@@ -1,0 +1,120 @@
+{
+  "ok": true,
+  "source": "Google Scholar",
+  "run_id": "live-paper-search-rag-bd3274efb6f1461b859b2b899101b59f",
+  "step_key": "search_google_scholar",
+  "query": "(RAG OR \"retrieval-augmented generation\" OR \"retrieval-augmented language models\" OR \"RAG systems\") (evaluation OR benchmark)",
+  "search_query": null,
+  "total_results": 21000,
+  "returned_count": 3,
+  "papers": [
+    {
+      "source": "google_scholar",
+      "source_id": "Ucmd9L_gwzYJ",
+      "title": "Benchmarking large language models in retrieval-augmented generation",
+      "authors": [
+        "J Chen",
+        "H Lin",
+        "X Han",
+        "L Sun"
+      ],
+      "abstract": null,
+      "snippet": "… retrievalaugmented generation abilities we aim to evaluate. Next, we outline the process of constructing the RAG benchmark for evaluation. Lastly, we present the evaluation metrics. …",
+      "published": null,
+      "year": 2024,
+      "updated": null,
+      "venue": null,
+      "publication_summary": "J Chen, H Lin, X Han, L Sun - Proceedings of the AAAI Conference on …, 2024 - ojs.aaai.org",
+      "doi": null,
+      "citation_count": 1225,
+      "scholar_result_id": "Ucmd9L_gwzYJ",
+      "cites_id": "3946244813554043217",
+      "cluster_id": "3946244813554043217",
+      "versions_count": 5,
+      "landing_url": "https://ojs.aaai.org/index.php/AAAI/article/view/29728",
+      "pdf_url": "https://ojs.aaai.org/index.php/AAAI/article/view/29728/31250",
+      "scholar_cited_by_url": "https://scholar.google.com/scholar?cites=3946244813554043217&as_sdt=2005&sciodt=0,5&hl=en&num=3"
+    },
+    {
+      "source": "google_scholar",
+      "source_id": "9DUFlo_MlJsJ",
+      "title": "Ares: An automated evaluation framework for retrieval-augmented generation systems",
+      "authors": [
+        "J Saad-Falcon",
+        "O Khattab",
+        "C Potts"
+      ],
+      "abstract": null,
+      "snippet": "… Evaluating retrieval-augmented generation (RAG) systems … RAG Evaluation System, for evaluating RAG systems along … to assess the quality of individual RAG components. To mitigate …",
+      "published": null,
+      "year": 2024,
+      "updated": null,
+      "venue": null,
+      "publication_summary": "J Saad-Falcon, O Khattab, C Potts… - Proceedings of the 2024 …, 2024 - aclanthology.org",
+      "doi": null,
+      "citation_count": 437,
+      "scholar_result_id": "9DUFlo_MlJsJ",
+      "cites_id": "11210810289501320692",
+      "cluster_id": "11210810289501320692",
+      "versions_count": 4,
+      "landing_url": "https://aclanthology.org/2024.naacl-long.20/",
+      "pdf_url": "https://aclanthology.org/2024.naacl-long.20.pdf",
+      "scholar_cited_by_url": "https://scholar.google.com/scholar?cites=11210810289501320692&as_sdt=2005&sciodt=0,5&hl=en&num=3"
+    },
+    {
+      "source": "google_scholar",
+      "source_id": "ZthzJtL6eSwJ",
+      "title": "Evaluation of retrieval-augmented generation: A survey",
+      "authors": [
+        "H Yu",
+        "A Gan",
+        "K Zhang",
+        "S Tong",
+        "Q Liu",
+        "Z Liu"
+      ],
+      "abstract": null,
+      "snippet": "… by RAG systems, we introduce an analytical framework, referred to as A Unified Evaluation Process of RAG (… to RAG systems and guide for readers to comprehend the effectiveness of …",
+      "published": null,
+      "year": 2024,
+      "updated": null,
+      "venue": null,
+      "publication_summary": "H Yu, A Gan, K Zhang, S Tong, Q Liu, Z Liu - CCF Conference on Big Data, 2024 - Springer",
+      "doi": null,
+      "citation_count": 514,
+      "scholar_result_id": "ZthzJtL6eSwJ",
+      "cites_id": "3204868390346020966",
+      "cluster_id": "3204868390346020966",
+      "versions_count": 3,
+      "landing_url": "https://link.springer.com/chapter/10.1007/978-981-96-1024-2_8",
+      "pdf_url": "https://arxiv.org/pdf/2405.07437",
+      "scholar_cited_by_url": "https://scholar.google.com/scholar?cites=3204868390346020966&as_sdt=2005&sciodt=0,5&hl=en&num=3"
+    }
+  ],
+  "metadata": {
+    "plan_reasoning": "Google Scholar 使用自然语言查询，整合关键词与同义词，并通过 year_from/year_to 限定年份。intent 为 benchmark 已隐含在关键词中，excludeTerms 无法直接表达，将在后处理阶段过滤。",
+    "plan_arguments": {
+      "query": "(RAG OR \"retrieval-augmented generation\" OR \"retrieval-augmented language models\" OR \"RAG systems\") (evaluation OR benchmark)",
+      "start": 0,
+      "num": 3,
+      "total_limit": 3,
+      "max_pages": 1,
+      "year_from": 2023,
+      "year_to": 2026,
+      "review_only": false
+    },
+    "pagination": {
+      "initial_offset": 0,
+      "page_size": 3,
+      "total_limit": 3,
+      "max_pages": 1,
+      "pages_fetched": 1,
+      "raw_fetched_count": 3,
+      "returned_count": 3,
+      "has_next": true,
+      "next_offset": 3,
+      "stop_reason": "total_limit_reached"
+    },
+    "page_errors": []
+  }
+}

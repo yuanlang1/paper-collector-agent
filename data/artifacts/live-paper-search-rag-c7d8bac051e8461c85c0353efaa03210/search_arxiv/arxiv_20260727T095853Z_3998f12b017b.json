@@ -1,0 +1,41 @@
+{
+  "ok": true,
+  "source": "arXiv",
+  "run_id": "live-paper-search-rag-c7d8bac051e8461c85c0353efaa03210",
+  "step_key": "search_arxiv",
+  "query": "RAG retrieval-augmented generation evaluation benchmark retrieval-augmented language models RAG systems",
+  "search_query": "all:\"RAG retrieval-augmented generation evaluation benchmark retrieval-augmented language models RAG systems\" AND submittedDate:[202301010000 TO 202612312359]",
+  "total_results": 0,
+  "returned_count": 0,
+  "papers": [],
+  "metadata": {
+    "plan_reasoning": "根据用户确认的 query_understanding，使用 topic 检索类型组合关键词 'RAG', 'retrieval-augmented generation', 'evaluation', 'benchmark' 及其同义词，并限定年份为 2023 至 2026。排除术语如 'medical' 等无法在 arXiv API 中直接表达，将由后续过滤处理。",
+    "plan_arguments": {
+      "query": "RAG retrieval-augmented generation evaluation benchmark retrieval-augmented language models RAG systems",
+      "arxiv_ids": [],
+      "search_type": "topic",
+      "category": null,
+      "year_from": 2023,
+      "year_to": 2026,
+      "start": 0,
+      "max_results": 3,
+      "total_limit": 3,
+      "max_pages": 1,
+      "sort": "relevance",
+      "include_abstract": true
+    },
+    "pagination": {
+      "initial_offset": 0,
+      "page_size": 3,
+      "total_limit": 3,
+      "max_pages": 1,
+      "pages_fetched": 1,
+      "raw_fetched_count": 0,
+      "returned_count": 0,
+      "has_next": false,
+      "next_offset": null,
+      "stop_reason": "max_pages_reached"
+    },
+    "page_errors": []
+  }
+}

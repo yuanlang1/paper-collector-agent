@@ -1,0 +1,376 @@
+{
+  "run_id": "live-paper-search-rag-1ee6200180b84ca7a3f467ddeb015ab0",
+  "step_key": "abstract_enrichment",
+  "paper_info_schema": "paper_info_v1",
+  "papers": [
+    {
+      "dedup_key": "title_author:fairrag faithful adaptive iterative refinement for retrievalaugmented generation|mohammad aghajani asl",
+      "paper_info": {
+        "title": "FAIR-RAG: Faithful Adaptive Iterative Refinement for Retrieval-Augmented Generation",
+        "authors": "Mohammad Aghajani Asl, Majid Asgari-Bidhendi, Behrooz Minaei-Bidgoli",
+        "publish_date": "2025-10-25",
+        "paper_abstract": "While Retrieval-Augmented Generation (RAG) mitigates hallucination and knowledge staleness in Large Language Models (LLMs), existing frameworks often falter on complex, multi-hop queries that require synthesizing information from disparate sources. Current advanced RAG methods, employing iterative or adaptive strategies, lack a robust mechanism to systematically identify and fill evidence gaps, often propagating noise or failing to gather a comprehensive context. We introduce FAIR-RAG, a novel agentic framework that transforms the standard RAG pipeline into a dynamic, evidence-driven reasoning process. At its core is an Iterative Refinement Cycle governed by a module we term Structured Evidence Assessment (SEA). The SEA acts as an analytical gating mechanism: it deconstructs the initial query into a checklist of required findings and audits the aggregated evidence to identify confirmed facts and, critically, explicit informational gaps. These gaps provide a precise signal to an Adaptive Query Refinement agent, which generates new, targeted sub-queries to retrieve missing information. This cycle repeats until the evidence is verified as sufficient, ensuring a comprehensive context for a final, strictly faithful generation. We conducted experiments on challenging multi-hop QA benchmarks, including HotpotQA, 2WikiMultiHopQA, and MusiQue. In a unified experimental setup, FAIR-RAG significantly outperforms strong baselines. On HotpotQA, it achieves an F1-score of 0.453 -- an absolute improvement of 8.3 points over the strongest iterative baseline -- establishing a new state-of-the-art for this class of methods on these benchmarks. Our work demonstrates that a structured, evidence-driven refinement process with explicit gap analysis is crucial for unlocking reliable and accurate reasoning in advanced RAG systems for complex, knowledge-intensive tasks.",
+        "ai_abstract": "本文针对现有检索增强生成（RAG）系统在处理复杂多跳查询时难以系统识别和填补证据缺口的问题，提出了 FAIR-RAG 框架。该框架引入了一个以结构化证据评估（SEA）模块为核心的迭代优化循环：SEA 将原始查询分解为所需事实的检查清单，并对已检索证据进行审计，明确识别出已确认的事实和缺失的信息缺口；这些缺口被用于驱动自适应查询优化代理，生成针对性的子查询以补充缺失信息。该过程循环执行，直至证据充分，最终基于完整且验证过的上下文生成严格忠实的答案。实验在 HotpotQA、2WikiMultiHopQA 和 MusiQue 等多跳问答基准上进行，结果表明 FAIR-RAG 显著优于强基线方法，在 HotpotQA 上 F1 分数达到 0.453，比最强的迭代基线绝对提升 8.3 个百分点，树立了该类方法的新纪录。研究证明，显式的证据缺口分析与结构化的迭代优化机制对于提升复杂知识密集型任务中 RAG 系统的可靠性与准确性至关重要。",
+        "doi": null,
+        "venue_id": null,
+        "citations": 0,
+        "keywords": "RAG, retrieval-augmented generation, evaluation, benchmark",
+        "source": "arXiv",
+        "pdf_url": "https://arxiv.org/pdf/2510.22344v1",
+        "abstract_url": "https://arxiv.org/abs/2510.22344v1",
+        "file_name": "FAIR-RAG_ Faithful Adaptive Iterative Refinement for Retrieval-Augmented Generation_Mohammad Aghajani Asl_bf4ec92d9323.pdf"
+      },
+      "source_refs": [
+        {
+          "source": "arXiv",
+          "source_id": "2510.22344v1",
+          "doi": null,
+          "arxiv_id": "2510.22344v1",
+          "landing_url": "https://arxiv.org/abs/2510.22344v1"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://arxiv.org/pdf/2510.22344v1"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending",
+      "crossref_metadata": {
+        "status": "not_matched",
+        "match_method": "title"
+      },
+      "venue_resolution": {
+        "status": "missing",
+        "source": "missing",
+        "venue_id": null
+      },
+      "pdf_download": {
+        "status": "success",
+        "file_name": "FAIR-RAG_ Faithful Adaptive Iterative Refinement for Retrieval-Augmented Generation_Mohammad Aghajani Asl_bf4ec92d9323.pdf",
+        "local_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\FAIR-RAG_ Faithful Adaptive Iterative Refinement for Retrieval-Augmented Generation_Mohammad Aghajani Asl_bf4ec92d9323.pdf",
+        "artifact_uri": "artifact://papers/FAIR-RAG_ Faithful Adaptive Iterative Refinement for Retrieval-Augmented Generation_Mohammad Aghajani Asl_bf4ec92d9323.pdf",
+        "final_url": "https://arxiv.org/pdf/2510.22344v1",
+        "sha256": "edee709f8cbf7b5cccaa4e104817ab6c332be751209e38ca835aeb9092160227",
+        "size_bytes": 2367153
+      },
+      "abstract_resolution": {
+        "source": "source",
+        "extraction_status": "not_needed",
+        "pdf_pages_read": 4,
+        "ai_summary_source": "pdf_front_pages",
+        "error": null
+      }
+    },
+    {
+      "dedup_key": "title_author:engineering the rag stack a comprehensive review of the architecture and trust frameworks for retrievalaugmented generation systems|dean wampler",
+      "paper_info": {
+        "title": "Engineering the RAG Stack: A Comprehensive Review of the Architecture and Trust Frameworks for Retrieval-Augmented Generation Systems",
+        "authors": "Dean Wampler, Dave Nielson, Alireza Seddighi",
+        "publish_date": "2025-11-07",
+        "paper_abstract": "This article provides a comprehensive systematic literature review of academic studies, industrial applications, and real-world deployments from 2018 to 2025, providing a practical guide and detailed overview of modern Retrieval-Augmented Generation (RAG) architectures. RAG offers a modular approach for integrating external knowledge without increasing the capacity of the model as LLM systems expand. Research and engineering practices have been fragmented as a result of the increasing diversity of RAG methodologies, which encompasses a variety of fusion mechanisms, retrieval strategies, and orchestration approaches. We provide quantitative assessment frameworks, analyze the implications for trust and alignment, and systematically consolidate existing RAG techniques into a unified taxonomy. This document is a practical framework for the deployment of resilient, secure, and domain-adaptable RAG systems, synthesizing insights from academic literature, industry reports, and technical implementation guides. It also functions as a technical reference.",
+        "ai_abstract": "本文对2018至2025年间关于检索增强生成（RAG）系统的学术研究、工业应用和实际部署进行了系统性综述，旨在为现代RAG架构提供实用指南和全面概述。RAG通过模块化方式在不扩大大语言模型（LLM）容量的前提下引入外部知识，有效缓解了LLM在记忆、时效性和事实准确性方面的局限。然而，随着RAG方法在融合机制、检索策略和编排方式上的多样化，相关研究与工程实践日益碎片化。为此，作者提出了量化评估框架，分析了RAG对可信性与对齐的影响，并将现有技术整合为统一的分类体系。该文综合学术文献、行业报告和技术实施指南，构建了一个面向韧性、安全且可适配特定领域的RAG系统部署的实用框架，同时也可作为技术参考。",
+        "doi": null,
+        "venue_id": null,
+        "citations": 0,
+        "keywords": "RAG, retrieval-augmented generation, evaluation, benchmark",
+        "source": "arXiv",
+        "pdf_url": "https://arxiv.org/pdf/2601.05264v1",
+        "abstract_url": "https://arxiv.org/abs/2601.05264v1",
+        "file_name": "Engineering the RAG Stack_ A Comprehensive Review of the Architecture and Trust Frameworks for Retrieval-Augmented Gener_Dean Wampler_4195c8657119.pdf"
+      },
+      "source_refs": [
+        {
+          "source": "arXiv",
+          "source_id": "2601.05264v1",
+          "doi": null,
+          "arxiv_id": "2601.05264v1",
+          "landing_url": "https://arxiv.org/abs/2601.05264v1"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://arxiv.org/pdf/2601.05264v1"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending",
+      "crossref_metadata": {
+        "status": "not_matched",
+        "match_method": "title"
+      },
+      "venue_resolution": {
+        "status": "missing",
+        "source": "missing",
+        "venue_id": null
+      },
+      "pdf_download": {
+        "status": "success",
+        "file_name": "Engineering the RAG Stack_ A Comprehensive Review of the Architecture and Trust Frameworks for Retrieval-Augmented Gener_Dean Wampler_4195c8657119.pdf",
+        "local_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\Engineering the RAG Stack_ A Comprehensive Review of the Architecture and Trust Frameworks for Retrieval-Augmented Gener_Dean Wampler_4195c8657119.pdf",
+        "artifact_uri": "artifact://papers/Engineering the RAG Stack_ A Comprehensive Review of the Architecture and Trust Frameworks for Retrieval-Augmented Gener_Dean Wampler_4195c8657119.pdf",
+        "final_url": "https://arxiv.org/pdf/2601.05264v1",
+        "sha256": "c355fb5da42e7a1aabbd8094d4addef0810a0732222fc8cfecf15dd8b17bea5b",
+        "size_bytes": 2917925
+      },
+      "abstract_resolution": {
+        "source": "source",
+        "extraction_status": "not_needed",
+        "pdf_pages_read": 4,
+        "ai_summary_source": "pdf_front_pages",
+        "error": null
+      }
+    },
+    {
+      "dedup_key": "title_author:arrag autoregressive retrieval augmentation for image generation|jingyuan qi",
+      "paper_info": {
+        "title": "AR-RAG: Autoregressive Retrieval Augmentation for Image Generation",
+        "authors": "Jingyuan Qi, Zhiyang Xu, Qifan Wang, Lifu Huang",
+        "publish_date": "2025-06-08",
+        "paper_abstract": "We introduce Autoregressive Retrieval Augmentation (AR-RAG), a novel paradigm that enhances image generation by autoregressively incorporating knearest neighbor retrievals at the patch level. Unlike prior methods that perform a single, static retrieval before generation and condition the entire generation on fixed reference images, AR-RAG performs context-aware retrievals at each generation step, using prior-generated patches as queries to retrieve and incorporate the most relevant patch-level visual references, enabling the model to respond to evolving generation needs while avoiding limitations (e.g., over-copying, stylistic bias, etc.) prevalent in existing methods. To realize AR-RAG, we propose two parallel frameworks: (1) Distribution-Augmentation in Decoding (DAiD), a training-free plug-and-use decoding strategy that directly merges the distribution of model-predicted patches with the distribution of retrieved patches, and (2) Feature-Augmentation in Decoding (FAiD), a parameter-efficient fine-tuning method that progressively smooths the features of retrieved patches via multi-scale convolution operations and leverages them to augment the image generation process. We validate the effectiveness of AR-RAG on widely adopted benchmarks, including Midjourney-30K, GenEval and DPG-Bench, demonstrating significant performance gains over state-of-the-art image generation models.",
+        "ai_abstract": "本文提出了一种名为自回归检索增强（AR-RAG）的新范式，用于提升图像生成质量。与现有方法在生成前仅进行一次静态的整图检索不同，AR-RAG在生成过程中以自回归方式，在每个步骤基于已生成的图像块动态检索最相关的图像块级视觉参考，从而更好地适应不断变化的生成需求，并避免过复制、风格偏见等问题。为实现AR-RAG，作者提出了两种并行框架：一是解码中的分布增强（DAiD），一种无需训练的即插即用解码策略，通过融合模型预测分布与检索到的图像块分布来指导生成；二是解码中的特征增强（FAiD），一种参数高效的微调方法，利用多尺度卷积操作对检索到的图像块特征进行平滑处理，并将其融入生成过程。实验在Midjourney-30K、GenEval和DPG-Bench等基准上验证了AR-RAG的有效性，显著优于当前最先进的图像生成模型。",
+        "doi": null,
+        "venue_id": null,
+        "citations": 0,
+        "keywords": "RAG, retrieval-augmented generation, evaluation, benchmark",
+        "source": "arXiv",
+        "pdf_url": "https://arxiv.org/pdf/2506.06962v3",
+        "abstract_url": "https://arxiv.org/abs/2506.06962v3",
+        "file_name": "AR-RAG_ Autoregressive Retrieval Augmentation for Image Generation_Jingyuan Qi_60faec1ffb52.pdf"
+      },
+      "source_refs": [
+        {
+          "source": "arXiv",
+          "source_id": "2506.06962v3",
+          "doi": null,
+          "arxiv_id": "2506.06962v3",
+          "landing_url": "https://arxiv.org/abs/2506.06962v3"
+        },
+        {
+          "source": "DBLP",
+          "source_id": "journals/corr/abs-2506-06962",
+          "doi": "10.48550/ARXIV.2506.06962",
+          "arxiv_id": null,
+          "landing_url": "https://dblp.org/rec/journals/corr/abs-2506-06962"
+        }
+      ],
+      "venue_candidates": [
+        "CoRR"
+      ],
+      "pdf_candidates": [
+        "https://arxiv.org/pdf/2506.06962v3"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending",
+      "crossref_metadata": {
+        "status": "not_matched",
+        "match_method": "title"
+      },
+      "venue_resolution": {
+        "status": "resolved",
+        "source": "easy_scholar",
+        "venue_id": null,
+        "venue_draft": {
+          "standard_name": "CoRR",
+          "acronym": null,
+          "type": 0,
+          "sci_rank": null,
+          "ccf_rank": null,
+          "sci_if": "0",
+          "sci_up": null,
+          "sci_up_small": null,
+          "core_rank": null
+        }
+      },
+      "pdf_download": {
+        "status": "success",
+        "file_name": "AR-RAG_ Autoregressive Retrieval Augmentation for Image Generation_Jingyuan Qi_60faec1ffb52.pdf",
+        "local_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\AR-RAG_ Autoregressive Retrieval Augmentation for Image Generation_Jingyuan Qi_60faec1ffb52.pdf",
+        "artifact_uri": "artifact://papers/AR-RAG_ Autoregressive Retrieval Augmentation for Image Generation_Jingyuan Qi_60faec1ffb52.pdf",
+        "final_url": "https://arxiv.org/pdf/2506.06962v3",
+        "sha256": "7f18a80e431b0342bac236ea02bcd28c093ba3ce46f01efd9ddacb8782eab634",
+        "size_bytes": 8870231
+      },
+      "abstract_resolution": {
+        "source": "source",
+        "extraction_status": "not_needed",
+        "pdf_pages_read": 4,
+        "ai_summary_source": "pdf_front_pages",
+        "error": null
+      }
+    },
+    {
+      "dedup_key": "title_author:crudrag a comprehensive chinese benchmark for retrievalaugmented generation of large language models|y lyu",
+      "paper_info": {
+        "title": "Crud-rag: A comprehensive chinese benchmark for retrieval-augmented generation of large language models",
+        "authors": "Y Lyu, Z Li, S Niu, F Xiong, B Tang, W Wang",
+        "publish_date": "2025-03-31",
+        "paper_abstract": null,
+        "ai_abstract": "本文提出了 CRUD-RAG，一个面向中文的综合性检索增强生成（RAG）评测基准，旨在全面评估 RAG 系统在多样化应用场景下的性能。现有 RAG 评测多局限于问答任务，且往往仅关注语言模型或检索器在知识密集型场景中的表现，忽视了知识库构建、检索模块在非知识密集型任务中的作用。为解决这一问题，作者基于用户与知识库交互的 CRUD（Create, Read, Update, Delete）四类操作，将 RAG 应用划分为：内容创作（如续写）、知识问答（单文档与多文档）、幻觉修正和文本摘要（多文档删减）。据此，研究团队利用最新中文新闻数据，结合 GPT-4 自动生成高质量数据集，构建了覆盖四类任务的大规模中文基准。论文还系统评估了检索器、上下文长度、知识库构建方式和大语言模型等组件对整体性能的影响，并为不同场景下优化 RAG 系统提供了实用建议。该工作贡献了一个更全面的 RAG 评测框架、高质量多任务数据集以及详实的实验分析。",
+        "doi": "10.1145/3701228",
+        "venue_id": null,
+        "citations": 242,
+        "keywords": "RAG, retrieval-augmented generation, evaluation, benchmark",
+        "source": "Google Scholar",
+        "pdf_url": "https://arxiv.org/pdf/2401.17043",
+        "abstract_url": "https://arxiv.org/abs/2401.17043",
+        "file_name": "Crud-rag_ A comprehensive chinese benchmark for retrieval-augmented generation of large language models_Y Lyu_7da051759937.pdf"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "l5-qQCiSpw4J",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://arxiv.org/abs/2401.17043"
+        }
+      ],
+      "venue_candidates": [
+        "ACM Transactions on Information Systems"
+      ],
+      "pdf_candidates": [
+        "https://arxiv.org/pdf/2401.17043"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending",
+      "crossref_metadata": {
+        "status": "matched",
+        "match_method": "title",
+        "doi": "10.1145/3701228",
+        "published_date": "2025-03-31",
+        "citations": 82,
+        "venue_title": "ACM Transactions on Information Systems",
+        "paper_type_code": 1,
+        "crossref_type": "journal-article"
+      },
+      "venue_resolution": {
+        "status": "resolved",
+        "source": "easy_scholar",
+        "venue_id": null,
+        "venue_draft": {
+          "standard_name": "ACM Transactions on Information Systems",
+          "acronym": null,
+          "type": 1,
+          "sci_rank": "Q1",
+          "ccf_rank": "A",
+          "sci_if": "11.2",
+          "sci_up": "计算机科学2区",
+          "sci_up_small": "计算机：信息系统1区。",
+          "core_rank": null
+        }
+      },
+      "pdf_download": {
+        "status": "success",
+        "file_name": "Crud-rag_ A comprehensive chinese benchmark for retrieval-augmented generation of large language models_Y Lyu_7da051759937.pdf",
+        "local_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\Crud-rag_ A comprehensive chinese benchmark for retrieval-augmented generation of large language models_Y Lyu_7da051759937.pdf",
+        "artifact_uri": "artifact://papers/Crud-rag_ A comprehensive chinese benchmark for retrieval-augmented generation of large language models_Y Lyu_7da051759937.pdf",
+        "final_url": "https://arxiv.org/pdf/2401.17043",
+        "sha256": "2e4ae0cb708fdca9d96bcf8d1c0713dae121195a0a31b78e3132e9ef4fa7db8a",
+        "size_bytes": 2115072
+      },
+      "abstract_resolution": {
+        "source": "pdf_abstract_not_found",
+        "extraction_status": "failed",
+        "pdf_pages_read": 4,
+        "ai_summary_source": "pdf_front_pages",
+        "error": "未在 PDF 前四页定位到 Abstract 段落。"
+      }
+    },
+    {
+      "dedup_key": "title_author:evaluation of retrievalaugmented generation a survey|h yu",
+      "paper_info": {
+        "title": "Evaluation of retrieval-augmented generation: A survey",
+        "authors": "H Yu, A Gan, K Zhang, S Tong, Q Liu, Z Liu",
+        "publish_date": "2025-01-01",
+        "paper_abstract": ". Retrieval-Augmented Generation (RAG) has recently gained traction in natural language processing. Numerous studies and real-world applications are leveraging its ability to enhance generative models through external informa- tion retrieval. Evaluating these RAG systems, however, poses unique challenges due to their hybrid structure and reliance on dynamic knowledge sources. To better understand these challenges, we conduct A Unified Evaluation Process of RAG (Auepora) and aim to provide a comprehensive overview of the evaluation and benchmarks of RAG systems. Specifically, we examine and compare several quantifiable metrics of the Retrieval and Generation components, such as rele- vance, accuracy, and faithfulness, within the current RAG benchmarks, encom- passing the possible output and ground truth pairs. We then analyze the various datasets and metrics, discuss the limitations of current benchmarks, and suggest potential directions to advance the field of RAG benchmarks.",
+        "ai_abstract": "本文对检索增强生成（Retrieval-Augmented Generation, RAG）系统的评估方法进行了系统性综述。由于RAG结合了检索与生成两个模块，并依赖动态外部知识源，其评估面临独特挑战。作者提出了一个统一的RAG评估流程——Auepora，从“评估目标”、“数据集”和“评估指标”三个维度出发，全面梳理现有RAG基准测试中的可量化指标（如相关性、准确性、忠实性等），并分析了当前评估框架在覆盖范围、任务适配性和指标完备性等方面的局限性。文章总结了12种评估框架，强调需综合考虑检索、生成及整体系统性能，并为未来RAG评估基准的发展提供了方向建议。",
+        "doi": "10.1007/978-981-96-1024-2_8",
+        "venue_id": null,
+        "citations": 514,
+        "keywords": "RAG, retrieval-augmented generation, evaluation, benchmark",
+        "source": "Google Scholar",
+        "pdf_url": "https://arxiv.org/pdf/2405.07437",
+        "abstract_url": "https://link.springer.com/chapter/10.1007/978-981-96-1024-2_8",
+        "file_name": "Evaluation of retrieval-augmented generation_ A survey_H Yu_6ae557633940.pdf"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "ZthzJtL6eSwJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://link.springer.com/chapter/10.1007/978-981-96-1024-2_8"
+        }
+      ],
+      "venue_candidates": [
+        "Communications in Computer and Information Science"
+      ],
+      "pdf_candidates": [
+        "https://arxiv.org/pdf/2405.07437"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending",
+      "crossref_metadata": {
+        "status": "matched",
+        "match_method": "title",
+        "doi": "10.1007/978-981-96-1024-2_8",
+        "published_date": "2025-01-01",
+        "citations": 121,
+        "venue_title": "Communications in Computer and Information Science",
+        "paper_type_code": 18,
+        "crossref_type": "book-chapter"
+      },
+      "venue_resolution": {
+        "status": "resolved",
+        "source": "easy_scholar",
+        "venue_id": null,
+        "venue_draft": {
+          "standard_name": "Communications in Computer and Information Science",
+          "acronym": null,
+          "type": 18,
+          "sci_rank": null,
+          "ccf_rank": null,
+          "sci_if": "0",
+          "sci_up": null,
+          "sci_up_small": null,
+          "core_rank": null
+        }
+      },
+      "pdf_download": {
+        "status": "success",
+        "file_name": "Evaluation of retrieval-augmented generation_ A survey_H Yu_6ae557633940.pdf",
+        "local_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\Evaluation of retrieval-augmented generation_ A survey_H Yu_6ae557633940.pdf",
+        "artifact_uri": "artifact://papers/Evaluation of retrieval-augmented generation_ A survey_H Yu_6ae557633940.pdf",
+        "final_url": "https://arxiv.org/pdf/2405.07437",
+        "sha256": "9ec643765eb079660cad9cf2bf7dcd3371e9ab9e05b1f94573cc101fb4a25374",
+        "size_bytes": 573447
+      },
+      "abstract_resolution": {
+        "source": "pdf_extracted",
+        "extraction_status": "success",
+        "pdf_pages_read": 4,
+        "ai_summary_source": "pdf_front_pages",
+        "error": null
+      }
+    }
+  ],
+  "rejected": [],
+  "identity_conflicts": [],
+  "deferred_filters": {
+    "requires_code": null,
+    "paper_tags": [
+      1,
+      2
+    ]
+  },
+  "removed_without_pdf": [],
+  "removed_pdf_download_failed": [
+    {
+      "title": "Benchmarking large language models in retrieval-augmented generation",
+      "reason": "PDF 下载失败：下载失败，已超过最大重试次数。"
+    }
+  ]
+}

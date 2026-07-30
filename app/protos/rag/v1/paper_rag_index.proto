@@ -1,0 +1,111 @@
+syntax = "proto3";
+
+package papercollector.rag.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_package = "com.yl.paperservice.grpc.rag.v1";
+
+service PaperRagIndexInternalService {
+  rpc EnsurePaperRagIndexes(EnsurePaperRagIndexesRequest)
+      returns (EnsurePaperRagIndexesResponse);
+  rpc ClaimPaperRagIndexes(ClaimPaperRagIndexesRequest)
+      returns (ClaimPaperRagIndexesResponse);
+  rpc CompletePaperRagIndex(CompletePaperRagIndexRequest)
+      returns (CompletePaperRagIndexResponse);
+  rpc GetPaperRagIndexes(GetPaperRagIndexesRequest)
+      returns (GetPaperRagIndexesResponse);
+  rpc SkipPaperRagIndexes(SkipPaperRagIndexesRequest)
+      returns (SkipPaperRagIndexesResponse);
+}
+
+message PaperHashItem {
+  int64 paper_id = 1;
+  string content_hash = 2;
+}
+
+message RagIndexView {
+  int64 paper_id = 1;
+  string content_hash = 2;
+  string index_status = 3;
+  string lightrag_document_id = 4;
+  string lightrag_track_id = 5;
+  string error_message = 6;
+}
+
+message EnsureResult {
+  RagIndexView index = 1;
+  bool should_index = 2;
+}
+
+message EnsurePaperRagIndexesRequest {
+  repeated PaperHashItem items = 1;
+}
+
+message EnsurePaperRagIndexesResponse {
+  int32 code = 1;
+  bool success = 2;
+  repeated EnsureResult indexes = 3;
+  string message = 4;
+}
+
+message ClaimPaperRagIndexesRequest {
+  repeated PaperHashItem items = 1;
+  string worker_id = 2;
+  int32 lease_seconds = 3;
+}
+
+message ClaimedRagIndex {
+  int64 paper_id = 1;
+  string lease_token = 2;
+  string index_status = 3;
+  google.protobuf.Timestamp lease_expires_at = 4;
+}
+
+message ClaimPaperRagIndexesResponse {
+  int32 code = 1;
+  bool success = 2;
+  repeated ClaimedRagIndex claimed = 3;
+  string message = 4;
+}
+
+message CompletePaperRagIndexRequest {
+  int64 paper_id = 1;
+  string lease_token = 2;
+  string content_hash = 3;
+  string index_status = 4;
+  string lightrag_track_id = 5;
+  string lightrag_document_id = 6;
+  string error_message = 7;
+}
+
+message CompletePaperRagIndexResponse {
+  int32 code = 1;
+  bool success = 2;
+  bool accepted = 3;
+  string message = 4;
+}
+
+message GetPaperRagIndexesRequest {
+  repeated int64 paper_ids = 1;
+}
+
+message GetPaperRagIndexesResponse {
+  int32 code = 1;
+  bool success = 2;
+  repeated RagIndexView indexes = 3;
+  string message = 4;
+}
+
+message SkipPaperRagIndexesRequest {
+  repeated int64 paper_ids = 1;
+  string reason = 2;
+}
+
+message SkipPaperRagIndexesResponse {
+  int32 code = 1;
+  bool success = 2;
+  int32 skipped_count = 3;
+  string message = 4;
+}

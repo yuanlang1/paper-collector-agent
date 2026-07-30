@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package papercollector.task.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/wrappers.proto";
+
+option java_multiple_files = true;
+option java_package = "com.yl.paperservice.grpc.task.v1";
+
+service TaskInternalService {
+  rpc AddQueryTask(AddQueryTaskRequest) returns (AddQueryTaskResponse);
+  rpc UpdateTaskStatus(UpdateTaskStatusRequest) returns (UpdateTaskStatusResponse);
+  rpc BatchSaveTaskPaperRelations(BatchSaveTaskPaperRelationsRequest)
+      returns (BatchSaveTaskPaperRelationsResponse);
+}
+
+message AddQueryTaskRequest {
+  string prompt = 1;
+  QueryTaskTag search_tag = 2;
+  PromptUnderstanding prompt_understanding = 3;
+}
+
+message QueryTaskTag {
+  int32 year_tag = 1;
+  repeated int32 paper_type_codes = 2;
+  repeated int32 source_type_codes = 3;
+}
+
+message PromptUnderstanding {
+  string topic = 1;
+  repeated string subfields = 2;
+  string intent = 3; // survey | benchmark | method | mixed
+  google.protobuf.Int32Value year_from = 4;
+  google.protobuf.Int32Value year_to = 5;
+  repeated string keywords = 6;
+  repeated string synonyms = 7;
+  repeated string include_terms = 8;
+  repeated string exclude_terms = 9;
+  google.protobuf.BoolValue requires_code = 10;
+  string reasoning = 11;
+}
+
+message AddQueryTaskResponse {
+  int32 code = 1;
+  bool success = 2;
+  google.protobuf.Int64Value data = 3;
+  string message = 4;
+  google.protobuf.Struct other = 5;
+}
+
+message UpdateTaskStatusRequest {
+  int64 task_id = 1;
+  int32 task_state = 2;
+  string error_message = 3;
+}
+
+message UpdateTaskStatusResponse {
+  int32 code = 1;
+  bool success = 2;
+  bool updated = 3;
+  string message = 4;
+  google.protobuf.Struct other = 5;
+}
+
+message TaskPaperRelationItem {
+  int64 task_id = 1;
+  int64 paper_id = 2;
+  google.protobuf.Int32Value star = 3;
+  string recommendation_markdown = 4;
+  string reasons = 5;
+}
+
+message BatchSaveTaskPaperRelationsRequest {
+  repeated TaskPaperRelationItem relations = 1;
+}
+
+message BatchSaveTaskPaperRelationsResponse {
+  int32 code = 1;
+  bool success = 2;
+  int32 data = 3;
+  string message = 4;
+  google.protobuf.Struct other = 5;
+}

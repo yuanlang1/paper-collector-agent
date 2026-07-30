@@ -1,0 +1,32 @@
+{
+  "ok": false,
+  "source": "arXiv",
+  "run_id": "live-paper-search-rag-4693b9ec9c084aceb178d56d5c0bb666",
+  "step_key": "search_arxiv",
+  "query": "RAG OR \"retrieval-augmented generation\" OR \"retrieval-augmented language generation\" AND evaluation AND benchmark",
+  "search_query": null,
+  "total_results": 0,
+  "returned_count": 0,
+  "papers": [],
+  "metadata": {
+    "plan_reasoning": "根据用户确认的 query_understanding，使用 topic 检索类型组合关键词 'RAG'、'retrieval-augmented generation'、'evaluation' 和 'benchmark'，并限定年份为 2023 至 2026。排除词如 'medical' 等无法在 arXiv API 中直接表达，将由后续过滤处理。",
+    "plan_arguments": {
+      "query": "RAG OR \"retrieval-augmented generation\" OR \"retrieval-augmented language generation\" AND evaluation AND benchmark",
+      "arxiv_ids": [],
+      "search_type": "topic",
+      "category": null,
+      "year_from": 2023,
+      "year_to": 2026,
+      "start": 0,
+      "max_results": 3,
+      "total_limit": 3,
+      "max_pages": 1,
+      "sort": "relevance",
+      "include_abstract": true
+    },
+    "pagination": {},
+    "page_errors": [
+      "Rate exceeded."
+    ]
+  }
+}

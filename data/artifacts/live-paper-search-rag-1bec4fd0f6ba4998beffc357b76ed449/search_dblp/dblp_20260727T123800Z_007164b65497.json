@@ -1,0 +1,79 @@
+{
+  "ok": true,
+  "source": "DBLP",
+  "run_id": "live-paper-search-rag-1bec4fd0f6ba4998beffc357b76ed449",
+  "step_key": "search_dblp",
+  "query": "RAG evaluation benchmark",
+  "search_query": null,
+  "total_results": 0,
+  "returned_count": 2,
+  "papers": [
+    {
+      "source": "dblp",
+      "source_id": "conf/tpctc/2024",
+      "title": "Performance Evaluation and Benchmarking - 16th TPC Technology Conference, TPCTC 2024, Guangzhou, China, August 30, 2024, Revised Selected Papers",
+      "authors": [
+        "Raghunath Nambiar",
+        "Meikel Poess"
+      ],
+      "abstract": null,
+      "published": null,
+      "year": 2026,
+      "updated": null,
+      "venue": "['TPCTC', 'Lecture Notes in Computer Science']",
+      "publication_type": "Editorship",
+      "doi": "10.1007/978-3-031-93858-0",
+      "dblp_key": "conf/tpctc/2024",
+      "landing_url": "https://dblp.org/rec/conf/tpctc/2024",
+      "external_url": "https://doi.org/10.1007/978-3-031-93858-0",
+      "pdf_url": null
+    },
+    {
+      "source": "dblp",
+      "source_id": "conf/tpctc/2025",
+      "title": "Performance Evaluation and Benchmarking - 17th TPC Technology Conference, TPCTC 2025, London, UK, September 1, 2025, Revised Selected Papers",
+      "authors": [
+        "Raghunath Nambiar",
+        "Meikel Poess"
+      ],
+      "abstract": null,
+      "published": null,
+      "year": 2026,
+      "updated": null,
+      "venue": "['TPCTC', 'Lecture Notes in Computer Science']",
+      "publication_type": "Editorship",
+      "doi": "10.1007/978-3-032-18070-4",
+      "dblp_key": "conf/tpctc/2025",
+      "landing_url": "https://dblp.org/rec/conf/tpctc/2025",
+      "external_url": "https://doi.org/10.1007/978-3-032-18070-4",
+      "pdf_url": null
+    }
+  ],
+  "metadata": {
+    "plan_reasoning": "DBLP主要支持简单关键词查询和年份过滤。将主题关键词组合成单一查询字符串，并设置年份范围。排除术语和同义词扩展由后续过滤处理。",
+    "plan_arguments": {
+      "query": "RAG evaluation benchmark",
+      "f": 0,
+      "h": 3,
+      "total_limit": 3,
+      "max_pages": 1,
+      "year_from": 2023,
+      "year_to": 2026,
+      "venue": null,
+      "paper_type": "all"
+    },
+    "pagination": {
+      "initial_offset": 0,
+      "page_size": 3,
+      "total_limit": 3,
+      "max_pages": 1,
+      "pages_fetched": 1,
+      "raw_fetched_count": 3,
+      "returned_count": 2,
+      "has_next": false,
+      "next_offset": null,
+      "stop_reason": "max_pages_reached"
+    },
+    "page_errors": []
+  }
+}

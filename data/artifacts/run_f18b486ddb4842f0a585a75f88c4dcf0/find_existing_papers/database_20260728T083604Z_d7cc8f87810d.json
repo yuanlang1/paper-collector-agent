@@ -1,0 +1,443 @@
+{
+  "run_id": "run_f18b486ddb4842f0a585a75f88c4dcf0",
+  "step_key": "find_existing_papers",
+  "papers": [
+    {
+      "dedup_key": "title_author:token reduction should go beyond efficiency in generative modelsfrom vision language to multimodality|z kong",
+      "paper_info": {
+        "title": "Token Reduction Should Go Beyond Efficiency in Generative Models--From Vision, Language to Multimodality",
+        "authors": "Z Kong, Y Li, F Zeng, L Xin, S Messica, X Lin",
+        "publish_date": null,
+        "paper_abstract": "In Transformer architectures, tokens—discrete units derived from raw data—are formed by segmenting inputs into fixed-length chunks. Each token is then mapped to an embedding, enabling parallel attention computations while preserving the input’s essential information. Due to the quadratic computational complexity of transformer self-attention mechanisms, token reduction has primarily been used as an efficiency strategy. This is especially true in single vision and language domains, where it helps balance computational costs, memory usage, and inference latency. Despite these advances, this paper argues that token reduction should transcend its traditional efficiency-oriented role in the era of large generative models. In this paper, we characterize this mechanism as a fundamental principle in generative modeling, critically influencing both model architecture and broader applications. We analyze how token reduction addresses critical challenges in current systems across vision, language, and multimodal, demonstrating its ability to: (i) facilitate deeper multimodal integration and alignment, (ii) mitigate overthinking and hal- lucinations, (iii) maintain coherence over long inputs, and (iv) enhance training stability, etc. We reframe token reduction as more than an efficiency measure. By doing so, we outline future directions for task-aware token reduction, span- ning adaptive algorithms, reasoning-centric compression, reinforcement-guided reasoning control, long video understanding, dense prediction, agentic systems, and broader scientific AI domains. 2",
+        "ai_abstract": "本文重新审视了Transformer生成模型中令牌缩减（token reduction）的作用，指出其不应仅被视为提升效率的后处理优化手段，而应作为生成建模的核心设计原则。文章系统梳理了视觉、语言和多模态领域中令牌缩减方法的发展脉络，从早期的效率驱动型优化（如DynamicViT、ToMe、PoWER-BERT）演进至面向任务感知的增强策略。作者论证了令牌缩减在解决当前生成模型关键挑战中的多重价值，包括：促进多模态深度融合与对齐、缓解过度思考与幻觉问题、维持长序列输入的语义连贯性、以及提升训练稳定性。文章进一步展望了未来研究方向，涵盖自适应算法、以推理为中心的压缩、强化学习引导的令牌选择、长视频理解、密集预测、智能体系统及科学AI等领域，为下一代鲁棒且高效的生成架构设计提供了路线图。",
+        "doi": null,
+        "venue_id": 0,
+        "citations": 42,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://arxiv.org/pdf/2505.18227",
+        "abstract_url": "https://arxiv.org/abs/2505.18227",
+        "file_name": "Token Reduction Should Go Beyond Efficiency in Generative Models--From Vision, Language to Multimodality_Z Kong_908b50f90e58.pdf",
+        "published_date": null
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "I5ZzaEHqtUgJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://arxiv.org/abs/2505.18227"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://arxiv.org/pdf/2505.18227"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending",
+      "crossref_metadata": {
+        "status": "not_matched",
+        "match_method": "title"
+      },
+      "venue_resolution": {
+        "status": "missing",
+        "source": "missing",
+        "venue_id": 0
+      },
+      "pdf_download": {
+        "status": "success",
+        "file_name": "Token Reduction Should Go Beyond Efficiency in Generative Models--From Vision, Language to Multimodality_Z Kong_908b50f90e58.pdf",
+        "local_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\Token Reduction Should Go Beyond Efficiency in Generative Models--From Vision, Language to Multimodality_Z Kong_908b50f90e58.pdf",
+        "artifact_uri": "artifact://papers/Token Reduction Should Go Beyond Efficiency in Generative Models--From Vision, Language to Multimodality_Z Kong_908b50f90e58.pdf",
+        "final_url": "https://arxiv.org/pdf/2505.18227",
+        "sha256": "5b5db1e99d64a577aee2256af623517832d000ca4810b30d2f20a7b2a898c5f3",
+        "size_bytes": 2692308
+      },
+      "abstract_resolution": {
+        "source": "pdf_extracted",
+        "extraction_status": "success",
+        "pdf_pages_read": 4,
+        "ai_summary_source": "pdf_front_pages",
+        "error": null
+      },
+      "paper_id": 141,
+      "updated_at": "2026-07-28T08:14:43.792931+00:00"
+    },
+    {
+      "dedup_key": "title_author:token fusion bridging the gap between token pruning and token merging|m kim",
+      "paper_info": {
+        "title": "Token fusion: Bridging the gap between token pruning and token merging",
+        "authors": "M Kim, S Gao, YC Hsu, Y Shen",
+        "publish_date": "2024-01-03",
+        "paper_abstract": "Vision Transformers (ViTs) have emerged as powerful backbones in computer vision, outperforming many tra- ditional CNNs. However, their computational overhead, largely attributed to the self-attention mechanism, makes deployment on resource-constrained edge devices challeng- ing. Multiple solutions rely on token pruning or token merg- ing. In this paper, we introduce“Token Fusion” (ToFu), a method that amalgamates the benefits of both token prun- ing and token merging. Token pruning proves advanta- geous when the model exhibits sensitivity to input inter- polations, while token merging is effective when the model manifests close to linear responses to inputs. We combine this to propose a new scheme called Token Fusion. More- over, we tackle the limitations of average merging, which doesn’t preserve the intrinsic feature norm, resulting in dis- tributional shifts. To mitigate this, we introduce MLERP merging, a variant of the SLERP technique, tailored to merge multiple tokens while maintaining the norm distri- bution. ToFu is versatile, applicable to ViTs with or with- out additional training. Our empirical evaluations indicate that ToFu establishes new benchmarks in both classifica- tion and image generation tasks concerning computational efficiency and model accuracy.",
+        "ai_abstract": "针对视觉Transformer（ViT）计算开销大、难以部署于资源受限设备的问题，本文提出Token Fusion（ToFu）方法，融合了令牌剪枝与令牌合并的优势。研究发现，当模型对输入插值敏感时剪枝更优，而当模型对输入呈现近似线性响应时合并更有效。ToFu根据各层的功能线性度动态选择剪枝或合并策略。此外，针对平均合并无法保持特征范数、导致分布偏移的缺陷，本文引入MLERP合并技术，在合并多个令牌时保持范数分布。ToFu可应用于预训练ViT，无需额外训练。在ImageNet-1K分类和稳定扩散图像生成任务上的实验表明，ToFu在计算效率和模型精度上均达到新标杆，性能优于现有方法。",
+        "doi": "10.1109/wacv57701.2024.00141",
+        "venue_id": 119,
+        "citations": 202,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://openaccess.thecvf.com/content/WACV2024/papers/Kim_Token_Fusion_Bridging_the_Gap_Between_Token_Pruning_and_Token_WACV_2024_paper.pdf",
+        "abstract_url": "https://openaccess.thecvf.com/content/WACV2024/html/Kim_Token_Fusion_Bridging_the_Gap_Between_Token_Pruning_and_Token_WACV_2024_paper.html",
+        "file_name": "Token fusion_ Bridging the gap between token pruning and token merging_M Kim_e35236e92615.pdf",
+        "published_date": "2024-01-03"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "vJTLCyRt_SoJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://openaccess.thecvf.com/content/WACV2024/html/Kim_Token_Fusion_Bridging_the_Gap_Between_Token_Pruning_and_Token_WACV_2024_paper.html"
+        },
+        {
+          "source": "DBLP",
+          "source_id": "conf/wacv/KimGHSJ24",
+          "doi": "10.1109/WACV57701.2024.00141",
+          "arxiv_id": null,
+          "landing_url": "https://dblp.org/rec/conf/wacv/KimGHSJ24"
+        }
+      ],
+      "venue_candidates": [
+        "WACV",
+        "2024 IEEE/CVF Winter Conference on Applications of Computer Vision (WACV)"
+      ],
+      "pdf_candidates": [
+        "https://openaccess.thecvf.com/content/WACV2024/papers/Kim_Token_Fusion_Bridging_the_Gap_Between_Token_Pruning_and_Token_WACV_2024_paper.pdf"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending",
+      "crossref_metadata": {
+        "status": "matched",
+        "match_method": "title",
+        "doi": "10.1109/wacv57701.2024.00141",
+        "published_date": "2024-01-03",
+        "citations": 64,
+        "venue_title": "2024 IEEE/CVF Winter Conference on Applications of Computer Vision (WACV)",
+        "paper_type_code": 2,
+        "crossref_type": "proceedings-article"
+      },
+      "venue_resolution": {
+        "status": "resolved",
+        "source": "easy_scholar",
+        "venue_id": 119,
+        "venue_draft": {
+          "standard_name": "WACV",
+          "acronym": null,
+          "type": 2,
+          "sci_rank": null,
+          "ccf_rank": null,
+          "sci_if": "0",
+          "sci_up": null,
+          "sci_up_small": null,
+          "core_rank": null
+        }
+      },
+      "pdf_download": {
+        "status": "success",
+        "file_name": "Token fusion_ Bridging the gap between token pruning and token merging_M Kim_e35236e92615.pdf",
+        "local_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\Token fusion_ Bridging the gap between token pruning and token merging_M Kim_e35236e92615.pdf",
+        "artifact_uri": "artifact://papers/Token fusion_ Bridging the gap between token pruning and token merging_M Kim_e35236e92615.pdf",
+        "final_url": "https://openaccess.thecvf.com/content/WACV2024/papers/Kim_Token_Fusion_Bridging_the_Gap_Between_Token_Pruning_and_Token_WACV_2024_paper.pdf",
+        "sha256": "c89496272c73cdf5779d2b171a336d81a2c469091d9f278e4cdcc896c282c98d",
+        "size_bytes": 2965035
+      },
+      "abstract_resolution": {
+        "source": "pdf_extracted",
+        "extraction_status": "success",
+        "pdf_pages_read": 4,
+        "ai_summary_source": "pdf_front_pages",
+        "error": null
+      },
+      "paper_id": 135,
+      "updated_at": "2026-07-28T08:14:43.645006+00:00"
+    },
+    {
+      "dedup_key": "title_author:visioncentric token compression in large language model|l xing",
+      "paper_info": {
+        "title": "Vision-centric token compression in large language model",
+        "authors": "L Xing, AJ Wang, R Yan, X Shu",
+        "publish_date": null,
+        "paper_abstract": "Real-world applications are stretching context windows to hundreds of thousand of tokens while Large Language Models (LLMs) swell from billions to trillions of parameters. This dual expansion send compute and memory costs skyrocket- ing, making token compression indispensable. We introduce VISION CENTRIC TOKEN COMPRESSION (VIST), a slow–fast compression framework that mir- rors human reading: the fast path renders distant tokens into images, letting a frozen, lightweight vision encoder skim the low-salience context; the slow path feeds the proximal window into the LLM for fine-grained reasoning. A Probability-informed Visual Enhancement (PVE) objective masks high-frequency tokens during training, steering the Resampler to concentrate on semantically rich regions—just as skilled reader gloss over function words. On eleven in-context learning benchmarks, VIST achieves the same accuracy with 2.3× fewer tokens, cutting FLOPs by 16% and memory by 50%. This method delivers remarkable results, outperforming the strongest text encoder-based compression method CEPE by 7.6% on average over benchmarks like TriviaQA, NQ, PopQA, NLUI, and CLIN, setting a new standard for token efficiency in LLMs. The project is at https://github.com/CSU-JPG/VIST.",
+        "ai_abstract": "针对大语言模型（LLM）在超长上下文和高参数量下计算与内存成本激增的问题，本文提出VISION CENTRIC TOKEN COMPRESSION（VIST），一种模拟人类阅读的慢-快压缩框架。快速路径将远端文本渲染为图像，由冻结的轻量视觉编码器（CLIP ViT-L/14）快速扫描低显著性内容；慢速路径将近端窗口输入LLM进行细粒度推理。为提升视觉令牌的语义密度，设计概率引导视觉增强（PVE）目标，通过掩码高频低信息令牌，引导可训练的Perceiver Resampler聚焦于语义丰富区域。在11个上下文学习基准上，VIST以2.3倍更少的令牌达到相同精度，FLOPs降低16%，内存减少50%；在TriviaQA、NQ、PopQA等基准上平均超越最强文本编码压缩方法CEPE 7.6%，为LLM令牌效率设立了新标准。",
+        "doi": null,
+        "venue_id": 0,
+        "citations": 34,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://proceedings.neurips.cc/paper_files/paper/2025/file/2f8b56543953d60f262fb2c4b85c50b3-Paper-Conference.pdf",
+        "abstract_url": "https://proceedings.neurips.cc/paper_files/paper/2025/hash/2f8b56543953d60f262fb2c4b85c50b3-Abstract-Conference.html",
+        "file_name": "Vision-centric token compression in large language model_L Xing_5ea0590ba00c.pdf",
+        "published_date": null
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "4xNvYve_hRsJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://proceedings.neurips.cc/paper_files/paper/2025/hash/2f8b56543953d60f262fb2c4b85c50b3-Abstract-Conference.html"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://proceedings.neurips.cc/paper_files/paper/2025/file/2f8b56543953d60f262fb2c4b85c50b3-Paper-Conference.pdf"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending",
+      "crossref_metadata": {
+        "status": "not_matched",
+        "match_method": "title"
+      },
+      "venue_resolution": {
+        "status": "missing",
+        "source": "missing",
+        "venue_id": 0
+      },
+      "pdf_download": {
+        "status": "success",
+        "file_name": "Vision-centric token compression in large language model_L Xing_5ea0590ba00c.pdf",
+        "local_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\Vision-centric token compression in large language model_L Xing_5ea0590ba00c.pdf",
+        "artifact_uri": "artifact://papers/Vision-centric token compression in large language model_L Xing_5ea0590ba00c.pdf",
+        "final_url": "https://proceedings.neurips.cc/paper_files/paper/2025/file/2f8b56543953d60f262fb2c4b85c50b3-Paper-Conference.pdf",
+        "sha256": "f768209fa07e3631c09e3dede79aa17deb3ef936540c76c21a382cd526b35683",
+        "size_bytes": 2014319
+      },
+      "abstract_resolution": {
+        "source": "pdf_extracted",
+        "extraction_status": "success",
+        "pdf_pages_read": 4,
+        "ai_summary_source": "pdf_front_pages",
+        "error": null
+      },
+      "paper_id": 144,
+      "updated_at": "2026-07-28T08:14:43.893171+00:00"
+    },
+    {
+      "dedup_key": "title_author:efficient token compression for vision transformer with spatial information preserved|j mao",
+      "paper_info": {
+        "title": "Efficient token compression for vision transformer with spatial information preserved",
+        "authors": "J Mao, Y Shen, J Guo, Y Yao, X Hua",
+        "publish_date": null,
+        "paper_abstract": "Token compression is essential for reducing the computational and memory requirements of transformer models, enabling their deployment in resource-constrained environments. In this work, we propose an efficient and hardware-compatible token compression method called Prune and Merge. Our ap- proach integrates token pruning and merging operations within transformer models to achieve layer-wise token compression. By introducing trainable merge and reconstruct matrices and utilizing shortcut connections, we efficiently merge tokens while preserving important information and enabling the restoration of pruned tokens. Additionally, we introduce a novel gradient- weighted attention scoring mechanism that computes token importance scores during the training phase, eliminating the need for separate computations during inference and enhancing compression efficiency. We also leverage gradient information to capture the global impact of tokens and automatically identify optimal compression structures. Extensive experiments on the ImageNet-1k and ADE20K datasets validate the effectiveness of our approach, achieving significant speed-ups with minimal accuracy degradation compared to state-of-the-art methods. For instance, on DeiT-Small, we achieve a 1.64 × speed-up with only a 0.2% drop in accuracy on ImageNet-1k. Moreover, by compressing segmenter models and comparing with ex- isting methods, we demonstrate the superior performance of our approach in terms of efficiency and effectiveness. Code and models have been made available at https://github.com/ NUST-Machine-Intelligence-Laboratory/prune and merge.",
+        "ai_abstract": "针对视觉Transformer中token数量导致计算成本高的问题，本文提出一种高效且硬件兼容的token压缩方法Prune and Merge。该方法在Transformer模块内集成token剪枝与合并操作，通过引入可训练的合并矩阵和重构矩阵，并结合捷径连接，在保留重要信息的同时实现逐层token压缩，并支持被剪枝token的恢复。此外，提出一种梯度加权注意力评分机制，在训练阶段计算token重要性分数，避免推理时的额外计算开销；同时利用梯度信息捕捉token的全局影响，自动识别最优压缩结构。在ImageNet-1k和ADE20K数据集上的实验表明，该方法在分类和语义分割任务中均取得显著加速且精度损失极小。例如，在DeiT-Small上实现1.64倍加速，精度仅下降0.2%。",
+        "doi": null,
+        "venue_id": 0,
+        "citations": 4,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://arxiv.org/pdf/2503.23455",
+        "abstract_url": "https://arxiv.org/abs/2503.23455",
+        "file_name": "Efficient token compression for vision transformer with spatial information preserved_J Mao_c681d1fc553d.pdf",
+        "published_date": null
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "iB49p8tfmzQJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://arxiv.org/abs/2503.23455"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://arxiv.org/pdf/2503.23455"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending",
+      "crossref_metadata": {
+        "status": "not_matched",
+        "match_method": "title"
+      },
+      "venue_resolution": {
+        "status": "missing",
+        "source": "missing",
+        "venue_id": 0
+      },
+      "pdf_download": {
+        "status": "success",
+        "file_name": "Efficient token compression for vision transformer with spatial information preserved_J Mao_c681d1fc553d.pdf",
+        "local_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\Efficient token compression for vision transformer with spatial information preserved_J Mao_c681d1fc553d.pdf",
+        "artifact_uri": "artifact://papers/Efficient token compression for vision transformer with spatial information preserved_J Mao_c681d1fc553d.pdf",
+        "final_url": "https://arxiv.org/pdf/2503.23455",
+        "sha256": "671733b70f770d20131803b45fb1cc87f9b9cb6d0cdbcc2eb4f047a0a266f7ed",
+        "size_bytes": 1765792
+      },
+      "abstract_resolution": {
+        "source": "pdf_extracted",
+        "extraction_status": "success",
+        "pdf_pages_read": 4,
+        "ai_summary_source": "pdf_front_pages",
+        "error": null
+      },
+      "paper_id": 143,
+      "updated_at": "2026-07-28T08:14:43.862174+00:00"
+    },
+    {
+      "dedup_key": "title_author:sparsecoder advancing source code analysis with sparse attention and learned token pruning|x yang",
+      "paper_info": {
+        "title": "SparseCoder: Advancing source code analysis with sparse attention and learned token pruning",
+        "authors": "X Yang, M Jakubowski, L Kang, H Yu",
+        "publish_date": "2025-01-01",
+        "paper_abstract": "As software projects rapidly evolve, software artifacts become more complex and defects behind get harder to identify. The emerging Transformer- based approaches, though achieving remarkable performance, struggle with long code sequences due to their self-attention mechanism, which scales quadrat- ically with the sequence length. This paper introduces SparseCoder, an in- novative approach incorporating sparse attention and learned token pruning (LTP) method (adapted from natural language processing) to address this lim- itation. Compared to previous state-of-the-art models (CodeBERT, RoBERTa and CodeT5), our experiments demonstrate that SparseCoder can handle sig- nificantly longer input sequences—at least twice as long, within the limits of our hardware resources and data statistics. Additionally, SparseCoder is four times faster than other methods measured in runtime, achieving a 50% reduc- tion in floating point operations per second (FLOPs) with a negligible perfor- mance drop of less than 1% compared to Transformers using sparse attention (Sparse Atten). Plotting FLOPs of model inference against token lengths re- veals that SparseCoder scales linearly, whereas other methods, including the current state-of-the-art model CodeT5, scale quadratically. Moreover, Spar- seCoder enhances interpretability by visualizing non-trivial tokens layer-wise.",
+        "ai_abstract": "针对Transformer模型在处理长代码序列时自注意力机制呈二次方复杂度、导致计算效率低下的问题，本文提出SparseCoder方法，融合稀疏注意力机制与从自然语言处理领域引入的学习型令牌剪枝（LTP）技术。实验以CodeBERT、RoBERTa和CodeT5为基线模型，结果表明：SparseCoder可在相同硬件资源下处理至少两倍于基线模型的输入序列长度；推理速度提升约4倍，浮点运算量（FLOPs）降低50%，且性能下降不足1%；模型推理的FLOPs随令牌长度呈线性增长，而基线模型（含CodeT5）仍为二次增长。此外，SparseCoder通过逐层可视化非平凡令牌，增强了模型的可解释性。主要贡献在于显著提升了源代码分析中Transformer模型在长序列场景下的可扩展性与计算效率。",
+        "doi": "10.1007/s10664-024-10558-1",
+        "venue_id": 122,
+        "citations": 11,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://arxiv.org/pdf/2310.07109",
+        "abstract_url": "https://link.springer.com/article/10.1007/s10664-024-10558-1",
+        "file_name": "SparseCoder_ Advancing source code analysis with sparse attention and learned token pruning_X Yang_c4595fe6cd16.pdf",
+        "published_date": "2025-01-01"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "uifHBltDUuwJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://link.springer.com/article/10.1007/s10664-024-10558-1"
+        }
+      ],
+      "venue_candidates": [
+        "Empirical Software Engineering"
+      ],
+      "pdf_candidates": [
+        "https://arxiv.org/pdf/2310.07109"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending",
+      "crossref_metadata": {
+        "status": "matched",
+        "match_method": "title",
+        "doi": "10.1007/s10664-024-10558-1",
+        "published_date": "2025-01-01",
+        "citations": 6,
+        "venue_title": "Empirical Software Engineering",
+        "paper_type_code": 1,
+        "crossref_type": "journal-article"
+      },
+      "venue_resolution": {
+        "status": "resolved",
+        "source": "easy_scholar",
+        "venue_id": 122,
+        "venue_draft": {
+          "standard_name": "Empirical Software Engineering",
+          "acronym": null,
+          "type": 1,
+          "sci_rank": "Q2",
+          "ccf_rank": "B",
+          "sci_if": "3.4",
+          "sci_up": "计算机科学2区",
+          "sci_up_small": "计算机：软件工程2区。",
+          "core_rank": null
+        }
+      },
+      "pdf_download": {
+        "status": "success",
+        "file_name": "SparseCoder_ Advancing source code analysis with sparse attention and learned token pruning_X Yang_c4595fe6cd16.pdf",
+        "local_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\SparseCoder_ Advancing source code analysis with sparse attention and learned token pruning_X Yang_c4595fe6cd16.pdf",
+        "artifact_uri": "artifact://papers/SparseCoder_ Advancing source code analysis with sparse attention and learned token pruning_X Yang_c4595fe6cd16.pdf",
+        "final_url": "https://arxiv.org/pdf/2310.07109",
+        "sha256": "0abc66e45f612fd81783330e87b417e48f4c86a8e61e913f81bfd2b95c872eba",
+        "size_bytes": 1639418
+      },
+      "abstract_resolution": {
+        "source": "pdf_extracted",
+        "extraction_status": "success",
+        "pdf_pages_read": 4,
+        "ai_summary_source": "pdf_front_pages",
+        "error": null
+      },
+      "paper_id": 146,
+      "updated_at": "2026-07-28T08:14:43.960585+00:00"
+    },
+    {
+      "dedup_key": "title_author:more tokens lower precision towards the optimal tokenprecision tradeoff in kv cache compression|j zhang",
+      "paper_info": {
+        "title": "More tokens, lower precision: Towards the optimal token-precision trade-off in kv cache compression",
+        "authors": "J Zhang, D Zhu, Y Song, W Wu, C Kuang",
+        "publish_date": "2025-01-01",
+        "paper_abstract": "As large language models (LLMs) process in- creasing context windows, the memory usage of KV cache has become a critical bottleneck during inference. The mainstream KV com- pression methods, including KV pruning and KV quantization, primarily focus on either to- ken or precision dimensions separately. How- ever, these works have left the trade-off be- tween these two orthogonal dimensions largely unexplored. In this paper, we leverage the In- formation Bottleneck principle to formulate KV cache compression within a unified the- oretical framework. We demonstrate that a carefully managed token-precision trade-off can achieve an optimal point within the In- formation Bottleneck compared to standalone KV pruning or KV quantization. Experi- ments reveal that storing more tokens in the KV cache at lower precision—a strategy we term quantized pruning—can significantly en- hance the long-context performance of LLMs. An in-depth analysis of this token-precision trade-off across key aspects shows that quan- tized pruning achieves substantial improve- ments in retrieval-related tasks and consistently performs well across varying input lengths. Furthermore, quantized pruning exhibits no- table stability and effectiveness across differ- ent KV pruning methods, quantization strate- gies, and model scales. These findings offer valuable insights into optimizing KV cache compression through balanced token-precision trade-off strategies. Our code is available at https://github.com/zhzihao/QPruningKV.",
+        "ai_abstract": "大语言模型推理时，KV缓存的内存占用随上下文增长成为关键瓶颈。现有主流压缩方法（KV剪枝与KV量化）分别聚焦于token或精度单一维度，忽略了两者间的权衡。本文基于信息瓶颈原理构建统一理论框架，发现联合优化token数量与精度的策略（即\"量化剪枝\"：以更低精度存储更多token）可在信息瓶颈曲线上达到更优操作点。实验表明，在多种KV缓存预算下，量化剪枝显著优于单独使用KV剪枝或量化，尤其在低资源场景中有效避免性能崩溃。在检索类任务和不同输入长度上均表现稳健，且在不同剪枝方法、量化策略和模型规模下展现出良好的稳定性。该工作为通过平衡token-精度权衡优化KV缓存压缩提供了重要见解。",
+        "doi": "10.18653/v1/2025.findings-emnlp.429",
+        "venue_id": 118,
+        "citations": 18,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://aclanthology.org/anthology-files/pdf/findings/2025.findings-emnlp.429.pdf",
+        "abstract_url": "https://aclanthology.org/anthology-files/pdf/findings/2025.findings-emnlp.429.pdf",
+        "file_name": "More tokens, lower precision_ Towards the optimal token-precision trade-off in kv cache compression_J Zhang_dc4aaa7c1edf.pdf",
+        "published_date": "2025-01-01"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "BdZc7GDwFdkJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://aclanthology.org/anthology-files/pdf/findings/2025.findings-emnlp.429.pdf"
+        }
+      ],
+      "venue_candidates": [
+        "Findings of the Association for Computational Linguistics: EMNLP 2025"
+      ],
+      "pdf_candidates": [
+        "https://aclanthology.org/anthology-files/pdf/findings/2025.findings-emnlp.429.pdf"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending",
+      "crossref_metadata": {
+        "status": "matched",
+        "match_method": "title",
+        "doi": "10.18653/v1/2025.findings-emnlp.429",
+        "published_date": "2025-01-01",
+        "citations": 2,
+        "venue_title": "Findings of the Association for Computational Linguistics: EMNLP 2025",
+        "paper_type_code": 2,
+        "crossref_type": "proceedings-article"
+      },
+      "venue_resolution": {
+        "status": "resolved",
+        "source": "local_cache",
+        "venue_id": 118,
+        "venue_draft": {
+          "standard_name": "EMNLP",
+          "acronym": null,
+          "type": 2,
+          "sci_rank": null,
+          "ccf_rank": "B",
+          "sci_if": "0",
+          "sci_up": null,
+          "sci_up_small": null,
+          "core_rank": null
+        }
+      },
+      "pdf_download": {
+        "status": "success",
+        "file_name": "More tokens, lower precision_ Towards the optimal token-precision trade-off in kv cache compression_J Zhang_dc4aaa7c1edf.pdf",
+        "local_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\More tokens, lower precision_ Towards the optimal token-precision trade-off in kv cache compression_J Zhang_dc4aaa7c1edf.pdf",
+        "artifact_uri": "artifact://papers/More tokens, lower precision_ Towards the optimal token-precision trade-off in kv cache compression_J Zhang_dc4aaa7c1edf.pdf",
+        "final_url": "https://aclanthology.org/anthology-files/pdf/findings/2025.findings-emnlp.429.pdf",
+        "sha256": "fc6e6df67876c881ea8878e063c156bf9756bf417d6434703e394ded97e9b7c5",
+        "size_bytes": 464735
+      },
+      "abstract_resolution": {
+        "source": "pdf_extracted",
+        "extraction_status": "success",
+        "pdf_pages_read": 4,
+        "ai_summary_source": "pdf_front_pages",
+        "error": null
+      },
+      "paper_id": 148,
+      "updated_at": "2026-07-28T08:14:44.031575+00:00"
+    }
+  ]
+}

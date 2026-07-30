@@ -1,0 +1,121 @@
+{
+  "ok": true,
+  "source": "Google Scholar",
+  "run_id": "live-paper-search-rag-4693b9ec9c084aceb178d56d5c0bb666",
+  "step_key": "search_google_scholar",
+  "query": "RAG \"retrieval-augmented generation\" \"retrieval-augmented language generation\" evaluation benchmark",
+  "search_query": null,
+  "total_results": 129,
+  "returned_count": 3,
+  "papers": [
+    {
+      "source": "google_scholar",
+      "source_id": "AOSOOSunkf8J",
+      "title": "Retrieval augmented generation evaluation in the era of large language models: A comprehensive survey",
+      "authors": [
+        "A Gan",
+        "H Yu",
+        "K Zhang",
+        "Q Liu",
+        "W Yan",
+        "Z Huang"
+      ],
+      "abstract": null,
+      "snippet": "… This section systematically compiles, categorizes, and presents the implemented RAG evaluation frameworks, benchmarks, analytical tools, and datasets that have emerged in the large …",
+      "published": null,
+      "year": 2025,
+      "updated": null,
+      "venue": null,
+      "publication_summary": "A Gan, H Yu, K Zhang, Q Liu, W Yan, Z Huang… - arXiv preprint arXiv …, 2025 - arxiv.org",
+      "doi": null,
+      "citation_count": 81,
+      "scholar_result_id": "AOSOOSunkf8J",
+      "cites_id": "18415684155385766912",
+      "cluster_id": "18415684155385766912",
+      "versions_count": 3,
+      "landing_url": "https://arxiv.org/abs/2504.14891",
+      "pdf_url": "https://arxiv.org/pdf/2504.14891?",
+      "scholar_cited_by_url": "https://scholar.google.com/scholar?cites=18415684155385766912&as_sdt=2005&sciodt=0,5&hl=en&num=3"
+    },
+    {
+      "source": "google_scholar",
+      "source_id": "gEAqY33eN3EJ",
+      "title": "Engineering the RAG Stack: A Comprehensive Review of the Architecture and Trust Frameworks for Retrieval-Augmented Generation Systems",
+      "authors": [
+        "D Wampler",
+        "D Nielson",
+        "A Seddighi"
+      ],
+      "abstract": null,
+      "snippet": "… Empirical Analysis and Benchmarking: We provide an exhaustive evaluation of architectural trade-offs, … contexts by consolidating performance trends across major RAG benchmarks. …",
+      "published": null,
+      "year": 2025,
+      "updated": null,
+      "venue": null,
+      "publication_summary": "D Wampler, D Nielson, A Seddighi - arXiv preprint arXiv:2601.05264, 2025 - arxiv.org",
+      "doi": null,
+      "citation_count": 7,
+      "scholar_result_id": "gEAqY33eN3EJ",
+      "cites_id": "8158233880120934528",
+      "cluster_id": "8158233880120934528",
+      "versions_count": 2,
+      "landing_url": "https://arxiv.org/abs/2601.05264",
+      "pdf_url": "https://arxiv.org/pdf/2601.05264",
+      "scholar_cited_by_url": "https://scholar.google.com/scholar?cites=8158233880120934528&as_sdt=2005&sciodt=0,5&hl=en&num=3"
+    },
+    {
+      "source": "google_scholar",
+      "source_id": "9kGk8md7CwAJ",
+      "title": "SafeRAG: benchmarking security in retrieval-augmented generation of large language model",
+      "authors": [
+        "X Liang",
+        "S Niu",
+        "Z Li",
+        "S Zhang",
+        "H Wang"
+      ],
+      "abstract": null,
+      "snippet": "… The indexing-retrieval-generation paradigm of retrieval-augmented generation (RAG) has been … In this paper, we introduce a benchmark named SafeRAG designed to evaluate the RAG …",
+      "published": null,
+      "year": 2025,
+      "updated": null,
+      "venue": null,
+      "publication_summary": "X Liang, S Niu, Z Li, S Zhang, H Wang… - Proceedings of the …, 2025 - aclanthology.org",
+      "doi": null,
+      "citation_count": 42,
+      "scholar_result_id": "9kGk8md7CwAJ",
+      "cites_id": "3231911126516214",
+      "cluster_id": "3231911126516214",
+      "versions_count": 4,
+      "landing_url": "https://aclanthology.org/2025.acl-long.230/",
+      "pdf_url": "https://aclanthology.org/2025.acl-long.230.pdf",
+      "scholar_cited_by_url": "https://scholar.google.com/scholar?cites=3231911126516214&as_sdt=2005&sciodt=0,5&hl=en&num=3"
+    }
+  ],
+  "metadata": {
+    "plan_reasoning": "Google Scholar 使用自然语言风格查询，将关键词与同义词合并为一个查询串，并应用年份限制。排除术语无法直接表达，留待后续过滤。",
+    "plan_arguments": {
+      "query": "RAG \"retrieval-augmented generation\" \"retrieval-augmented language generation\" evaluation benchmark",
+      "start": 0,
+      "num": 3,
+      "total_limit": 3,
+      "max_pages": 1,
+      "year_from": 2023,
+      "year_to": 2026,
+      "review_only": false
+    },
+    "pagination": {
+      "initial_offset": 0,
+      "page_size": 3,
+      "total_limit": 3,
+      "max_pages": 1,
+      "pages_fetched": 1,
+      "raw_fetched_count": 3,
+      "returned_count": 3,
+      "has_next": true,
+      "next_offset": 3,
+      "stop_reason": "total_limit_reached"
+    },
+    "page_errors": []
+  }
+}

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.llm.tools.registry import get_tool_specs
 
 
-class LangChainToolFactory:
+class ToolFactory:
     def build(
         self,
         db: Session,

@@ -1,0 +1,51 @@
+{
+  "run_id": "live-paper-search-rag-1bec4fd0f6ba4998beffc357b76ed449",
+  "step_key": "persist_recommended_papers",
+  "input_manifest": "artifact://live-paper-search-rag-1bec4fd0f6ba4998beffc357b76ed449/recommend_papers/recommendation_20260727T124126Z_cf35c508248c.json",
+  "results": [
+    {
+      "client_key": "live-paper-search-rag-1bec4fd0f6ba4998beffc357b76ed449:0",
+      "title": "Engineering the RAG Stack: A Comprehensive Review of the Architecture and Trust Frameworks for Retrieval-Augmented Generation Systems",
+      "venue_id": 0,
+      "venue_save_status": "not_available",
+      "paper_id": null,
+      "paper_save_status": "failed",
+      "paper_cache_status": "not_started",
+      "task_paper_save_status": "pending",
+      "error": "gRPC call failed: code=INTERNAL, details=Batch save papers failed"
+    },
+    {
+      "client_key": "live-paper-search-rag-1bec4fd0f6ba4998beffc357b76ed449:1",
+      "title": "CRAG-MM: Multi-modal Multi-turn Comprehensive RAG Benchmark",
+      "venue_id": 0,
+      "venue_save_status": "not_available",
+      "paper_id": null,
+      "paper_save_status": "failed",
+      "paper_cache_status": "not_started",
+      "task_paper_save_status": "pending",
+      "error": "gRPC call failed: code=INTERNAL, details=Batch save papers failed"
+    },
+    {
+      "client_key": "live-paper-search-rag-1bec4fd0f6ba4998beffc357b76ed449:2",
+      "title": "Can LLMs Be trusted for evaluating RAG systems? A survey of methods and datasets",
+      "venue_id": 116,
+      "venue_save_status": "saved",
+      "paper_id": null,
+      "paper_save_status": "failed",
+      "paper_cache_status": "not_started",
+      "task_paper_save_status": "pending",
+      "error": "gRPC call failed: code=INTERNAL, details=Batch save papers failed"
+    },
+    {
+      "client_key": "live-paper-search-rag-1bec4fd0f6ba4998beffc357b76ed449:3",
+      "title": "Evaluation of retrieval-augmented generation: A survey",
+      "venue_id": null,
+      "venue_save_status": "not_started",
+      "paper_id": 121,
+      "paper_save_status": "not_required",
+      "paper_cache_status": "not_started",
+      "task_paper_save_status": "saved",
+      "error": null
+    }
+  ]
+}

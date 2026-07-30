@@ -1,0 +1,29 @@
+{
+  "ok": false,
+  "source": "DBLP",
+  "run_id": "live-paper-search-rag-5fd0822a5e3f463ab46002c9b89bea7d",
+  "step_key": "search_dblp",
+  "query": "(RAG OR \"retrieval-augmented generation\" OR \"retrieval-augmented language models\" OR \"RAG systems\") AND (evaluation OR benchmark)",
+  "search_query": null,
+  "total_results": 0,
+  "returned_count": 0,
+  "papers": [],
+  "metadata": {
+    "plan_reasoning": "DBLP 不支持直接排除术语，因此仅使用包含关键词和同义词构建查询，并限定年份范围。意图是查找与 RAG 评测基准相关的论文。",
+    "plan_arguments": {
+      "query": "(RAG OR \"retrieval-augmented generation\" OR \"retrieval-augmented language models\" OR \"RAG systems\") AND (evaluation OR benchmark)",
+      "f": 0,
+      "h": 3,
+      "total_limit": 3,
+      "max_pages": 1,
+      "year_from": 2023,
+      "year_to": 2026,
+      "venue": null,
+      "paper_type": "all"
+    },
+    "pagination": {},
+    "page_errors": [
+      "<!DOCTYPE html>\n<html lang=\"en\">\n<head><meta charset=\"UTF-8\"><title>dblp: error 500</title><link rel=\"home\" href=\"https://dblp.org\"><link rel=\"search\" type=\"application/opensearchdescription+xml\" href=\"https://dblp.org/xml/osd.xml\" title=\"dblp search\"><link rel=\"apple-touch-icon\" type=\"image/png\" sizes=\"192x192\" href=\"https://dblp.org/img/dblp.icon.192x192.png\"><link rel=\"icon\" type=\"image/png\" sizes=\"192x192\" href=\"https://dblp.org/img/dblp.icon.192x192.png\"><link rel=\"icon\" type=\"image/png\" si"
+    ]
+  }
+}

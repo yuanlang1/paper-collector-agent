@@ -1,0 +1,32 @@
+{
+  "ok": false,
+  "source": "arXiv",
+  "run_id": "live-paper-search-rag-5fd0822a5e3f463ab46002c9b89bea7d",
+  "step_key": "search_arxiv",
+  "query": "(RAG OR \"retrieval-augmented generation\" OR \"retrieval-augmented language models\" OR \"RAG systems\") AND (evaluation OR benchmark) NOT (medical OR healthcare OR clinical)",
+  "search_query": null,
+  "total_results": 0,
+  "returned_count": 0,
+  "papers": [],
+  "metadata": {
+    "plan_reasoning": "根据用户确认的 query_understanding，将关键词、同义词和评测相关术语组合为布尔查询，排除医疗相关术语，并限定年份范围。arXiv 使用 topic 检索类型以覆盖标题、摘要等字段。",
+    "plan_arguments": {
+      "query": "(RAG OR \"retrieval-augmented generation\" OR \"retrieval-augmented language models\" OR \"RAG systems\") AND (evaluation OR benchmark) NOT (medical OR healthcare OR clinical)",
+      "arxiv_ids": [],
+      "search_type": "topic",
+      "category": null,
+      "year_from": 2023,
+      "year_to": 2026,
+      "start": 0,
+      "max_results": 3,
+      "total_limit": 3,
+      "max_pages": 1,
+      "sort": "relevance",
+      "include_abstract": true
+    },
+    "pagination": {},
+    "page_errors": [
+      "UPSTREAM_REQUEST_ERROR"
+    ]
+  }
+}

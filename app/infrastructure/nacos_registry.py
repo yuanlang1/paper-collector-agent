@@ -37,6 +37,7 @@ class NacosRegistry:
             .server_address(settings.NACOS_SERVER_ADDR)
             .namespace_id(settings.NACOS_NAMESPACE_ID)
             .log_level(settings.NACOS_LOG_LEVEL)
+            .log_dir(settings.NACOS_LOG_DIR)
             .grpc_config(GRPCConfig(grpc_timeout=settings.NACOS_GRPC_TIMEOUT_MS))
         )
 

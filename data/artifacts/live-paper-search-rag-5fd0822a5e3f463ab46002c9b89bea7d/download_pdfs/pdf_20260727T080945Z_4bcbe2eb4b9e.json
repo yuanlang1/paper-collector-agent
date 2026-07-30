@@ -1,0 +1,220 @@
+{
+  "run_id": "live-paper-search-rag-5fd0822a5e3f463ab46002c9b89bea7d",
+  "step_key": "download_pdfs",
+  "paper_info_schema": "paper_info_v1",
+  "papers": [
+    {
+      "dedup_key": "title_author:rankify a comprehensive python toolkit for retrieval reranking and retrievalaugmented generation|a abdallah",
+      "paper_info": {
+        "title": "Rankify: A comprehensive python toolkit for retrieval, re-ranking, and retrieval-augmented generation",
+        "authors": "A Abdallah, B Piryani, J Mozafari",
+        "publish_date": "2026-01-01",
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": "10.18653/v1/2026.acl-demo.21",
+        "venue_id": null,
+        "citations": 51,
+        "keywords": "RAG, retrieval-augmented generation, evaluation, benchmark",
+        "source": "Google Scholar",
+        "pdf_url": "https://aclanthology.org/2026.acl-demo.21.pdf",
+        "abstract_url": "https://aclanthology.org/2026.acl-demo.21/",
+        "file_name": "Rankify_ A comprehensive python toolkit for retrieval, re-ranking, and retrieval-augmented generation_A Abdallah_1b5ba453e5a9.pdf"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "5y1_RZMvQwAJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://aclanthology.org/2026.acl-demo.21/"
+        }
+      ],
+      "venue_candidates": [
+        "Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (Volume 3: System Demonstrations)"
+      ],
+      "pdf_candidates": [
+        "https://aclanthology.org/2026.acl-demo.21.pdf"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending",
+      "crossref_metadata": {
+        "status": "matched",
+        "match_method": "title",
+        "doi": "10.18653/v1/2026.acl-demo.21",
+        "published_date": "2026-01-01",
+        "citations": 2,
+        "venue_title": "Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (Volume 3: System Demonstrations)",
+        "paper_type_code": 2,
+        "crossref_type": "proceedings-article"
+      },
+      "venue_resolution": {
+        "status": "resolved",
+        "source": "easy_scholar",
+        "venue_id": null,
+        "venue_draft": {
+          "standard_name": "Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (Volume 3: System Demonstrations)",
+          "acronym": null,
+          "type": 2,
+          "sci_rank": null,
+          "ccf_rank": "A",
+          "sci_if": "0",
+          "sci_up": null,
+          "sci_up_small": null,
+          "core_rank": null
+        }
+      },
+      "pdf_download": {
+        "status": "success",
+        "file_name": "Rankify_ A comprehensive python toolkit for retrieval, re-ranking, and retrieval-augmented generation_A Abdallah_1b5ba453e5a9.pdf",
+        "local_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\Rankify_ A comprehensive python toolkit for retrieval, re-ranking, and retrieval-augmented generation_A Abdallah_1b5ba453e5a9.pdf",
+        "artifact_uri": "artifact://papers/Rankify_ A comprehensive python toolkit for retrieval, re-ranking, and retrieval-augmented generation_A Abdallah_1b5ba453e5a9.pdf",
+        "final_url": "https://aclanthology.org/2026.acl-demo.21.pdf",
+        "sha256": "6f6085634745e8729ac6e57cd824d70d79953d7f48f868f33651f496ce8b9256",
+        "size_bytes": 253117
+      }
+    },
+    {
+      "dedup_key": "title_author:evaluation of retrievalaugmented generation a survey|h yu",
+      "paper_info": {
+        "title": "Evaluation of retrieval-augmented generation: A survey",
+        "authors": "H Yu, A Gan, K Zhang, S Tong, Q Liu, Z Liu",
+        "publish_date": "2025-01-01",
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": "10.1007/978-981-96-1024-2_8",
+        "venue_id": null,
+        "citations": 514,
+        "keywords": "RAG, retrieval-augmented generation, evaluation, benchmark",
+        "source": "Google Scholar",
+        "pdf_url": "https://arxiv.org/pdf/2405.07437",
+        "abstract_url": "https://link.springer.com/chapter/10.1007/978-981-96-1024-2_8",
+        "file_name": "Evaluation of retrieval-augmented generation_ A survey_H Yu_6ae557633940.pdf"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "ZthzJtL6eSwJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://link.springer.com/chapter/10.1007/978-981-96-1024-2_8"
+        },
+        {
+          "source": "DBLP",
+          "source_id": "journals/corr/abs-2405-07437",
+          "doi": "10.48550/ARXIV.2405.07437",
+          "arxiv_id": null,
+          "landing_url": "https://dblp.org/rec/journals/corr/abs-2405-07437"
+        }
+      ],
+      "venue_candidates": [
+        "CoRR",
+        "Communications in Computer and Information Science"
+      ],
+      "pdf_candidates": [
+        "https://arxiv.org/pdf/2405.07437"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending",
+      "crossref_metadata": {
+        "status": "matched",
+        "match_method": "title",
+        "doi": "10.1007/978-981-96-1024-2_8",
+        "published_date": "2025-01-01",
+        "citations": 121,
+        "venue_title": "Communications in Computer and Information Science",
+        "paper_type_code": 18,
+        "crossref_type": "book-chapter"
+      },
+      "venue_resolution": {
+        "status": "resolved",
+        "source": "local_cache",
+        "venue_id": null,
+        "venue_draft": {
+          "standard_name": "CoRR",
+          "acronym": null,
+          "type": 18,
+          "sci_rank": null,
+          "ccf_rank": null,
+          "sci_if": "0",
+          "sci_up": null,
+          "sci_up_small": null,
+          "core_rank": null
+        }
+      },
+      "pdf_download": {
+        "status": "success",
+        "file_name": "Evaluation of retrieval-augmented generation_ A survey_H Yu_6ae557633940.pdf",
+        "local_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\Evaluation of retrieval-augmented generation_ A survey_H Yu_6ae557633940.pdf",
+        "artifact_uri": "artifact://papers/Evaluation of retrieval-augmented generation_ A survey_H Yu_6ae557633940.pdf",
+        "final_url": "https://arxiv.org/pdf/2405.07437",
+        "sha256": "9ec643765eb079660cad9cf2bf7dcd3371e9ab9e05b1f94573cc101fb4a25374",
+        "size_bytes": 573447
+      }
+    },
+    {
+      "dedup_key": "title_author:chainofretrieval augmented generation|l wang",
+      "paper_info": {
+        "title": "Chain-of-retrieval augmented generation",
+        "authors": "L Wang, H Chen, N Yang, X Huang",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 139,
+        "keywords": "RAG, retrieval-augmented generation, evaluation, benchmark",
+        "source": "Google Scholar",
+        "pdf_url": "https://proceedings.neurips.cc/paper_files/paper/2025/file/566aad4fac1acf17fd1ae8c3aef75326-Paper-Conference.pdf",
+        "abstract_url": "https://proceedings.neurips.cc/paper_files/paper/2025/hash/566aad4fac1acf17fd1ae8c3aef75326-Abstract-Conference.html",
+        "file_name": "Chain-of-retrieval augmented generation_L Wang_3db1a79ea890.pdf"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "B2nSovUYQLsJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://proceedings.neurips.cc/paper_files/paper/2025/hash/566aad4fac1acf17fd1ae8c3aef75326-Abstract-Conference.html"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://proceedings.neurips.cc/paper_files/paper/2025/file/566aad4fac1acf17fd1ae8c3aef75326-Paper-Conference.pdf"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending",
+      "crossref_metadata": {
+        "status": "not_matched",
+        "match_method": "title"
+      },
+      "venue_resolution": {
+        "status": "missing",
+        "source": "missing",
+        "venue_id": null
+      },
+      "pdf_download": {
+        "status": "success",
+        "file_name": "Chain-of-retrieval augmented generation_L Wang_3db1a79ea890.pdf",
+        "local_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\Chain-of-retrieval augmented generation_L Wang_3db1a79ea890.pdf",
+        "artifact_uri": "artifact://papers/Chain-of-retrieval augmented generation_L Wang_3db1a79ea890.pdf",
+        "final_url": "https://proceedings.neurips.cc/paper_files/paper/2025/file/566aad4fac1acf17fd1ae8c3aef75326-Paper-Conference.pdf",
+        "sha256": "511b8835a767e681303515797734ce1eeee0cdb427b7de81cff32acd7f67a362",
+        "size_bytes": 552971
+      }
+    }
+  ],
+  "rejected": [],
+  "identity_conflicts": [],
+  "deferred_filters": {
+    "requires_code": null,
+    "paper_tags": [
+      1,
+      2
+    ]
+  },
+  "removed_without_pdf": [],
+  "removed_pdf_download_failed": []
+}

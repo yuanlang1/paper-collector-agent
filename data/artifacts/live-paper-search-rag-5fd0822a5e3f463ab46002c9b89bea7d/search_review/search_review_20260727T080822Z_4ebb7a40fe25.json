@@ -1,0 +1,46 @@
+{
+  "effective_count": 3,
+  "target_count": 2,
+  "round": 0,
+  "source_stats": {
+    "arXiv": {
+      "source": "arXiv",
+      "status": "failed",
+      "discovered_count": 0,
+      "artifact_ref": "artifact://live-paper-search-rag-5fd0822a5e3f463ab46002c9b89bea7d/search_arxiv/arxiv_20260727T080756Z_a437eac7aa9f.json",
+      "error": "UPSTREAM_REQUEST_ERROR",
+      "searched_pages": 0,
+      "has_next": false,
+      "next_offset": null,
+      "accepted_count": 0
+    },
+    "DBLP": {
+      "source": "DBLP",
+      "status": "failed",
+      "discovered_count": 0,
+      "artifact_ref": "artifact://live-paper-search-rag-5fd0822a5e3f463ab46002c9b89bea7d/search_dblp/dblp_20260727T080820Z_39a054420643.json",
+      "error": "<!DOCTYPE html>\n<html lang=\"en\">\n<head><meta charset=\"UTF-8\"><title>dblp: error 500</title><link rel=\"home\" href=\"https://dblp.org\"><link rel=\"search\" type=\"application/opensearchdescription+xml\" href=\"https://dblp.org/xml/osd.xml\" title=\"dblp search\"><link rel=\"apple-touch-icon\" type=\"image/png\" sizes=\"192x192\" href=\"https://dblp.org/img/dblp.icon.192x192.png\"><link rel=\"icon\" type=\"image/png\" sizes=\"192x192\" href=\"https://dblp.org/img/dblp.icon.192x192.png\"><link rel=\"icon\" type=\"image/png\" si",
+      "searched_pages": 0,
+      "has_next": false,
+      "next_offset": null,
+      "accepted_count": 0
+    },
+    "Google Scholar": {
+      "source": "Google Scholar",
+      "status": "success",
+      "discovered_count": 3,
+      "artifact_ref": "artifact://live-paper-search-rag-5fd0822a5e3f463ab46002c9b89bea7d/search_google_scholar/google_scholar_20260727T080822Z_972a5a5e2f90.json",
+      "error": null,
+      "searched_pages": 1,
+      "has_next": true,
+      "next_offset": 3,
+      "accepted_count": 3
+    }
+  },
+  "decision": {
+    "action": "finish",
+    "required_additional_count": 0,
+    "source_actions": [],
+    "reasoning": "候选论文数量已满足目标或已达到补充检索轮次上限。"
+  }
+}

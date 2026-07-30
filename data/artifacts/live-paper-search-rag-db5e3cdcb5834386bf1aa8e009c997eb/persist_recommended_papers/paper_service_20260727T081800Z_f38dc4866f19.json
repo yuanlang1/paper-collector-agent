@@ -1,0 +1,51 @@
+{
+  "run_id": "live-paper-search-rag-db5e3cdcb5834386bf1aa8e009c997eb",
+  "step_key": "persist_recommended_papers",
+  "input_manifest": "artifact://live-paper-search-rag-db5e3cdcb5834386bf1aa8e009c997eb/recommend_papers/recommendation_20260727T081800Z_a1d407c3cfba.json",
+  "results": [
+    {
+      "client_key": "live-paper-search-rag-db5e3cdcb5834386bf1aa8e009c997eb:0",
+      "title": "FAIR-RAG: Faithful Adaptive Iterative Refinement for Retrieval-Augmented Generation",
+      "venue_id": null,
+      "venue_save_status": "missing",
+      "paper_id": null,
+      "paper_save_status": "not_started",
+      "paper_cache_status": "not_started",
+      "task_paper_save_status": "not_started",
+      "error": "missing valid venue draft"
+    },
+    {
+      "client_key": "live-paper-search-rag-db5e3cdcb5834386bf1aa8e009c997eb:1",
+      "title": "Engineering the RAG Stack: A Comprehensive Review of the Architecture and Trust Frameworks for Retrieval-Augmented Generation Systems",
+      "venue_id": null,
+      "venue_save_status": "missing",
+      "paper_id": null,
+      "paper_save_status": "not_started",
+      "paper_cache_status": "not_started",
+      "task_paper_save_status": "not_started",
+      "error": "missing valid venue draft"
+    },
+    {
+      "client_key": "live-paper-search-rag-db5e3cdcb5834386bf1aa8e009c997eb:2",
+      "title": "Ares: An automated evaluation framework for retrieval-augmented generation systems",
+      "venue_id": 111,
+      "venue_save_status": "saved",
+      "paper_id": 120,
+      "paper_save_status": "saved",
+      "paper_cache_status": "saved",
+      "task_paper_save_status": "saved",
+      "error": null
+    },
+    {
+      "client_key": "live-paper-search-rag-db5e3cdcb5834386bf1aa8e009c997eb:3",
+      "title": "Evaluation of retrieval-augmented generation: A survey",
+      "venue_id": 112,
+      "venue_save_status": "saved",
+      "paper_id": 121,
+      "paper_save_status": "saved",
+      "paper_cache_status": "saved",
+      "task_paper_save_status": "saved",
+      "error": null
+    }
+  ]
+}

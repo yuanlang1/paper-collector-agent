@@ -1,0 +1,30 @@
+{
+  "run_id": "live-paper-search-rag-4693b9ec9c084aceb178d56d5c0bb666",
+  "search_task_id": 40,
+  "requests": [
+    {
+      "paper_id": 124,
+      "task_id": 40,
+      "title": "Retrieval augmented generation evaluation in the era of large language models: A comprehensive survey",
+      "source_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\Retrieval augmented generation evaluation in the era of large language models_ A comprehensive survey_A Gan_1b886e890285.pdf",
+      "source_pdf_available": true,
+      "status": "pending"
+    },
+    {
+      "paper_id": 125,
+      "task_id": 40,
+      "title": "Engineering the RAG Stack: A Comprehensive Review of the Architecture and Trust Frameworks for Retrieval-Augmented Generation Systems",
+      "source_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\Engineering the RAG Stack_ A Comprehensive Review of the Architecture and Trust Frameworks for Retrieval-Augmented Gener_D Wampler_16b758d0f430.pdf",
+      "source_pdf_available": true,
+      "status": "pending"
+    },
+    {
+      "paper_id": 126,
+      "task_id": 40,
+      "title": "SafeRAG: benchmarking security in retrieval-augmented generation of large language model",
+      "source_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\SafeRAG_ benchmarking security in retrieval-augmented generation of large language model_X Liang_1ea9f7c570fe.pdf",
+      "source_pdf_available": true,
+      "status": "pending"
+    }
+  ]
+}

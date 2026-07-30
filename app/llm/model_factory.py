@@ -26,8 +26,6 @@ def create_chat_model(
         kwargs["base_url"] = settings.OPENAI_BASE_URL
     
     
-    # DeepSeek 当前不支持 OpenAI Structured Outputs 的 response_format=json_schema。
-    # function_calling 会走 tools 参数；这里过滤 LangChain 可能附带的 parallel_tool_calls。
     if settings.OPENAI_BASE_URL and "deepseek" in settings.OPENAI_BASE_URL:
         kwargs["disabled_params"] = {"parallel_tool_calls": None}
         kwargs["extra_body"] = {

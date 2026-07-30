@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package papercollector.paper.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+option java_multiple_files = true;
+option java_package = "com.yl.paperservice.grpc.paper.v1";
+
+service PaperInternalService {
+  rpc GetExistingPapers(GetExistingPapersRequest)
+      returns (GetExistingPapersResponse);
+  rpc BatchSavePapers(BatchSavePapersRequest)
+      returns (BatchSavePapersResponse);
+}
+
+message GetExistingPapersRequest {
+  repeated PaperLookupKey papers = 1;
+}
+
+message PaperLookupKey {
+  string title = 1;
+  string authors = 2;
+}
+
+message PaperLookupResult {
+  string title = 1;
+  string authors = 2;
+  bool exists = 3;
+
+  int64 id = 4;
+  int64 venue_id = 5;
+  string paper_abstract = 6;
+  google.protobuf.Int32Value citations = 7;
+  string keywords = 8;
+  string source = 9;
+  google.protobuf.Timestamp published_date = 10;
+  string ai_abstract = 11;
+  string only_name = 12;
+}
+
+message GetExistingPapersResponse {
+  int32 code = 1;
+  bool success = 2;
+  repeated PaperLookupResult data = 3;
+  string message = 4;
+  google.protobuf.Struct other = 5;
+}
+
+message SavePaperRequest {
+  string title = 1;
+  string authors = 2;
+  google.protobuf.Timestamp published_date = 3;
+  string paper_abstract = 4;
+  string ai_abstract = 5;
+  string doi = 6;
+  int64 venue_id = 7;
+  google.protobuf.Int32Value citations = 8;
+  string keywords = 9;
+  string source = 10;
+  string pdf_url = 11;
+  string abstract_url = 12;
+  string oss_name = 13;
+  string client_key = 14;
+}
+
+message BatchSavePapersRequest {
+  repeated SavePaperRequest papers = 1;
+}
+
+message PaperSaveItem {
+  string title = 1;
+  string authors = 2;
+  int64 id = 3;
+  string client_key = 4;
+}
+
+message BatchSavePapersResponse {
+  int32 code = 1;
+  bool success = 2;
+  repeated PaperSaveItem data = 3;
+  string message = 4;
+  google.protobuf.Struct other = 5;
+}

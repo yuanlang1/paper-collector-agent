@@ -1,0 +1,38 @@
+{
+  "ok": true,
+  "source": "DBLP",
+  "run_id": "live-paper-search-rag-db5e3cdcb5834386bf1aa8e009c997eb",
+  "step_key": "search_dblp",
+  "query": "RAG retrieval-augmented generation evaluation benchmark",
+  "search_query": null,
+  "total_results": 0,
+  "returned_count": 0,
+  "papers": [],
+  "metadata": {
+    "plan_reasoning": "DBLP 不支持布尔逻辑或排除词，因此仅使用核心关键词组合成 query，并设置年份范围 2023–2026。排除医疗相关论文将在后处理阶段完成。",
+    "plan_arguments": {
+      "query": "RAG retrieval-augmented generation evaluation benchmark",
+      "f": 0,
+      "h": 3,
+      "total_limit": 3,
+      "max_pages": 1,
+      "year_from": 2023,
+      "year_to": 2026,
+      "venue": null,
+      "paper_type": "all"
+    },
+    "pagination": {
+      "initial_offset": 0,
+      "page_size": 3,
+      "total_limit": 3,
+      "max_pages": 1,
+      "pages_fetched": 1,
+      "raw_fetched_count": 0,
+      "returned_count": 0,
+      "has_next": false,
+      "next_offset": null,
+      "stop_reason": "max_pages_reached"
+    },
+    "page_errors": []
+  }
+}

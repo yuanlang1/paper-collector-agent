@@ -1,0 +1,120 @@
+{
+  "ok": true,
+  "source": "Google Scholar",
+  "run_id": "live-paper-search-rag-5fd0822a5e3f463ab46002c9b89bea7d",
+  "step_key": "search_google_scholar",
+  "query": "(RAG OR \"retrieval-augmented generation\" OR \"retrieval-augmented language models\" OR \"RAG systems\") AND (evaluation OR benchmark) -medical -healthcare -clinical",
+  "search_query": null,
+  "total_results": 3830,
+  "returned_count": 3,
+  "papers": [
+    {
+      "source": "google_scholar",
+      "source_id": "5y1_RZMvQwAJ",
+      "title": "Rankify: A comprehensive python toolkit for retrieval, re-ranking, and retrieval-augmented generation",
+      "authors": [
+        "A Abdallah",
+        "B Piryani",
+        "J Mozafari"
+      ],
+      "abstract": null,
+      "snippet": "… -end RAG evaluation with RAGAS metrics in a single pip-installable package. RANKIFY targets NLP researchers and practitioners who need reproducible, end-to-end retrieval and RAG …",
+      "published": null,
+      "year": 2026,
+      "updated": null,
+      "venue": null,
+      "publication_summary": "A Abdallah, B Piryani, J Mozafari… - Proceedings of the …, 2026 - aclanthology.org",
+      "doi": null,
+      "citation_count": 51,
+      "scholar_result_id": "5y1_RZMvQwAJ",
+      "cites_id": "18911133012274663",
+      "cluster_id": "18911133012274663",
+      "versions_count": 2,
+      "landing_url": "https://aclanthology.org/2026.acl-demo.21/",
+      "pdf_url": "https://aclanthology.org/2026.acl-demo.21.pdf",
+      "scholar_cited_by_url": "https://scholar.google.com/scholar?cites=18911133012274663&as_sdt=5,34&sciodt=0,34&hl=en&num=3"
+    },
+    {
+      "source": "google_scholar",
+      "source_id": "ZthzJtL6eSwJ",
+      "title": "Evaluation of retrieval-augmented generation: A survey",
+      "authors": [
+        "H Yu",
+        "A Gan",
+        "K Zhang",
+        "S Tong",
+        "Q Liu",
+        "Z Liu"
+      ],
+      "abstract": null,
+      "snippet": "… by RAG systems, we introduce an analytical framework, referred to as A Unified Evaluation Process of RAG (… to RAG systems and guide for readers to comprehend the effectiveness of …",
+      "published": null,
+      "year": 2024,
+      "updated": null,
+      "venue": null,
+      "publication_summary": "H Yu, A Gan, K Zhang, S Tong, Q Liu, Z Liu - CCF Conference on Big Data, 2024 - Springer",
+      "doi": null,
+      "citation_count": 514,
+      "scholar_result_id": "ZthzJtL6eSwJ",
+      "cites_id": "3204868390346020966",
+      "cluster_id": "3204868390346020966",
+      "versions_count": 3,
+      "landing_url": "https://link.springer.com/chapter/10.1007/978-981-96-1024-2_8",
+      "pdf_url": "https://arxiv.org/pdf/2405.07437",
+      "scholar_cited_by_url": "https://scholar.google.com/scholar?cites=3204868390346020966&as_sdt=5,34&sciodt=0,34&hl=en&num=3"
+    },
+    {
+      "source": "google_scholar",
+      "source_id": "B2nSovUYQLsJ",
+      "title": "Chain-of-retrieval augmented generation",
+      "authors": [
+        "L Wang",
+        "H Chen",
+        "N Yang",
+        "X Huang"
+      ],
+      "abstract": null,
+      "snippet": "… KILT Benchmark We present several strong systems on the KILT benchmark in Table 2, including KILT-RAG [27], SEAL [2], Atlas-11B [11], RA-DIT 65B [23], and FiD with RS [9]. For …",
+      "published": null,
+      "year": 2026,
+      "updated": null,
+      "venue": null,
+      "publication_summary": "L Wang, H Chen, N Yang, X Huang… - Advances in Neural …, 2026 - proceedings.neurips.cc",
+      "doi": null,
+      "citation_count": 139,
+      "scholar_result_id": "B2nSovUYQLsJ",
+      "cites_id": "13492811926879758599",
+      "cluster_id": "13492811926879758599",
+      "versions_count": 8,
+      "landing_url": "https://proceedings.neurips.cc/paper_files/paper/2025/hash/566aad4fac1acf17fd1ae8c3aef75326-Abstract-Conference.html",
+      "pdf_url": "https://proceedings.neurips.cc/paper_files/paper/2025/file/566aad4fac1acf17fd1ae8c3aef75326-Paper-Conference.pdf",
+      "scholar_cited_by_url": "https://scholar.google.com/scholar?cites=13492811926879758599&as_sdt=5,34&sciodt=0,34&hl=en&num=3"
+    }
+  ],
+  "metadata": {
+    "plan_reasoning": "Google Scholar 支持使用减号排除术语，因此在查询中加入排除项，并结合关键词、同义词及评测术语，同时限定年份范围以匹配用户需求。",
+    "plan_arguments": {
+      "query": "(RAG OR \"retrieval-augmented generation\" OR \"retrieval-augmented language models\" OR \"RAG systems\") AND (evaluation OR benchmark) -medical -healthcare -clinical",
+      "start": 0,
+      "num": 3,
+      "total_limit": 3,
+      "max_pages": 1,
+      "year_from": 2023,
+      "year_to": 2026,
+      "review_only": false
+    },
+    "pagination": {
+      "initial_offset": 0,
+      "page_size": 3,
+      "total_limit": 3,
+      "max_pages": 1,
+      "pages_fetched": 1,
+      "raw_fetched_count": 3,
+      "returned_count": 3,
+      "has_next": true,
+      "next_offset": 3,
+      "stop_reason": "total_limit_reached"
+    },
+    "page_errors": []
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "ok": false,
+  "source": "DBLP",
+  "run_id": "live-paper-search-rag-1ee6200180b84ca7a3f467ddeb015ab0",
+  "step_key": "search_dblp",
+  "query": "RAG retrieval-augmented generation evaluation benchmark \"retrieval-augmented language models\" \"RAG systems\"",
+  "search_query": null,
+  "total_results": 0,
+  "returned_count": 0,
+  "papers": [],
+  "metadata": {
+    "plan_reasoning": "DBLP 支持关键词查询和年份过滤。将关键词与同义词合并为 query，并设置 year_from 和 year_to。DBLP 无法表达排除术语，交由后处理。",
+    "plan_arguments": {
+      "query": "RAG retrieval-augmented generation evaluation benchmark \"retrieval-augmented language models\" \"RAG systems\"",
+      "f": 0,
+      "h": 3,
+      "total_limit": 3,
+      "max_pages": 1,
+      "year_from": 2023,
+      "year_to": 2026,
+      "venue": null,
+      "paper_type": "all"
+    },
+    "pagination": {},
+    "page_errors": [
+      "<!DOCTYPE html>\n<html lang=\"en\">\n<head><meta charset=\"UTF-8\"><title>dblp: error 500</title><link rel=\"home\" href=\"https://dblp.org\"><link rel=\"search\" type=\"application/opensearchdescription+xml\" href=\"https://dblp.org/xml/osd.xml\" title=\"dblp search\"><link rel=\"apple-touch-icon\" type=\"image/png\" sizes=\"192x192\" href=\"https://dblp.org/img/dblp.icon.192x192.png\"><link rel=\"icon\" type=\"image/png\" sizes=\"192x192\" href=\"https://dblp.org/img/dblp.icon.192x192.png\"><link rel=\"icon\" type=\"image/png\" si"
+    ]
+  }
+}

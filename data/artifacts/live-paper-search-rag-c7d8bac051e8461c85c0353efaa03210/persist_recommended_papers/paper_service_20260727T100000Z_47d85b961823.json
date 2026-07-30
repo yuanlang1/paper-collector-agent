@@ -1,0 +1,40 @@
+{
+  "run_id": "live-paper-search-rag-c7d8bac051e8461c85c0353efaa03210",
+  "step_key": "persist_recommended_papers",
+  "input_manifest": "artifact://live-paper-search-rag-c7d8bac051e8461c85c0353efaa03210/recommend_papers/recommendation_20260727T095959Z_12a562ce0760.json",
+  "results": [
+    {
+      "client_key": "live-paper-search-rag-c7d8bac051e8461c85c0353efaa03210:0",
+      "title": "Retrieval-augmented generation for large language models: A survey",
+      "venue_id": 0,
+      "venue_save_status": "not_available",
+      "paper_id": 122,
+      "paper_save_status": "saved",
+      "paper_cache_status": "saved",
+      "task_paper_save_status": "saved",
+      "error": null
+    },
+    {
+      "client_key": "live-paper-search-rag-c7d8bac051e8461c85c0353efaa03210:1",
+      "title": "Crud-rag: A comprehensive chinese benchmark for retrieval-augmented generation of large language models",
+      "venue_id": 113,
+      "venue_save_status": "saved",
+      "paper_id": 123,
+      "paper_save_status": "saved",
+      "paper_cache_status": "saved",
+      "task_paper_save_status": "saved",
+      "error": null
+    },
+    {
+      "client_key": "live-paper-search-rag-c7d8bac051e8461c85c0353efaa03210:2",
+      "title": "Evaluation of retrieval-augmented generation: A survey",
+      "venue_id": null,
+      "venue_save_status": "not_started",
+      "paper_id": 121,
+      "paper_save_status": "not_required",
+      "paper_cache_status": "not_started",
+      "task_paper_save_status": "saved",
+      "error": null
+    }
+  ]
+}

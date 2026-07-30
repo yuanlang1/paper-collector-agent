@@ -1,0 +1,1 @@
+"""RAG-related protobuf contracts."""

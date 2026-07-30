@@ -1,0 +1,411 @@
+{
+  "version": 2,
+  "venues": {
+    "corr": {
+      "venue_draft": {
+        "standard_name": "CoRR",
+        "acronym": null,
+        "type": 0,
+        "sci_rank": null,
+        "ccf_rank": null,
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 114
+    },
+    "proceedings of the aaai conference on artificial intelligence": {
+      "venue_draft": {
+        "standard_name": "Proceedings of the AAAI Conference on Artificial Intelligence",
+        "acronym": null,
+        "type": 0,
+        "sci_rank": null,
+        "ccf_rank": "A",
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": null
+    },
+    "acm transactions on information systems": {
+      "venue_draft": {
+        "standard_name": "ACM Transactions on Information Systems",
+        "acronym": null,
+        "type": 1,
+        "sci_rank": "Q1",
+        "ccf_rank": "A",
+        "sci_if": "11.2",
+        "sci_up": "计算机科学2区",
+        "sci_up_small": "计算机：信息系统1区。",
+        "core_rank": null
+      },
+      "venue_id": 113
+    },
+    "communications in computer and information science": {
+      "venue_draft": {
+        "standard_name": "Communications in Computer and Information Science",
+        "acronym": null,
+        "type": 18,
+        "sci_rank": null,
+        "ccf_rank": null,
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 112
+    },
+    "proceedings of the 64th annual meeting of the association for computational linguistics (volume 3: system demonstrations)": {
+      "venue_draft": {
+        "standard_name": "Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (Volume 3: System Demonstrations)",
+        "acronym": null,
+        "type": 0,
+        "sci_rank": null,
+        "ccf_rank": "A",
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": null
+    },
+    "proceedings of the 2024 conference of the north american chapter of the association for computational linguistics: human language technologies (volume 1: long papers)": {
+      "venue_draft": {
+        "standard_name": "Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers)",
+        "acronym": null,
+        "type": 2,
+        "sci_rank": null,
+        "ccf_rank": "B",
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 111
+    },
+    "proceedings of the 63rd annual meeting of the association for computational linguistics (volume 1: long papers)": {
+      "venue_draft": {
+        "standard_name": "Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)",
+        "acronym": null,
+        "type": 2,
+        "sci_rank": null,
+        "ccf_rank": "A",
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 115
+    },
+    "2025 ieee swiss conference on data science (sds)": {
+      "venue_draft": {
+        "standard_name": "2025 IEEE Swiss Conference on Data Science (SDS)",
+        "acronym": null,
+        "type": 2,
+        "sci_rank": null,
+        "ccf_rank": null,
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 116
+    },
+    "proceedings of the 33rd acm international conference on multimedia": {
+      "venue_draft": {
+        "standard_name": "ACM Multimedia",
+        "acronym": null,
+        "type": 2,
+        "sci_rank": null,
+        "ccf_rank": null,
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 117
+    },
+    "acm multimedia": {
+      "venue_draft": {
+        "standard_name": "ACM Multimedia",
+        "acronym": null,
+        "type": 2,
+        "sci_rank": null,
+        "ccf_rank": null,
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 117
+    },
+    "trans. mach. learn. res.": {
+      "venue_draft": {
+        "standard_name": "Trans. Mach. Learn. Res.",
+        "acronym": null,
+        "type": 0,
+        "sci_rank": null,
+        "ccf_rank": null,
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": null
+    },
+    "emnlp": {
+      "venue_draft": {
+        "standard_name": "EMNLP",
+        "acronym": null,
+        "type": 2,
+        "sci_rank": null,
+        "ccf_rank": "B",
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 118
+    },
+    "findings of the association for computational linguistics: emnlp 2025": {
+      "venue_draft": {
+        "standard_name": "EMNLP",
+        "acronym": null,
+        "type": 2,
+        "sci_rank": null,
+        "ccf_rank": "B",
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 118
+    },
+    "2024 ieee/cvf winter conference on applications of computer vision (wacv)": {
+      "venue_draft": {
+        "standard_name": "WACV",
+        "acronym": null,
+        "type": 2,
+        "sci_rank": null,
+        "ccf_rank": null,
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 119
+    },
+    "wacv": {
+      "venue_draft": {
+        "standard_name": "WACV",
+        "acronym": null,
+        "type": 2,
+        "sci_rank": null,
+        "ccf_rank": null,
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 119
+    },
+    "acl": {
+      "venue_draft": {
+        "standard_name": "ACL",
+        "acronym": null,
+        "type": 2,
+        "sci_rank": null,
+        "ccf_rank": "A",
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 120
+    },
+    "findings of the association for computational linguistics acl 2024": {
+      "venue_draft": {
+        "standard_name": "ACL",
+        "acronym": null,
+        "type": 2,
+        "sci_rank": null,
+        "ccf_rank": "A",
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 120
+    },
+    "2025 asia pacific signal and information processing association annual summit and conference (apsipa asc)": {
+      "venue_draft": {
+        "standard_name": "2025 Asia Pacific Signal and Information Processing Association Annual Summit and Conference (APSIPA ASC)",
+        "acronym": null,
+        "type": 2,
+        "sci_rank": null,
+        "ccf_rank": null,
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 121
+    },
+    "empirical software engineering": {
+      "venue_draft": {
+        "standard_name": "Empirical Software Engineering",
+        "acronym": null,
+        "type": 1,
+        "sci_rank": "Q2",
+        "ccf_rank": "B",
+        "sci_if": "3.4",
+        "sci_up": "计算机科学2区",
+        "sci_up_small": "计算机：软件工程2区。",
+        "core_rank": null
+      },
+      "venue_id": 122
+    },
+    "2025 ieee international conference on big data (bigdata)": {
+      "venue_draft": {
+        "standard_name": "2025 IEEE International Conference on Big Data (BigData)",
+        "acronym": null,
+        "type": 2,
+        "sci_rank": null,
+        "ccf_rank": "C",
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 123
+    },
+    "proceedings of the 39th ieee/acm international conference on automated software engineering": {
+      "venue_draft": {
+        "standard_name": "Proceedings of the 39th IEEE/ACM International Conference on Automated Software Engineering",
+        "acronym": null,
+        "type": 0,
+        "sci_rank": null,
+        "ccf_rank": "A",
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": null
+    },
+    "2025 ieee/cvf international conference on computer vision (iccv)": {
+      "venue_draft": {
+        "standard_name": "ICCV",
+        "acronym": null,
+        "type": 2,
+        "sci_rank": null,
+        "ccf_rank": "A",
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 124
+    },
+    "iccv": {
+      "venue_draft": {
+        "standard_name": "ICCV",
+        "acronym": null,
+        "type": 2,
+        "sci_rank": null,
+        "ccf_rank": "A",
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 124
+    },
+    "advances in neural information processing systems 37": {
+      "venue_draft": {
+        "standard_name": "Advances in Neural Information Processing Systems 37",
+        "acronym": null,
+        "type": 0,
+        "sci_rank": null,
+        "ccf_rank": "A",
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": null
+    },
+    "2024 ieee/cvf conference on computer vision and pattern recognition workshops (cvprw)": {
+      "venue_draft": {
+        "standard_name": "2024 IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops (CVPRW)",
+        "acronym": null,
+        "type": 2,
+        "sci_rank": null,
+        "ccf_rank": "A",
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 125
+    },
+    "2025 ieee/cvf conference on computer vision and pattern recognition (cvpr)": {
+      "venue_draft": {
+        "standard_name": "2025 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)",
+        "acronym": null,
+        "type": 2,
+        "sci_rank": null,
+        "ccf_rank": "A",
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 126
+    },
+    "2024 ieee/cvf conference on computer vision and pattern recognition (cvpr)": {
+      "venue_draft": {
+        "standard_name": "2024 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)",
+        "acronym": null,
+        "type": 2,
+        "sci_rank": null,
+        "ccf_rank": "A",
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 127
+    },
+    "lecture notes in computer science": {
+      "venue_draft": {
+        "standard_name": "Lecture Notes in Computer Science",
+        "acronym": null,
+        "type": 18,
+        "sci_rank": null,
+        "ccf_rank": null,
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 128
+    },
+    "icml": {
+      "venue_draft": {
+        "standard_name": "ICML",
+        "acronym": null,
+        "type": 0,
+        "sci_rank": null,
+        "ccf_rank": "A",
+        "sci_if": "0",
+        "sci_up": null,
+        "sci_up_small": null,
+        "core_rank": null
+      },
+      "venue_id": 129
+    }
+  }
+}

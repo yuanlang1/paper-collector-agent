@@ -1,0 +1,40 @@
+{
+  "run_id": "live-paper-search-rag-5fd0822a5e3f463ab46002c9b89bea7d",
+  "step_key": "persist_recommended_papers",
+  "input_manifest": "artifact://live-paper-search-rag-5fd0822a5e3f463ab46002c9b89bea7d/recommend_papers/recommendation_20260727T081027Z_301ab62a920e.json",
+  "results": [
+    {
+      "client_key": "live-paper-search-rag-5fd0822a5e3f463ab46002c9b89bea7d:0",
+      "title": "Rankify: A comprehensive python toolkit for retrieval, re-ranking, and retrieval-augmented generation",
+      "venue_id": null,
+      "venue_save_status": "failed",
+      "paper_id": null,
+      "paper_save_status": "not_started",
+      "paper_cache_status": "not_started",
+      "task_paper_save_status": "not_started",
+      "error": "gRPC call failed: code=INTERNAL, details=Batch save venues failed"
+    },
+    {
+      "client_key": "live-paper-search-rag-5fd0822a5e3f463ab46002c9b89bea7d:1",
+      "title": "Evaluation of retrieval-augmented generation: A survey",
+      "venue_id": null,
+      "venue_save_status": "failed",
+      "paper_id": null,
+      "paper_save_status": "not_started",
+      "paper_cache_status": "not_started",
+      "task_paper_save_status": "not_started",
+      "error": "gRPC call failed: code=INTERNAL, details=Batch save venues failed"
+    },
+    {
+      "client_key": "live-paper-search-rag-5fd0822a5e3f463ab46002c9b89bea7d:2",
+      "title": "Chain-of-retrieval augmented generation",
+      "venue_id": null,
+      "venue_save_status": "missing",
+      "paper_id": null,
+      "paper_save_status": "not_started",
+      "paper_cache_status": "not_started",
+      "task_paper_save_status": "not_started",
+      "error": "missing valid venue draft"
+    }
+  ]
+}

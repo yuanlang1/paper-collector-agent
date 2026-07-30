@@ -1,0 +1,29 @@
+{
+  "ok": false,
+  "source": "DBLP",
+  "run_id": "live-paper-search-rag-72459613976a4f579ceaaf84db678a26",
+  "step_key": "search_dblp",
+  "query": "RAG retrieval-augmented generation evaluation benchmark retrieval-augmented language models RAG systems",
+  "search_query": null,
+  "total_results": 0,
+  "returned_count": 0,
+  "papers": [],
+  "metadata": {
+    "plan_reasoning": "DBLP主要索引会议与期刊论文元数据，适合检索benchmark类工作。将keywords与synonyms合并为query，并限定年份范围2023–2026。DBLP不支持直接排除术语，交由后处理过滤。",
+    "plan_arguments": {
+      "query": "RAG retrieval-augmented generation evaluation benchmark retrieval-augmented language models RAG systems",
+      "f": 0,
+      "h": 3,
+      "total_limit": 3,
+      "max_pages": 1,
+      "year_from": 2023,
+      "year_to": 2026,
+      "venue": null,
+      "paper_type": "all"
+    },
+    "pagination": {},
+    "page_errors": [
+      "<!DOCTYPE html>\n<html lang=\"en\">\n<head><meta charset=\"UTF-8\"><title>dblp: error 500</title><link rel=\"home\" href=\"https://dblp.org\"><link rel=\"search\" type=\"application/opensearchdescription+xml\" href=\"https://dblp.org/xml/osd.xml\" title=\"dblp search\"><link rel=\"apple-touch-icon\" type=\"image/png\" sizes=\"192x192\" href=\"https://dblp.org/img/dblp.icon.192x192.png\"><link rel=\"icon\" type=\"image/png\" sizes=\"192x192\" href=\"https://dblp.org/img/dblp.icon.192x192.png\"><link rel=\"icon\" type=\"image/png\" si"
+    ]
+  }
+}

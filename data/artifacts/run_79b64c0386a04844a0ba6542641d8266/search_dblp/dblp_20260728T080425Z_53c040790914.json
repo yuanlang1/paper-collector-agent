@@ -1,0 +1,262 @@
+{
+  "ok": true,
+  "source": "DBLP",
+  "run_id": "run_79b64c0386a04844a0ba6542641d8266",
+  "step_key": "search_dblp",
+  "query": "token compression|token reduction|token pruning|token merging|token skipping|token condensation|token summarization",
+  "search_query": null,
+  "total_results": 0,
+  "returned_count": 10,
+  "papers": [
+    {
+      "source": "dblp",
+      "source_id": "conf/acl/RagazziIMP24",
+      "title": "What Are You Token About? Differentiable Perturbed Top-k Token Selection for Scientific Document Summarization.",
+      "authors": [
+        "Luca Ragazzi",
+        "Paolo Italiani",
+        "Gianluca Moro",
+        "Mattia Panni"
+      ],
+      "abstract": null,
+      "published": null,
+      "year": 2024,
+      "updated": null,
+      "venue": "ACL",
+      "publication_type": "Conference and Workshop Papers",
+      "doi": "10.18653/V1/2024.FINDINGS-ACL.561",
+      "dblp_key": "conf/acl/RagazziIMP24",
+      "landing_url": "https://dblp.org/rec/conf/acl/RagazziIMP24",
+      "external_url": "https://doi.org/10.18653/v1/2024.findings-acl.561",
+      "pdf_url": null
+    },
+    {
+      "source": "dblp",
+      "source_id": "journals/kbs/HuangBGL26",
+      "title": "Dynamic token halting for efficient abstractive summarization with importance-aware regularization.",
+      "authors": [
+        "Heyan Huang",
+        "Yu Bai 0018",
+        "Yang Gao 0016",
+        "Minpeng Liao"
+      ],
+      "abstract": null,
+      "published": null,
+      "year": 2026,
+      "updated": null,
+      "venue": "Knowl. Based Syst.",
+      "publication_type": "Journal Articles",
+      "doi": "10.1016/J.KNOSYS.2026.116105",
+      "dblp_key": "journals/kbs/HuangBGL26",
+      "landing_url": "https://dblp.org/rec/journals/kbs/HuangBGL26",
+      "external_url": "https://doi.org/10.1016/j.knosys.2026.116105",
+      "pdf_url": null
+    },
+    {
+      "source": "dblp",
+      "source_id": "conf/acl/BaldeRMG26",
+      "title": "Learning Faster with Better Tokens: Parameter-Efficient Vocabulary Adaptation for Specialized Text Summarization.",
+      "authors": [
+        "Gunjan Balde",
+        "Soumyadeep Roy",
+        "Mainack Mondal",
+        "Niloy Ganguly"
+      ],
+      "abstract": null,
+      "published": null,
+      "year": 2026,
+      "updated": null,
+      "venue": "ACL",
+      "publication_type": "Conference and Workshop Papers",
+      "doi": null,
+      "dblp_key": "conf/acl/BaldeRMG26",
+      "landing_url": "https://dblp.org/rec/conf/acl/BaldeRMG26",
+      "external_url": "https://aclanthology.org/2026.acl-long.2088/",
+      "pdf_url": null
+    },
+    {
+      "source": "dblp",
+      "source_id": "conf/acl/ChenRLWGJ26",
+      "title": "TRAC: Token-level Reward Assignment for Coherent Abstractive Summarization.",
+      "authors": [
+        "Xuanqi Chen",
+        "Ziying Rong",
+        "Xinfeng Liao",
+        "Lianxi Wang 0001",
+        "Ying Gao",
+        "Shengyi Jiang"
+      ],
+      "abstract": null,
+      "published": null,
+      "year": 2026,
+      "updated": null,
+      "venue": "ACL",
+      "publication_type": "Conference and Workshop Papers",
+      "doi": null,
+      "dblp_key": "conf/acl/ChenRLWGJ26",
+      "landing_url": "https://dblp.org/rec/conf/acl/ChenRLWGJ26",
+      "external_url": "https://aclanthology.org/2026.findings-acl.1873/",
+      "pdf_url": null
+    },
+    {
+      "source": "dblp",
+      "source_id": "journals/corr/abs-2601-20147",
+      "title": "Not All Tokens Matter: Data-Centric Optimization for Efficient Code Summarization.",
+      "authors": [
+        "Saima Afrin",
+        "Zaiyu Cheng",
+        "Tushar Sharma 0001",
+        "Alexander Serebrenik",
+        "Massimiliano Di Penta",
+        "Antonio Mastropaolo"
+      ],
+      "abstract": null,
+      "published": null,
+      "year": 2026,
+      "updated": null,
+      "venue": "CoRR",
+      "publication_type": "Informal and Other Publications",
+      "doi": "10.48550/ARXIV.2601.20147",
+      "dblp_key": "journals/corr/abs-2601-20147",
+      "landing_url": "https://dblp.org/rec/journals/corr/abs-2601-20147",
+      "external_url": "https://doi.org/10.48550/arXiv.2601.20147",
+      "pdf_url": null
+    },
+    {
+      "source": "dblp",
+      "source_id": "journals/corr/abs-2605-17379",
+      "title": "Learning Faster with Better Tokens: Parameter-Efficient Vocabulary Adaptation for Specialized Text Summarization.",
+      "authors": [
+        "Gunjan Balde",
+        "Soumyadeep Roy",
+        "Mainack Mondal",
+        "Niloy Ganguly"
+      ],
+      "abstract": null,
+      "published": null,
+      "year": 2026,
+      "updated": null,
+      "venue": "CoRR",
+      "publication_type": "Informal and Other Publications",
+      "doi": "10.48550/ARXIV.2605.17379",
+      "dblp_key": "journals/corr/abs-2605-17379",
+      "landing_url": "https://dblp.org/rec/journals/corr/abs-2605-17379",
+      "external_url": "https://doi.org/10.48550/arXiv.2605.17379",
+      "pdf_url": null
+    },
+    {
+      "source": "dblp",
+      "source_id": "conf/mlhc/PiyaB25",
+      "title": "ConTextual: Improving Clinical Text Summarization in LLMs with Context-preserving Token Filtering and Knowledge Graphs.",
+      "authors": [
+        "Fahmida Liza Piya",
+        "Rahmatollah Beheshti"
+      ],
+      "abstract": null,
+      "published": null,
+      "year": 2025,
+      "updated": null,
+      "venue": "MLHC",
+      "publication_type": "Conference and Workshop Papers",
+      "doi": null,
+      "dblp_key": "conf/mlhc/PiyaB25",
+      "landing_url": "https://dblp.org/rec/conf/mlhc/PiyaB25",
+      "external_url": "https://proceedings.mlr.press/v298/piya25a.html",
+      "pdf_url": null
+    },
+    {
+      "source": "dblp",
+      "source_id": "conf/mm/Jiang0Z0YDJ25",
+      "title": "VISA: Group-wise Visual Token Selection and Aggregation via Graph Summarization for Efficient MLLMs Inference.",
+      "authors": [
+        "Pengfei Jiang",
+        "Hanjun Li 0002",
+        "Linglan Zhao",
+        "Fei Chao 0001",
+        "Ke Yan",
+        "Shouhong Ding",
+        "Rongrong Ji"
+      ],
+      "abstract": null,
+      "published": null,
+      "year": 2025,
+      "updated": null,
+      "venue": "ACM Multimedia",
+      "publication_type": "Conference and Workshop Papers",
+      "doi": "10.1145/3746027.3755792",
+      "dblp_key": "conf/mm/Jiang0Z0YDJ25",
+      "landing_url": "https://dblp.org/rec/conf/mm/Jiang0Z0YDJ25",
+      "external_url": "https://doi.org/10.1145/3746027.3755792",
+      "pdf_url": null
+    },
+    {
+      "source": "dblp",
+      "source_id": "conf/pkdd/MarozzoBCL25",
+      "title": "Balanced and Token-Efficient Summarization of User Reviews via Stratified Sampling and Large Language Models.",
+      "authors": [
+        "Fabrizio Marozzo",
+        "Loris Belcastro",
+        "Cristian Cosentino",
+        "Pietro Liò"
+      ],
+      "abstract": null,
+      "published": null,
+      "year": 2025,
+      "updated": null,
+      "venue": "ECML/PKDD",
+      "publication_type": "Conference and Workshop Papers",
+      "doi": "10.1007/978-3-032-06078-5_17",
+      "dblp_key": "conf/pkdd/MarozzoBCL25",
+      "landing_url": "https://dblp.org/rec/conf/pkdd/MarozzoBCL25",
+      "external_url": "https://doi.org/10.1007/978-3-032-06078-5_17",
+      "pdf_url": null
+    },
+    {
+      "source": "dblp",
+      "source_id": "journals/corr/abs-2504-16394",
+      "title": "ConTextual: Improving Clinical Text Summarization in LLMs with Context-preserving Token Filtering and Knowledge Graphs.",
+      "authors": [
+        "Fahmida Liza Piya",
+        "Rahmatollah Beheshti"
+      ],
+      "abstract": null,
+      "published": null,
+      "year": 2025,
+      "updated": null,
+      "venue": "CoRR",
+      "publication_type": "Informal and Other Publications",
+      "doi": "10.48550/ARXIV.2504.16394",
+      "dblp_key": "journals/corr/abs-2504-16394",
+      "landing_url": "https://dblp.org/rec/journals/corr/abs-2504-16394",
+      "external_url": "https://doi.org/10.48550/arXiv.2504.16394",
+      "pdf_url": null
+    }
+  ],
+  "metadata": {
+    "plan_reasoning": "DBLP使用管道符分隔多个检索词，将核心关键词和同义词合并为一条query进行广义检索，覆盖用户确认的所有相关术语。",
+    "plan_arguments": {
+      "query": "token compression|token reduction|token pruning|token merging|token skipping|token condensation|token summarization",
+      "f": 0,
+      "h": 50,
+      "total_limit": 10,
+      "max_pages": 2,
+      "year_from": null,
+      "year_to": null,
+      "venue": null,
+      "paper_type": "all"
+    },
+    "pagination": {
+      "initial_offset": 0,
+      "page_size": 50,
+      "total_limit": 10,
+      "max_pages": 2,
+      "pages_fetched": 1,
+      "raw_fetched_count": 10,
+      "returned_count": 10,
+      "has_next": false,
+      "next_offset": null,
+      "stop_reason": "total_limit_reached"
+    },
+    "page_errors": []
+  }
+}

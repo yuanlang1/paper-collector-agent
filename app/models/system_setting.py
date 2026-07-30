@@ -10,7 +10,7 @@ class SystemSetting(Base):
     __tablename__ = "system_settings"
 
     key = Column(String(100), primary_key=True, index=True)
-    value = Column(Text, nullable=True)  # 存储 JSON 字符串或普通文本
+    value = Column(Text, nullable=True)
 
     def __repr__(self):
         return f"<SystemSetting(key='{self.key}', value='{self.value[:20]}...')>"

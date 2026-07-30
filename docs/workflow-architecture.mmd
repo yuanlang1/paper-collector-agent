@@ -1,0 +1,36 @@
+flowchart TD
+    U["用户请求"] --> MG["主图: MainAgentState"]
+    MG --> S["solve: 决策 direct / tool / subagent"]
+    S -->|"direct"| FIN["final: 生成用户回复"]
+    S -->|"tool"| TOOL["tool: 执行原子工具"]
+    TOOL --> S
+
+    S -->|"paper_search_agent"| C["confirm: interrupt 后恢复"]
+    C -->|"拒绝"| S
+    C -->|"批准"| PREP["prepare_paper_search: 构造共享请求"]
+    PREP --> PSG["paper_search: 编译后的原生子图节点"]
+
+    subgraph PAPER_SEARCH["论文检索子图: PaperSearchWorkflowState"]
+        PSG --> INIT["initialize: 读取 paper_search_request"]
+        INIT --> I["理解意图与构建检索标签"]
+        I --> T["创建论文检索任务"]
+        T --> Q["生成多源查询计划"]
+        Q --> A["arXiv -> DBLP -> Google Scholar"]
+        A --> F["标准化、去重、过滤"]
+        F --> RV["检索质量复盘"]
+        RV -->|"需补充"| SP["补充检索规划"]
+        SP --> A
+        RV -->|"足够"| E["元数据与内容富化"]
+        E --> CR["Crossref 富化"]
+        CR --> V["期刊/会议解析"]
+        V --> P["下载 PDF"]
+        P --> AB["补全摘要"]
+        AB --> RE["推荐排序"]
+        RE --> PE["持久化论文与任务关系"]
+        PE --> CLEAN["删除本次任务下载的 PDF"]
+        CLEAN --> TS["更新任务状态"]
+        TS --> H["finalize_handoff: 写入共享结果"]
+    end
+
+    H --> COMPLETE["complete_paper_search: 转为 ActionResult"]
+    COMPLETE --> S

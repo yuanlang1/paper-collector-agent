@@ -1,0 +1,41 @@
+{
+  "ok": true,
+  "source": "arXiv",
+  "run_id": "run_79b64c0386a04844a0ba6542641d8266",
+  "step_key": "search_arxiv",
+  "query": "token compression OR token reduction OR token pruning OR token merging OR token skipping OR token condensation OR token summarization",
+  "search_query": "all:\"token compression OR token reduction OR token pruning OR token merging OR token skipping OR token condensation OR token summarization\"",
+  "total_results": 0,
+  "returned_count": 0,
+  "papers": [],
+  "metadata": {
+    "plan_reasoning": "用户意图为检索token compression方法相关论文，使用核心关键词和同义词构建广义检索式，覆盖topic和synonyms中的所有术语，search_type使用topic进行主题检索。",
+    "plan_arguments": {
+      "query": "token compression OR token reduction OR token pruning OR token merging OR token skipping OR token condensation OR token summarization",
+      "arxiv_ids": [],
+      "search_type": "topic",
+      "category": null,
+      "year_from": null,
+      "year_to": null,
+      "start": 0,
+      "max_results": 50,
+      "total_limit": 10,
+      "max_pages": 2,
+      "sort": "relevance",
+      "include_abstract": true
+    },
+    "pagination": {
+      "initial_offset": 0,
+      "page_size": 50,
+      "total_limit": 10,
+      "max_pages": 2,
+      "pages_fetched": 1,
+      "raw_fetched_count": 0,
+      "returned_count": 0,
+      "has_next": false,
+      "next_offset": null,
+      "stop_reason": "upstream_exhausted"
+    },
+    "page_errors": []
+  }
+}

@@ -1,0 +1,1040 @@
+{
+  "run_id": "run_f18b486ddb4842f0a585a75f88c4dcf0",
+  "step_key": "normalize_deduplicate_filter",
+  "paper_info_schema": "paper_info_v1",
+  "papers": [
+    {
+      "dedup_key": "doi:10.48550/arxiv.2506.22396",
+      "paper_info": {
+        "title": "QuickSilver - Speeding up LLM Inference through Dynamic Token Halting, KV Skipping, Contextual Token Fusion, and Adaptive Matryoshka Quantization.",
+        "authors": "Danush Khanna, Aditya Kumar Guru, Srivarshinee Sridhar, Zidan Ahmed, Rubhav Bahirwani, Meetu Malhotra, Vinija Jain, Aman Chadha, Amitava Das 0001, Kripabandhu Ghosh",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": "10.48550/arxiv.2506.22396",
+        "venue_id": null,
+        "citations": 0,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "DBLP",
+        "pdf_url": null,
+        "abstract_url": "https://dblp.org/rec/journals/corr/abs-2506-22396"
+      },
+      "source_refs": [
+        {
+          "source": "DBLP",
+          "source_id": "journals/corr/abs-2506-22396",
+          "doi": "10.48550/ARXIV.2506.22396",
+          "arxiv_id": null,
+          "landing_url": "https://dblp.org/rec/journals/corr/abs-2506-22396"
+        }
+      ],
+      "venue_candidates": [
+        "CoRR"
+      ],
+      "pdf_candidates": [],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "doi:10.1109/tcsi.2024.3446662",
+      "paper_info": {
+        "title": "An Energy-Efficient CNN/Transformer Hybrid Neural Semantic Segmentation Processor With Chunk-Based Bit Plane Data Compression and Similarity-Based Token-Level Skipping Exploitation.",
+        "authors": "Jongjun Park, Seryeong Kim, Wonhoon Park, Seokchan Song, Hoi-Jun Yoo",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": "10.1109/tcsi.2024.3446662",
+        "venue_id": null,
+        "citations": 0,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "DBLP",
+        "pdf_url": null,
+        "abstract_url": "https://dblp.org/rec/journals/tcasI/ParkKPSY24"
+      },
+      "source_refs": [
+        {
+          "source": "DBLP",
+          "source_id": "journals/tcasI/ParkKPSY24",
+          "doi": "10.1109/TCSI.2024.3446662",
+          "arxiv_id": null,
+          "landing_url": "https://dblp.org/rec/journals/tcasI/ParkKPSY24"
+        }
+      ],
+      "venue_candidates": [
+        "IEEE Trans. Circuits Syst. I Regul. Pap."
+      ],
+      "pdf_candidates": [],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "doi:10.48550/arxiv.2601.13155",
+      "paper_info": {
+        "title": "Probe and Skip: Self-Predictive Token Skipping for Efficient Long-Context LLM Inference.",
+        "authors": "Zimeng Wu, Donghao Wang, Chaozhe Jin, Jiaxin Chen 0002, Yunhong Wang 0001",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": "10.48550/arxiv.2601.13155",
+        "venue_id": null,
+        "citations": 0,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "DBLP",
+        "pdf_url": null,
+        "abstract_url": "https://dblp.org/rec/journals/corr/abs-2601-13155"
+      },
+      "source_refs": [
+        {
+          "source": "DBLP",
+          "source_id": "journals/corr/abs-2601-13155",
+          "doi": "10.48550/ARXIV.2601.13155",
+          "arxiv_id": null,
+          "landing_url": "https://dblp.org/rec/journals/corr/abs-2601-13155"
+        }
+      ],
+      "venue_candidates": [
+        "CoRR"
+      ],
+      "pdf_candidates": [],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "doi:10.1109/iccad66269.2025.11240724",
+      "paper_info": {
+        "title": "SPARTA: Spike-Aware Token Skipping Co-Optimization with Heterogeneous ReRAM-CIM Architecture for Spiking Transformer Acceleration.",
+        "authors": "Pinfeng Jiang, Letian Wang, Yilong Fang, Yi Wang, Mingde Zhu, Xiangshui Miao, Xingsheng Wang",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": "10.1109/iccad66269.2025.11240724",
+        "venue_id": null,
+        "citations": 0,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "DBLP",
+        "pdf_url": null,
+        "abstract_url": "https://dblp.org/rec/conf/iccad/JiangWFWZMW25"
+      },
+      "source_refs": [
+        {
+          "source": "DBLP",
+          "source_id": "conf/iccad/JiangWFWZMW25",
+          "doi": "10.1109/ICCAD66269.2025.11240724",
+          "arxiv_id": null,
+          "landing_url": "https://dblp.org/rec/conf/iccad/JiangWFWZMW25"
+        }
+      ],
+      "venue_candidates": [
+        "ICCAD"
+      ],
+      "pdf_candidates": [],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "doi:10.1109/iccv51701.2025.01986",
+      "paper_info": {
+        "title": "Skip-Vision: Efficient and Scalable Acceleration of Vision-Language Models Via Adaptive Token Skipping.",
+        "authors": "Weili Zeng, Ziyuan Huang, Kaixiang Ji, Yichao Yan",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": "10.1109/iccv51701.2025.01986",
+        "venue_id": null,
+        "citations": 0,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "DBLP",
+        "pdf_url": null,
+        "abstract_url": "https://dblp.org/rec/conf/iccv/ZengHJY25"
+      },
+      "source_refs": [
+        {
+          "source": "DBLP",
+          "source_id": "conf/iccv/ZengHJY25",
+          "doi": "10.1109/ICCV51701.2025.01986",
+          "arxiv_id": null,
+          "landing_url": "https://dblp.org/rec/conf/iccv/ZengHJY25"
+        }
+      ],
+      "venue_candidates": [
+        "ICCV"
+      ],
+      "pdf_candidates": [],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "doi:10.48550/arxiv.2503.21817",
+      "paper_info": {
+        "title": "Skip-Vision: Efficient and Scalable Acceleration of Vision-Language Models via Adaptive Token Skipping.",
+        "authors": "Weili Zeng, Ziyuan Huang, Kaixiang Ji, Yichao Yan",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": "10.48550/arxiv.2503.21817",
+        "venue_id": null,
+        "citations": 0,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "DBLP",
+        "pdf_url": null,
+        "abstract_url": "https://dblp.org/rec/journals/corr/abs-2503-21817"
+      },
+      "source_refs": [
+        {
+          "source": "DBLP",
+          "source_id": "journals/corr/abs-2503-21817",
+          "doi": "10.48550/ARXIV.2503.21817",
+          "arxiv_id": null,
+          "landing_url": "https://dblp.org/rec/journals/corr/abs-2503-21817"
+        }
+      ],
+      "venue_candidates": [
+        "CoRR"
+      ],
+      "pdf_candidates": [],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "doi:10.48550/arxiv.2510.08799",
+      "paper_info": {
+        "title": "SkipSR: Faster Super Resolution with Token Skipping.",
+        "authors": "Rohan Choudhury, Shanchuan Lin, Jianyi Wang, Hao Chen 0102, Qi Zhao, Feng Cheng, Lu Jiang, Kris Kitani, László A. Jeni",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": "10.48550/arxiv.2510.08799",
+        "venue_id": null,
+        "citations": 0,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "DBLP",
+        "pdf_url": null,
+        "abstract_url": "https://dblp.org/rec/journals/corr/abs-2510-08799"
+      },
+      "source_refs": [
+        {
+          "source": "DBLP",
+          "source_id": "journals/corr/abs-2510-08799",
+          "doi": "10.48550/ARXIV.2510.08799",
+          "arxiv_id": null,
+          "landing_url": "https://dblp.org/rec/journals/corr/abs-2510-08799"
+        }
+      ],
+      "venue_candidates": [
+        "CoRR"
+      ],
+      "pdf_candidates": [],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:tokenskip controllable chainofthought compression in llms|h xia",
+      "paper_info": {
+        "title": "Tokenskip: Controllable chain-of-thought compression in llms",
+        "authors": "H Xia, CT Leong, W Wang, Y Li",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 278,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://aclanthology.org/2025.emnlp-main.165.pdf",
+        "abstract_url": "https://aclanthology.org/2025.emnlp-main.165/"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "r01MoYADUPMJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://aclanthology.org/2025.emnlp-main.165/"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://aclanthology.org/2025.emnlp-main.165.pdf"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:skipvision efficient and scalable acceleration of visionlanguage models via adaptive token skipping|w zeng",
+      "paper_info": {
+        "title": "Skip-vision: Efficient and scalable acceleration of vision-language models via adaptive token skipping",
+        "authors": "W Zeng, Z Huang, K Ji, Y Yan",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 12,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://openaccess.thecvf.com/content/ICCV2025/papers/Zeng_Skip-Vision_Efficient_and_Scalable_Acceleration_of_Vision-Language_Models_via_Adaptive_ICCV_2025_paper.pdf",
+        "abstract_url": "https://openaccess.thecvf.com/content/ICCV2025/html/Zeng_Skip-Vision_Efficient_and_Scalable_Acceleration_of_Vision-Language_Models_via_Adaptive_ICCV_2025_paper.html"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "G0wK8AeiNTUJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://openaccess.thecvf.com/content/ICCV2025/html/Zeng_Skip-Vision_Efficient_and_Scalable_Acceleration_of_Vision-Language_Models_via_Adaptive_ICCV_2025_paper.html"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://openaccess.thecvf.com/content/ICCV2025/papers/Zeng_Skip-Vision_Efficient_and_Scalable_Acceleration_of_Vision-Language_Models_via_Adaptive_ICCV_2025_paper.pdf"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:llavaprumerge adaptive token reduction for efficient large multimodal models|y shang",
+      "paper_info": {
+        "title": "Llava-prumerge: Adaptive token reduction for efficient large multimodal models",
+        "authors": "Y Shang, M Cai, B Xu, YJ Lee, Y Yan",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 511,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://arxiv.org/pdf/2403.15388",
+        "abstract_url": "https://arxiv.org/abs/2403.15388"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "c9jxIsGoq-UJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://arxiv.org/abs/2403.15388"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://arxiv.org/pdf/2403.15388"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:prune and merge efficient token compression for vision transformer with spatial information preserved|j mao",
+      "paper_info": {
+        "title": "Prune and merge: Efficient token compression for vision transformer with spatial information preserved",
+        "authors": "J Mao, Y Shen, J Guo, Y Yao, X Hua",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 34,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": null,
+        "abstract_url": "https://ieeexplore.ieee.org/abstract/document/10855481/"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "reE8nL4-e9IJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://ieeexplore.ieee.org/abstract/document/10855481/"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:accelerating transformers with spectrumpreserving token merging|hc tran",
+      "paper_info": {
+        "title": "Accelerating transformers with spectrum-preserving token merging",
+        "authors": "HC Tran, DMH Nguyen, DM Nguyen",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 50,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://www.researchgate.net/profile/Duy-Nguyen-34/publication/385525721_Accelerating_Transformers_with_Spectrum-Preserving_Token_Merging/links/6729342e77f274616d5c4963/Accelerating-Transformers-with-Spectrum-Preserving-Token-Merging.pdf",
+        "abstract_url": null
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "kaVwYdVOlCYJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://www.researchgate.net/profile/Duy-Nguyen-34/publication/385525721_Accelerating_Transformers_with_Spectrum-Preserving_Token_Merging/links/6729342e77f274616d5c4963/Accelerating-Transformers-with-Spectrum-Preserving-Token-Merging.pdf"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://www.researchgate.net/profile/Duy-Nguyen-34/publication/385525721_Accelerating_Transformers_with_Spectrum-Preserving_Token_Merging/links/6729342e77f274616d5c4963/Accelerating-Transformers-with-Spectrum-Preserving-Token-Merging.pdf"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:tempme video temporal token merging for efficient textvideo retrieval|l shen",
+      "paper_info": {
+        "title": "Tempme: Video temporal token merging for efficient text-video retrieval",
+        "authors": "L Shen, T Hao, T He, S Zhao, Y Zhang",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 66,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://proceedings.iclr.cc/paper_files/paper/2025/file/98a5c0470e57d518ade4e56c6ee0b363-Paper-Conference.pdf",
+        "abstract_url": "https://proceedings.iclr.cc/paper_files/paper/2025/hash/98a5c0470e57d518ade4e56c6ee0b363-Abstract-Conference.html"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "HtoVXDaCMFEJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://proceedings.iclr.cc/paper_files/paper/2025/hash/98a5c0470e57d518ade4e56c6ee0b363-Abstract-Conference.html"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://proceedings.iclr.cc/paper_files/paper/2025/file/98a5c0470e57d518ade4e56c6ee0b363-Paper-Conference.pdf"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:efficient transformer adaptation with soft token merging|x yuan",
+      "paper_info": {
+        "title": "Efficient transformer adaptation with soft token merging",
+        "authors": "X Yuan, H Fei, J Baek",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 16,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://openaccess.thecvf.com/content/CVPR2024W/ELVM/papers/Yuan_Efficient_Transformer_Adaptation_with_Soft_Token_Merging_CVPRW_2024_paper.pdf",
+        "abstract_url": "https://openaccess.thecvf.com/content/CVPR2024W/ELVM/html/Yuan_Efficient_Transformer_Adaptation_with_Soft_Token_Merging_CVPRW_2024_paper.html"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "s9ScM-yZIR8J",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://openaccess.thecvf.com/content/CVPR2024W/ELVM/html/Yuan_Efficient_Transformer_Adaptation_with_Soft_Token_Merging_CVPRW_2024_paper.html"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://openaccess.thecvf.com/content/CVPR2024W/ELVM/papers/Yuan_Efficient_Transformer_Adaptation_with_Soft_Token_Merging_CVPRW_2024_paper.pdf"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:automatic pruning rate adjustment for dynamic token reduction in vision transformer r ishibashi and l meng|r ishibashi",
+      "paper_info": {
+        "title": "Automatic pruning rate adjustment for dynamic token reduction in vision transformer: R. Ishibashi and L. Meng",
+        "authors": "R Ishibashi, L Meng",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 30,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://link.springer.com/content/pdf/10.1007/s10489-025-06265-z.pdf",
+        "abstract_url": "https://link.springer.com/article/10.1007/s10489-025-06265-z"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "aDEO3Kas4HoJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://link.springer.com/article/10.1007/s10489-025-06265-z"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://link.springer.com/content/pdf/10.1007/s10489-025-06265-z.pdf"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:lazyllm dynamic token pruning for efficient long context llm inference|q fu",
+      "paper_info": {
+        "title": "Lazyllm: Dynamic token pruning for efficient long context llm inference",
+        "authors": "Q Fu, M Cho, T Merth, S Mehta, M Rastegari",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 112,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://arxiv.org/pdf/2407.14057?",
+        "abstract_url": "https://arxiv.org/abs/2407.14057"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "2ltZRpG4SOEJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://arxiv.org/abs/2407.14057"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://arxiv.org/pdf/2407.14057?"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:tfatm trainingfree adaptive token merging|x zhang",
+      "paper_info": {
+        "title": "TF-ATM: Training-Free Adaptive Token Merging",
+        "authors": "X Zhang, W Xie, Y Li, X Chen, T Hui, J Ma",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 2,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://dl.acm.org/doi/pdf/10.1145/3746027.3754503",
+        "abstract_url": "https://dl.acm.org/doi/abs/10.1145/3746027.3754503"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "RYjkfg_85_kJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://dl.acm.org/doi/abs/10.1145/3746027.3754503"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://dl.acm.org/doi/pdf/10.1145/3746027.3754503"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:divprune diversitybased visual token pruning for large multimodal models|sr alvar",
+      "paper_info": {
+        "title": "Divprune: Diversity-based visual token pruning for large multimodal models",
+        "authors": "SR Alvar, G Singh, M Akbari",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 235,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "http://openaccess.thecvf.com/content/CVPR2025/papers/Alvar_DivPrune_Diversity-based_Visual_Token_Pruning_for_Large_Multimodal_Models_CVPR_2025_paper.pdf",
+        "abstract_url": "http://openaccess.thecvf.com/content/CVPR2025/html/Alvar_DivPrune_Diversity-based_Visual_Token_Pruning_for_Large_Multimodal_Models_CVPR_2025_paper.html"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "U5ZqQw28RIIJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "http://openaccess.thecvf.com/content/CVPR2025/html/Alvar_DivPrune_Diversity-based_Visual_Token_Pruning_for_Large_Multimodal_Models_CVPR_2025_paper.html"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "http://openaccess.thecvf.com/content/CVPR2025/papers/Alvar_DivPrune_Diversity-based_Visual_Token_Pruning_for_Large_Multimodal_Models_CVPR_2025_paper.pdf"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:madtp bridge the gap between token and weight pruning for accelerating vlts|j cao",
+      "paper_info": {
+        "title": "MADTP++: Bridge the Gap Between Token and Weight Pruning for Accelerating VLTs",
+        "authors": "J Cao, C Yu, P Ye, T Chen",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 0,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": null,
+        "abstract_url": "https://ieeexplore.ieee.org/abstract/document/11328907/"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "4t-Evmzp63cJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://ieeexplore.ieee.org/abstract/document/11328907/"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:an analysis on matching mechanisms and token pruning for lateinteraction models|q liu",
+      "paper_info": {
+        "title": "An analysis on matching mechanisms and token pruning for late-interaction models",
+        "authors": "Q Liu, G Guo, J Mao, Z Dou, JR Wen, H Jiang",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 19,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://dl.acm.org/doi/pdf/10.1145/3639818",
+        "abstract_url": "https://dl.acm.org/doi/abs/10.1145/3639818"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "jDjYOWTLijQJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://dl.acm.org/doi/abs/10.1145/3639818"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://dl.acm.org/doi/pdf/10.1145/3639818"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:joint merging and pruning adaptive selection of better token compression strategy|w peng",
+      "paper_info": {
+        "title": "Joint merging and pruning: adaptive selection of better token compression strategy",
+        "authors": "W Peng, L Zeng, L Zhang",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 1,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": null,
+        "abstract_url": "https://www.spiedigitallibrary.org/journals/journal-of-electronic-imaging/volume-33/issue-4/043045/Joint-merging-and-pruning--adaptive-selection-of-better-token/10.1117/1.JEI.33.4.043045.short"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "D2_1cCfGeQwJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://www.spiedigitallibrary.org/journals/journal-of-electronic-imaging/volume-33/issue-4/043045/Joint-merging-and-pruning--adaptive-selection-of-better-token/10.1117/1.JEI.33.4.043045.short"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:madtp multimodal alignmentguided dynamic token pruning for accelerating visionlanguage transformer|j cao",
+      "paper_info": {
+        "title": "Madtp: Multimodal alignment-guided dynamic token pruning for accelerating vision-language transformer",
+        "authors": "J Cao, P Ye, S Li, C Yu, Y Tang",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 96,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://openaccess.thecvf.com/content/CVPR2024/papers/Cao_MADTP_Multimodal_Alignment-Guided_Dynamic_Token_Pruning_for_Accelerating_Vision-Language_Transformer_CVPR_2024_paper.pdf",
+        "abstract_url": "http://openaccess.thecvf.com/content/CVPR2024/html/Cao_MADTP_Multimodal_Alignment-Guided_Dynamic_Token_Pruning_for_Accelerating_Vision-Language_Transformer_CVPR_2024_paper.html"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "vRhDkmU35QEJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "http://openaccess.thecvf.com/content/CVPR2024/html/Cao_MADTP_Multimodal_Alignment-Guided_Dynamic_Token_Pruning_for_Accelerating_Vision-Language_Transformer_CVPR_2024_paper.html"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://openaccess.thecvf.com/content/CVPR2024/papers/Cao_MADTP_Multimodal_Alignment-Guided_Dynamic_Token_Pruning_for_Accelerating_Vision-Language_Transformer_CVPR_2024_paper.pdf"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:token pruning for caching better 9 times acceleration on stable diffusion for free|e zhang",
+      "paper_info": {
+        "title": "Token pruning for caching better: 9 times acceleration on stable diffusion for free",
+        "authors": "E Zhang, B Xiao, J Tang, Q Ma, C Zou, X Ning",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 22,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://arxiv.org/pdf/2501.00375",
+        "abstract_url": "https://arxiv.org/abs/2501.00375"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "87vYsIK4FO4J",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://arxiv.org/abs/2501.00375"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://arxiv.org/pdf/2501.00375"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:aim adaptive inference of multimodal llms via token merging and pruning|y zhong",
+      "paper_info": {
+        "title": "Aim: Adaptive inference of multi-modal llms via token merging and pruning",
+        "authors": "Y Zhong, Z Liu, Y Li, L Wang",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 47,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://openaccess.thecvf.com/content/ICCV2025/papers/Zhong_AIM_Adaptive_Inference_of_Multi-Modal_LLMs_via_Token_Merging_and_ICCV_2025_paper.pdf",
+        "abstract_url": "https://openaccess.thecvf.com/content/ICCV2025/html/Zhong_AIM_Adaptive_Inference_of_Multi-Modal_LLMs_via_Token_Merging_and_ICCV_2025_paper.html"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "pVcr9Nb1q_AJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://openaccess.thecvf.com/content/ICCV2025/html/Zhong_AIM_Adaptive_Inference_of_Multi-Modal_LLMs_via_Token_Merging_and_ICCV_2025_paper.html"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://openaccess.thecvf.com/content/ICCV2025/papers/Zhong_AIM_Adaptive_Inference_of_Multi-Modal_LLMs_via_Token_Merging_and_ICCV_2025_paper.pdf"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:fastvar linear visual autoregressive modeling via cached token pruning|h guo",
+      "paper_info": {
+        "title": "Fastvar: Linear visual autoregressive modeling via cached token pruning",
+        "authors": "H Guo, Y Li, T Zhang, J Wang, T Dai",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 32,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://openaccess.thecvf.com/content/ICCV2025/papers/Guo_FastVAR_Linear_Visual_Autoregressive_Modeling_via_Cached_Token_Pruning_ICCV_2025_paper.pdf",
+        "abstract_url": "https://openaccess.thecvf.com/content/ICCV2025/html/Guo_FastVAR_Linear_Visual_Autoregressive_Modeling_via_Cached_Token_Pruning_ICCV_2025_paper.html"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "-PqVi3_lZRgJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://openaccess.thecvf.com/content/ICCV2025/html/Guo_FastVAR_Linear_Visual_Autoregressive_Modeling_via_Cached_Token_Pruning_ICCV_2025_paper.html"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://openaccess.thecvf.com/content/ICCV2025/papers/Guo_FastVAR_Linear_Visual_Autoregressive_Modeling_via_Cached_Token_Pruning_ICCV_2025_paper.pdf"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:ivtp instructionguided visual token pruning for large visionlanguage models|k huang",
+      "paper_info": {
+        "title": "Ivtp: Instruction-guided visual token pruning for large vision-language models",
+        "authors": "K Huang, H Zou, Y Xi, BC Wang, Z Xie, L Yu",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 54,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://www.ecva.net/papers/eccv_2024/papers_ECCV/papers/02577.pdf",
+        "abstract_url": "https://link.springer.com/chapter/10.1007/978-3-031-72643-9_13"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "SrycLi0mwTsJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://link.springer.com/chapter/10.1007/978-3-031-72643-9_13"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://www.ecva.net/papers/eccv_2024/papers_ECCV/papers/02577.pdf"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:lookupvit compressing visual information to a limited number of tokens|r koner",
+      "paper_info": {
+        "title": "Lookupvit: Compressing visual information to a limited number of tokens",
+        "authors": "R Koner, G Jain, P Jain, V Tresp, S Paul",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 24,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://www.ecva.net/papers/eccv_2024/papers_ECCV/papers/11673.pdf",
+        "abstract_url": "https://link.springer.com/chapter/10.1007/978-3-031-73016-0_19"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "WEb_mmCaGcAJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://link.springer.com/chapter/10.1007/978-3-031-73016-0_19"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://www.ecva.net/papers/eccv_2024/papers_ECCV/papers/11673.pdf"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:the better you learn the smarter you prune towards efficient visionlanguageaction models via differentiable token pruning|t jiang",
+      "paper_info": {
+        "title": "The better you learn, the smarter you prune: Towards efficient vision-language-action models via differentiable token pruning",
+        "authors": "T Jiang, X Jiang, Y Ma, X Wen, B Li, K Zhan",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 32,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://arxiv.org/pdf/2509.12594?",
+        "abstract_url": "https://arxiv.org/abs/2509.12594"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "h778RmVSOYQJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://arxiv.org/abs/2509.12594"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://arxiv.org/pdf/2509.12594?"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:a survey on transformer compression|y tang",
+      "paper_info": {
+        "title": "A survey on transformer compression",
+        "authors": "Y Tang, Y Wang, J Guo, Z Tu, K Han, H Hu",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 126,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://arxiv.org/pdf/2402.05964",
+        "abstract_url": "https://arxiv.org/abs/2402.05964"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "oW4EUAX7yl4J",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://arxiv.org/abs/2402.05964"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://arxiv.org/pdf/2402.05964"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:tokenbutler token importance is predictable|y akhauri",
+      "paper_info": {
+        "title": "Tokenbutler: Token importance is predictable",
+        "authors": "Y Akhauri, AF AbouElhamayed, Y Gao",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 15,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://arxiv.org/pdf/2503.07518?",
+        "abstract_url": "https://arxiv.org/abs/2503.07518"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "jGjgxaBb_zkJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://arxiv.org/abs/2503.07518"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://arxiv.org/pdf/2503.07518?"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    },
+    {
+      "dedup_key": "title_author:sparsevlm visual token sparsification for efficient visionlanguage model inference|y zhang",
+      "paper_info": {
+        "title": "Sparsevlm: Visual token sparsification for efficient vision-language model inference",
+        "authors": "Y Zhang, CK Fan, J Ma, W Zheng, T Huang",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 401,
+        "keywords": "token compression, token reduction, token pruning",
+        "source": "Google Scholar",
+        "pdf_url": "https://arxiv.org/pdf/2410.04417",
+        "abstract_url": "https://arxiv.org/abs/2410.04417"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "Ta8Xo4rk0ygJ",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://arxiv.org/abs/2410.04417"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://arxiv.org/pdf/2410.04417"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending"
+    }
+  ],
+  "rejected": [],
+  "identity_conflicts": [
+    {
+      "title": "Skip-Vision: Efficient and Scalable Acceleration of Vision-Language Models via Adaptive Token Skipping.",
+      "title_author_key": "title_author:skipvision efficient and scalable acceleration of visionlanguage models via adaptive token skipping|weili zeng",
+      "existing_doi": "10.1109/iccv51701.2025.01986",
+      "incoming_doi": "10.48550/arxiv.2503.21817"
+    }
+  ],
+  "deferred_filters": {
+    "requires_code": null,
+    "paper_tags": [
+      1,
+      2
+    ]
+  }
+}

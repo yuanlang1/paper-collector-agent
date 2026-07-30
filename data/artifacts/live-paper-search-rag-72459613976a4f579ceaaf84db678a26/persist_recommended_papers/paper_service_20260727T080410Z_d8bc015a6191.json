@@ -1,0 +1,40 @@
+{
+  "run_id": "live-paper-search-rag-72459613976a4f579ceaaf84db678a26",
+  "step_key": "persist_recommended_papers",
+  "input_manifest": "artifact://live-paper-search-rag-72459613976a4f579ceaaf84db678a26/recommend_papers/recommendation_20260727T080410Z_e609f10fd273.json",
+  "results": [
+    {
+      "client_key": "live-paper-search-rag-72459613976a4f579ceaaf84db678a26:0",
+      "title": "Retrieval-augmented generation for large language models: A survey",
+      "venue_id": null,
+      "venue_save_status": "missing",
+      "paper_id": null,
+      "paper_save_status": "not_started",
+      "paper_cache_status": "not_started",
+      "task_paper_save_status": "not_started",
+      "error": "missing valid venue draft"
+    },
+    {
+      "client_key": "live-paper-search-rag-72459613976a4f579ceaaf84db678a26:1",
+      "title": "Crud-rag: A comprehensive chinese benchmark for retrieval-augmented generation of large language models",
+      "venue_id": null,
+      "venue_save_status": "failed",
+      "paper_id": null,
+      "paper_save_status": "not_started",
+      "paper_cache_status": "not_started",
+      "task_paper_save_status": "not_started",
+      "error": "gRPC call failed: code=INTERNAL, details=Batch save venues failed"
+    },
+    {
+      "client_key": "live-paper-search-rag-72459613976a4f579ceaaf84db678a26:2",
+      "title": "Evaluation of retrieval-augmented generation: A survey",
+      "venue_id": null,
+      "venue_save_status": "failed",
+      "paper_id": null,
+      "paper_save_status": "not_started",
+      "paper_cache_status": "not_started",
+      "task_paper_save_status": "not_started",
+      "error": "gRPC call failed: code=INTERNAL, details=Batch save venues failed"
+    }
+  ]
+}

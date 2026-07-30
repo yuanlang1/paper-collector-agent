@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package papercollector.venue.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/wrappers.proto";
+
+option java_multiple_files = true;
+option java_package = "com.yl.paperservice.grpc.venue.v1";
+
+service VenueInternalService {
+  rpc SaveVenue(SaveVenueRequest) returns (SaveVenueResponse);
+  rpc BatchSaveVenues(BatchSaveVenuesRequest) returns (BatchSaveVenuesResponse);
+}
+
+message SaveVenueRequest {
+  string standard_name = 1;
+  optional int32 type = 2;
+  string acronym = 3;
+  string sci_rank = 4;
+  string ccf_rank = 5;
+  optional double sci_if = 6;
+  string sci_up = 7;
+  string sci_up_small = 8;
+  string core_rank = 9;
+}
+
+message SaveVenueResponse {
+  int32 code = 1;
+  bool success = 2;
+  google.protobuf.Int64Value data = 3;
+  string message = 4;
+  google.protobuf.Struct other = 5;
+}
+
+message BatchSaveVenuesRequest {
+  repeated SaveVenueRequest venues = 1;
+}
+
+message VenueIdItem {
+  string standard_name = 1;
+  int64 id = 2;
+}
+
+message BatchSaveVenuesResponse {
+  int32 code = 1;
+  bool success = 2;
+  repeated VenueIdItem data = 3;
+  string message = 4;
+  google.protobuf.Struct other = 5;
+}

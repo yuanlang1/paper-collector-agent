@@ -1,0 +1,40 @@
+{
+  "run_id": "live-paper-search-rag-4693b9ec9c084aceb178d56d5c0bb666",
+  "step_key": "persist_recommended_papers",
+  "input_manifest": "artifact://live-paper-search-rag-4693b9ec9c084aceb178d56d5c0bb666/recommend_papers/recommendation_20260727T100741Z_1898d08488f8.json",
+  "results": [
+    {
+      "client_key": "live-paper-search-rag-4693b9ec9c084aceb178d56d5c0bb666:0",
+      "title": "Retrieval augmented generation evaluation in the era of large language models: A comprehensive survey",
+      "venue_id": 114,
+      "venue_save_status": "saved",
+      "paper_id": 124,
+      "paper_save_status": "saved",
+      "paper_cache_status": "saved",
+      "task_paper_save_status": "saved",
+      "error": null
+    },
+    {
+      "client_key": "live-paper-search-rag-4693b9ec9c084aceb178d56d5c0bb666:1",
+      "title": "Engineering the RAG Stack: A Comprehensive Review of the Architecture and Trust Frameworks for Retrieval-Augmented Generation Systems",
+      "venue_id": 114,
+      "venue_save_status": "saved",
+      "paper_id": 125,
+      "paper_save_status": "saved",
+      "paper_cache_status": "saved",
+      "task_paper_save_status": "saved",
+      "error": null
+    },
+    {
+      "client_key": "live-paper-search-rag-4693b9ec9c084aceb178d56d5c0bb666:2",
+      "title": "SafeRAG: benchmarking security in retrieval-augmented generation of large language model",
+      "venue_id": 115,
+      "venue_save_status": "saved",
+      "paper_id": 126,
+      "paper_save_status": "saved",
+      "paper_cache_status": "saved",
+      "task_paper_save_status": "saved",
+      "error": null
+    }
+  ]
+}

@@ -1,0 +1,128 @@
+{
+  "run_id": "live-paper-search-rag-c7d8bac051e8461c85c0353efaa03210",
+  "step_key": "resolve_venues",
+  "paper_info_schema": "paper_info_v1",
+  "papers": [
+    {
+      "dedup_key": "title_author:retrievalaugmented generation for large language models a survey|y gao",
+      "paper_info": {
+        "title": "Retrieval-augmented generation for large language models: A survey",
+        "authors": "Y Gao, Y Xiong, X Gao, K Jia, J Pan, Y Bi, Y Dai",
+        "publish_date": null,
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": null,
+        "venue_id": null,
+        "citations": 6818,
+        "keywords": "RAG, retrieval-augmented generation, evaluation, benchmark",
+        "source": "Google Scholar",
+        "pdf_url": "https://gracker.ai/static/Retrieval-Augmented%20Generation%20for%20Large%20Language%20Models-%20A%20Survey.W1hvpNo3.pdf",
+        "abstract_url": "https://gracker.ai/static/Retrieval-Augmented%20Generation%20for%20Large%20Language%20Models-%20A%20Survey.W1hvpNo3.pdf"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "iwzCABrgDH4J",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://gracker.ai/static/Retrieval-Augmented%20Generation%20for%20Large%20Language%20Models-%20A%20Survey.W1hvpNo3.pdf"
+        }
+      ],
+      "venue_candidates": [],
+      "pdf_candidates": [
+        "https://gracker.ai/static/Retrieval-Augmented%20Generation%20for%20Large%20Language%20Models-%20A%20Survey.W1hvpNo3.pdf"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending",
+      "crossref_metadata": {
+        "status": "not_matched",
+        "match_method": "title"
+      },
+      "venue_resolution": {
+        "status": "missing",
+        "source": "missing",
+        "venue_id": null
+      }
+    },
+    {
+      "dedup_key": "title_author:crudrag a comprehensive chinese benchmark for retrievalaugmented generation of large language models|y lyu",
+      "paper_info": {
+        "title": "Crud-rag: A comprehensive chinese benchmark for retrieval-augmented generation of large language models",
+        "authors": "Y Lyu, Z Li, S Niu, F Xiong, B Tang, W Wang",
+        "publish_date": "2025-03-31",
+        "paper_abstract": null,
+        "ai_abstract": null,
+        "doi": "10.1145/3701228",
+        "venue_id": null,
+        "citations": 242,
+        "keywords": "RAG, retrieval-augmented generation, evaluation, benchmark",
+        "source": "Google Scholar",
+        "pdf_url": "https://arxiv.org/pdf/2401.17043",
+        "abstract_url": "https://arxiv.org/abs/2401.17043"
+      },
+      "source_refs": [
+        {
+          "source": "Google Scholar",
+          "source_id": "l5-qQCiSpw4J",
+          "doi": null,
+          "arxiv_id": null,
+          "landing_url": "https://arxiv.org/abs/2401.17043"
+        },
+        {
+          "source": "DBLP",
+          "source_id": "journals/tois/LyuLNXTWWLXC25",
+          "doi": "10.1145/3701228",
+          "arxiv_id": null,
+          "landing_url": "https://dblp.org/rec/journals/tois/LyuLNXTWWLXC25"
+        }
+      ],
+      "venue_candidates": [
+        "ACM Trans. Inf. Syst.",
+        "ACM Transactions on Information Systems"
+      ],
+      "pdf_candidates": [
+        "https://arxiv.org/pdf/2401.17043"
+      ],
+      "oss_object_key": null,
+      "oss_uri": null,
+      "pdf_upload_status": "pending",
+      "crossref_metadata": {
+        "status": "matched",
+        "match_method": "title",
+        "doi": "10.1145/3701228",
+        "published_date": "2025-03-31",
+        "citations": 82,
+        "venue_title": "ACM Transactions on Information Systems",
+        "paper_type_code": 1,
+        "crossref_type": "journal-article"
+      },
+      "venue_resolution": {
+        "status": "resolved",
+        "source": "local_cache",
+        "venue_id": null,
+        "venue_draft": {
+          "standard_name": "ACM Transactions on Information Systems",
+          "acronym": null,
+          "type": 1,
+          "sci_rank": "Q1",
+          "ccf_rank": "A",
+          "sci_if": "11.2",
+          "sci_up": "计算机科学2区",
+          "sci_up_small": "计算机：信息系统1区。",
+          "core_rank": null
+        }
+      }
+    }
+  ],
+  "rejected": [],
+  "identity_conflicts": [],
+  "deferred_filters": {
+    "requires_code": null,
+    "paper_tags": [
+      1,
+      2
+    ]
+  },
+  "removed_without_pdf": []
+}

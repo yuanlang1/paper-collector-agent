@@ -1,0 +1,54 @@
+{
+  "run_id": "run_f18b486ddb4842f0a585a75f88c4dcf0",
+  "search_task_id": 44,
+  "requests": [
+    {
+      "paper_id": 141,
+      "task_id": 44,
+      "title": "Token Reduction Should Go Beyond Efficiency in Generative Models--From Vision, Language to Multimodality",
+      "source_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\Token Reduction Should Go Beyond Efficiency in Generative Models--From Vision, Language to Multimodality_Z Kong_908b50f90e58.pdf",
+      "source_pdf_available": true,
+      "status": "pending"
+    },
+    {
+      "paper_id": 135,
+      "task_id": 44,
+      "title": "Token fusion: Bridging the gap between token pruning and token merging",
+      "source_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\Token fusion_ Bridging the gap between token pruning and token merging_M Kim_e35236e92615.pdf",
+      "source_pdf_available": true,
+      "status": "pending"
+    },
+    {
+      "paper_id": 144,
+      "task_id": 44,
+      "title": "Vision-centric token compression in large language model",
+      "source_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\Vision-centric token compression in large language model_L Xing_5ea0590ba00c.pdf",
+      "source_pdf_available": true,
+      "status": "pending"
+    },
+    {
+      "paper_id": 143,
+      "task_id": 44,
+      "title": "Efficient token compression for vision transformer with spatial information preserved",
+      "source_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\Efficient token compression for vision transformer with spatial information preserved_J Mao_c681d1fc553d.pdf",
+      "source_pdf_available": true,
+      "status": "pending"
+    },
+    {
+      "paper_id": 146,
+      "task_id": 44,
+      "title": "SparseCoder: Advancing source code analysis with sparse attention and learned token pruning",
+      "source_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\SparseCoder_ Advancing source code analysis with sparse attention and learned token pruning_X Yang_c4595fe6cd16.pdf",
+      "source_pdf_available": true,
+      "status": "pending"
+    },
+    {
+      "paper_id": 148,
+      "task_id": 44,
+      "title": "More tokens, lower precision: Towards the optimal token-precision trade-off in kv cache compression",
+      "source_pdf_path": "E:\\FastAPI_project\\paper-collector-agent\\data\\artifacts\\papers\\More tokens, lower precision_ Towards the optimal token-precision trade-off in kv cache compression_J Zhang_dc4aaa7c1edf.pdf",
+      "source_pdf_available": true,
+      "status": "pending"
+    }
+  ]
+}
