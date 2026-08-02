@@ -4,6 +4,7 @@ import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import lru_cache
+import logging
 from typing import Any, Iterator
 from uuid import NAMESPACE_URL, uuid5
 
@@ -14,6 +15,8 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from qdrant_client import AsyncQdrantClient, models
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 DENSE_VECTOR_NAME = "dense"
 SPARSE_VECTOR_NAME = "sparse"
@@ -91,6 +94,8 @@ class BaseQdrantIndexConstructionModule(ABC):
         self,
         documents: list[Document],
     ) -> IndexConstructionResult:
+        logger.info(f"Build index number: {documents.count()}")
+
         if not documents:
             return IndexConstructionResult(
                 collection_name = self.collection_name,

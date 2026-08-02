@@ -10,7 +10,7 @@ from langchain_core.documents import Document
 
 from app.config import settings
 from app.infrastructure.mineru.mineru_client import MinerUClient
-from app.schemas.file_parser import FileParseRequest, FileType
+from app.schemas.file_parser import BatchDocumentParseResult, FileParseRequest, FileType
 
 T = TypeVar("T")
 
@@ -60,12 +60,16 @@ class FileParser:
         normalized = self._normalize_request(request)
         return await self._parse_single(normalized)
 
-    async def parse_files(
+    async def parse_files_result(
         self,
         requests: list[FileParseRequest],
-    ) -> list[Document]:
+    ) -> BatchDocumentParseResult:
         if not requests:
-            return []
+            return BatchDocumentParseResult(
+                total = 0,
+                documents = [],
+                errors = {},
+            )
 
         normalized = [
             self._normalize_request(request)
@@ -76,17 +80,13 @@ class FileParser:
             request.file_id
             for request in normalized
         ]
-
         if len(file_ids) != len(set(file_ids)):
             raise ValueError("file_id must be unique within one parse operation")
 
         batches = [
             batch
             for group in self._group_compatible_requests(normalized)
-            for batch in self._chunked(
-                group,
-                self.MAX_BATCH_SIZE,
-            )
+            for batch in self._chunked(group, self.MAX_BATCH_SIZE)
         ]
 
         semaphore = asyncio.Semaphore(self.max_parallel_batches)
@@ -99,7 +99,7 @@ class FileParser:
 
         batch_results = await asyncio.gather(
             *(execute_batch(batch) for batch in batches),
-            return_exceptions=True,
+            return_exceptions = True,
         )
 
         documents: list[Document] = []
@@ -108,12 +108,12 @@ class FileParser:
         for batch, result in zip(
             batches,
             batch_results,
-            strict=True,
+            strict = True,
         ):
             if isinstance(result, Exception):
                 errors.update(
                     {
-                        request.file_id: str(result)
+                        request.file_id: self._format_error(result)
                         for request in batch
                     }
                 )
@@ -123,18 +123,31 @@ class FileParser:
             documents.extend(batch_documents)
             errors.update(batch_errors)
 
-        if errors:
-            raise BatchFileParseError(errors)
-
         documents_by_id = {
             str(document.metadata["file_id"]): document
             for document in documents
         }
 
-        return [
-            documents_by_id[request.file_id]
-            for request in normalized
-        ]
+        return BatchDocumentParseResult(
+            total = len(normalized),
+            documents = [
+                documents_by_id[request.file_id]
+                for request in normalized
+                if request.file_id in documents_by_id
+            ],
+            errors = errors,
+        )
+
+    async def parse_files(
+        self,
+        requests: list[FileParseRequest],
+    ) -> list[Document]:
+        result = await self.parse_files_result(requests)
+
+        if result.errors:
+            raise BatchFileParseError(result.errors)
+
+        return result.documents
 
     async def _parse_single(
         self,
@@ -144,19 +157,19 @@ class FileParser:
         model_version = self._select_model(file_type)
 
         task_id = await self.mineru_client.submit_single_url(
-            uri=str(request.uri),
-            data_id=request.file_id,
-            model_version=model_version,
-            options=self._build_single_options(request),
+            uri = str(request.uri),
+            data_id = request.file_id,
+            model_version = model_version,
+            options = self._build_single_options(request),
         )
 
         result = await self.mineru_client.wait_single(task_id)
 
         return await self._build_document(
-            request=request,
-            result=result,
-            model_version=model_version,
-            task_id=task_id,
+            request = request,
+            result = result,
+            model_version = model_version,
+            task_id = task_id,
         )
 
     async def _parse_batch(
@@ -171,14 +184,14 @@ class FileParser:
                 return [document], {}
             except Exception as error:
                 return [], {
-                    request.file_id: str(error),
+                    request.file_id: self._format_error(error),
                 }
 
         file_type = cast(FileType, requests[0].file_type)
         model_version = self._select_model(file_type)
 
         batch_id = await self.mineru_client.submit_batch_urls(
-            files=[
+            files = [
                 {
                     "url": str(request.uri),
                     "data_id": request.file_id,
@@ -186,8 +199,8 @@ class FileParser:
                 }
                 for request in requests
             ],
-            model_version=model_version,
-            options=self._build_batch_options(requests[0]),
+            model_version = model_version,
+            options = self._build_batch_options(requests[0]),
         )
 
         results = await self.mineru_client.wait_batch(batch_id)
@@ -209,22 +222,19 @@ class FileParser:
                 continue
 
             if result["state"] == "failed":
-                errors[request.file_id] = (
-                    result.get("err_msg")
-                    or "MinerU parsing failed"
-                )
+                errors[request.file_id] = result.get("err_msg") or "MinerU parsing failed"
                 continue
 
             try:
                 document = await self._build_document(
-                    request=request,
-                    result=result,
-                    model_version=model_version,
-                    batch_id=batch_id,
+                    request = request,
+                    result = result,
+                    model_version = model_version,
+                    batch_id = batch_id,
                 )
                 documents.append(document)
             except Exception as error:
-                errors[request.file_id] = str(error)
+                errors[request.file_id] = self._format_error(error)
 
         return documents, errors
 
@@ -243,14 +253,11 @@ class FileParser:
         result_files = self.mineru_client.extract_result_files(zip_content)
         markdown = self.mineru_client.extract_markdown(result_files)
 
-        file_type = cast(
-            FileType,
-            request.file_type,
-        )
+        file_type = cast(FileType, request.file_type)
 
         return Document(
-            page_content=markdown,
-            metadata={
+            page_content = markdown,
+            metadata = {
                 **request.metadata,
                 "file_id": request.file_id,
                 "file_name": request.file_name,
@@ -273,7 +280,7 @@ class FileParser:
         file_type = request.file_type or self._detect_file_type(file_name)
 
         return request.model_copy(
-            update={
+            update = {
                 "file_name": file_name,
                 "file_type": file_type,
             }
@@ -290,10 +297,7 @@ class FileParser:
 
         for request in requests:
             options = request.options
-            file_type = cast(
-                FileType,
-                request.file_type,
-            )
+            file_type = cast(FileType, request.file_type)
 
             key = (
                 self._select_model(file_type),
@@ -308,6 +312,13 @@ class FileParser:
             groups[key].append(request)
 
         return list(groups.values())
+
+    @staticmethod
+    def _format_error(error: BaseException) -> str:
+        message = str(error).strip()
+        if message:
+            return f"{type(error).__name__}: {message}"
+        return f"{type(error).__name__}: {error!r}"
 
     @staticmethod
     def _select_model(

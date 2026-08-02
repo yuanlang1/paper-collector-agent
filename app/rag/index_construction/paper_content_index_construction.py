@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from langchain_core.documents import Document
@@ -8,7 +9,7 @@ from qdrant_client import AsyncQdrantClient, models
 
 from app.rag.index_construction.base import BaseQdrantIndexConstructionModule, IndexConstructionResult
 
-
+logger = logging.getLogger(__name__)
 
 class PaperContentIndexConstructionModule(
     BaseQdrantIndexConstructionModule
@@ -30,7 +31,7 @@ class PaperContentIndexConstructionModule(
         documents: list[Document],
         *,
         replace_existing: bool = True,
-    ) -> IndexConstructionResult:
+    ) -> IndexConstructionResult:    
         result = await super().build_index(documents)
 
         if replace_existing and documents:

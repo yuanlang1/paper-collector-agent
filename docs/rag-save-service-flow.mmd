@@ -1,0 +1,16 @@
+sequenceDiagram
+    participant W as "检索工作流"
+    participant R as "RAG 编排服务"
+    participant P as "PaperRagProcessor"
+    participant S as "RAG 保存服务"
+    participant DB as "论文/任务服务数据库"
+
+    W->>R: "任务论文已保存，提交 task_id"
+    R->>DB: "原子领取该任务的 PENDING 论文"
+    DB-->>R: "已领取的论文列表"
+    R->>P: "process_many(papers)"
+    P-->>R: "每篇 PaperRagResult"
+    R->>S: "complete_task_rag_batch(task_id, results)"
+    S->>DB: "同一事务：更新论文 rag_status 与任务状态"
+    DB-->>S: "提交成功"
+    S-->>R: "批次汇总"

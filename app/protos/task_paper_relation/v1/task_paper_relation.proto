@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package papercollector.taskpaperrelation.v1;
+
+import "google/protobuf/struct.proto";
+
+option java_multiple_files = true;
+option java_package = "com.yl.paperservice.grpc.taskpaperrelation.v1";
+
+service TaskPaperRelationInternalService {
+  rpc GetUnindexedPaperRagInfosByTaskId(TaskIdRequest)
+      returns (GetUnindexedPaperRagInfosByTaskIdResponse);
+
+  rpc GetPaperIdsByTaskId(TaskIdRequest)
+      returns (GetPaperIdsByTaskIdResponse);
+}
+
+message TaskIdRequest {
+  int64 task_id = 1;
+}
+
+message PaperRagInfoItem {
+  int64 paper_id = 1;
+  string title = 2;
+  string url = 3;
+  string paper_abstract = 4;
+}
+
+message GetUnindexedPaperRagInfosByTaskIdResponse {
+  int32 code = 1;
+  bool success = 2;
+  int64 task_id = 3;
+  repeated PaperRagInfoItem paper_infos = 4;
+  string message = 5;
+  google.protobuf.Struct other = 6;
+}
+
+message GetPaperIdsByTaskIdResponse {
+  int32 code = 1;
+  bool success = 2;
+  repeated int64 paper_ids = 3;
+  string message = 4;
+  google.protobuf.Struct other = 5;
+}

@@ -1,5 +1,6 @@
 
 import hashlib
+import logging
 import re
 from typing import Any
 from langchain_core.documents import Document
@@ -7,6 +8,8 @@ from langchain_text_splitters import (
     MarkdownHeaderTextSplitter,
     RecursiveCharacterTextSplitter,
 )
+
+logger = logging.getLogger(__name__)
 
 HEADERS_TO_SPLIT_ON = [
     ("#", "header_1"),
@@ -39,7 +42,7 @@ class DataPreparationModule:
     def __init__(
         self,
         *,
-        chunk_size: int = 1200,
+        chunk_size: int = 1200, 
         chunk_overlap: int = 200,
     ) -> None:
         self.header_splitter = MarkdownHeaderTextSplitter(
