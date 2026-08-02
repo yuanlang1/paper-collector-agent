@@ -8,7 +8,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.config import settings
-from app.llm.model_factory import create_structured_chat_model
+from app.llm.model_factory import (
+    create_validated_structured_chat_model,
+)
 from app.llm.tools.search_tools.arxiv.search_args import (
     ArxivSearchArgs,
 )
@@ -79,6 +81,31 @@ SOURCE_QUERY_PLAN_SYSTEM_PROMPT = """
     输入包含：
     1. 已由用户确认的 query_understanding；
     2. 前端选择的 sourceTag。
+
+    输出格式：
+    - 仅输出一个合法的 JSON 对象，不要输出 Markdown、代码块或额外文字。
+    - 顶层字段 plans：检索计划数组，至少包含一项。
+    - plans[].source：检索来源，只能是 arXiv、DBLP、Crossref 或 Google Scholar。
+    - plans[].display_query：展示给用户看的实际检索式。
+    - plans[].reasoning：简洁说明检索式如何从 query_understanding 推导得到。
+    - plans[].arguments：传给对应来源 API 的参数对象。
+
+    最小 JSON 输出示例：
+    {
+      "plans": [
+        {
+          "source": "arXiv",
+          "display_query": "retrieval augmented generation evaluation benchmark",
+          "reasoning": "使用主题和 benchmark 关键词构造相关性检索。",
+          "arguments": {
+            "query": "retrieval augmented generation evaluation benchmark",
+            "search_type": "topic",
+            "sort": "relevance",
+            "include_abstract": true
+          }
+        }
+      ]
+    }
 
     严格要求：
     - 只能为 sourceTag 中的来源生成计划，且每个来源必须恰好一条。
@@ -161,7 +188,7 @@ class BuildSourceQueryPlanNode:
         model: Any | None = None,
         pagination_settings: dict[str, int] | None = None,
     ) -> None:
-        self.model = model or create_structured_chat_model(
+        self.model = model or create_validated_structured_chat_model(
             SourceQueryPlansOutput,
             temperature=0,
         )

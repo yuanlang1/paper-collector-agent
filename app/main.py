@@ -6,6 +6,7 @@ from app.api import *
 from app.infrastructure.grpc_channel_pool import paper_service_grpc_channel_pool
 from app.infrastructure.nacos_registry import nacos_registry
 from app.core.exceptions import register_exception_handlers
+from app.rag.index_construction.base import close_index_resources
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +32,7 @@ async def lifespan(app: FastAPI):
     finally:
         await paper_service_grpc_channel_pool.close()
         await nacos_registry.stop()
+        await close_index_resources()
 
 app = FastAPI(lifespan = lifespan)
 

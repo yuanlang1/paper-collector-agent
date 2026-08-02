@@ -4,6 +4,7 @@ from langchain_core.runnables import Runnable
 from pydantic import BaseModel
 from typing import TypeVar
 from app.config import settings
+from app.llm.structured_output import ValidatedJsonInvoker
 
 StructuredModelT = TypeVar("StructuredModelT", bound=BaseModel)
 
@@ -45,4 +46,17 @@ def create_structured_chat_model(
     return create_chat_model(temperature=temperature).with_structured_output(
         schema,
         method="function_calling",
+    )
+
+
+def create_validated_structured_chat_model(
+    schema: type[StructuredModelT],
+    *,
+    temperature: float = 0,
+    max_attempts: int = 2,
+) -> ValidatedJsonInvoker[StructuredModelT]:
+    return ValidatedJsonInvoker(
+        model=create_chat_model(temperature=temperature),
+        schema=schema,
+        max_attempts=max_attempts,
     )

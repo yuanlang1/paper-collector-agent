@@ -1,0 +1,753 @@
+2026-08-01 10:50:49,676 INFO receive stream server request, connection_id:1785509667523_127.0.0.1_61990, original info: metadata {
+  type: "ClientDetectionRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"requestId\":\"6\",\"module\":\"internal\"}"
+}
+
+2026-08-01 14:01:52,549 INFO receive stream server request, connection_id:1785509667523_127.0.0.1_61990, original info: metadata {
+  type: "ClientDetectionRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"requestId\":\"7\",\"module\":\"internal\"}"
+}
+
+2026-08-01 14:09:07,439 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 14:09:07,866 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU4MjU0N30.omYV8bgVSpJk3_WzQxzACZhNslG8Swv5_RLPn_xcVFo, TTL: 18000, force_refresh: False
+2026-08-01 14:09:07,874 ERROR connection is unregistered, switch server, connectionId=1785509667523_127.0.0.1_61990, request=InstanceRequest
+2026-08-01 14:09:07,927 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785564547921_127.0.0.1_55706
+2026-08-01 14:09:07,953 INFO receive stream server request, connection_id:1785564547921_127.0.0.1_55706, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 14:09:07,978 ERROR send request fail, request=InstanceRequest{headers{'accessToken': 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU4MjU0N30.omYV8bgVSpJk3_WzQxzACZhNslG8Swv5_RLPn_xcVFo'}, retryTimes=0, errorMessage=Error [500]: Connection is unregistered.
+2026-08-01 14:09:08,054 INFO b47ce490-9755-4a40-bb55-22e1fa178563 success to connect a server:127.0.0.1:9848, connectionId:1785564547921_127.0.0.1_55706
+2026-08-01 14:09:08,054 INFO b47ce490-9755-4a40-bb55-22e1fa178563 abandon prev connection, server is:127.0.0.1:9848, connectionId:1785509667523_127.0.0.1_61990
+2026-08-01 14:09:08,064 INFO rpc client notify [disconnected] event to listeners
+2026-08-01 14:09:08,065 INFO rpc client notify [connected] event to listeners
+2026-08-01 14:09:08,101 ERROR send request fail, request=InstanceRequest{headers{'accessToken': 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU4MjU0N30.omYV8bgVSpJk3_WzQxzACZhNslG8Swv5_RLPn_xcVFo'}, retryTimes=1, errorMessage=Error [-401]: client not connected,status:RpcClientStatus.UNHEALTHY
+2026-08-01 14:09:08,129 INFO close Nacos python naming grpc client...
+2026-08-01 14:09:40,632 INFO log directory: data/logs/nacos\.
+2026-08-01 14:09:40,632 INFO create new rpc client: 887a9967-28f7-494f-8d92-c81ef040bba8
+2026-08-01 14:09:40,633 INFO init app conn labels from client config,None
+2026-08-01 14:09:40,633 INFO init app conn labels from env,{}
+2026-08-01 14:09:40,633 INFO final app conn labels: {}
+2026-08-01 14:09:40,634 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 14:09:40,634 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 14:09:40,634 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 14:09:40,637 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 14:09:40,637 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 14:09:40,638 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 14:09:40,646 INFO finish loading name cache, total file size: 1
+2026-08-01 14:09:40,647 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 14:09:40,669 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785564580647_127.0.0.1_55745
+2026-08-01 14:09:40,675 INFO receive stream server request, connection_id:1785564580647_127.0.0.1_55745, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 14:09:40,714 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU4MjU4MH0.0dHcPF-bxbJ-GfJFb2UTgsFsWioUx5a2-NCPS2yO31E, TTL: 18000, force_refresh: True
+2026-08-01 14:09:40,785 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785564580647_127.0.0.1_55745
+2026-08-01 14:09:40,785 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 14:09:40,786 INFO rpc client notify [connected] event to listeners
+2026-08-01 14:15:49,382 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 14:15:49,442 INFO close Nacos python naming grpc client...
+2026-08-01 14:16:05,490 INFO log directory: data/logs/nacos\.
+2026-08-01 14:16:05,490 INFO create new rpc client: fd8c88d4-a9b2-4354-906e-693bf2f257d7
+2026-08-01 14:16:05,491 INFO init app conn labels from client config,None
+2026-08-01 14:16:05,491 INFO init app conn labels from env,{}
+2026-08-01 14:16:05,491 INFO final app conn labels: {}
+2026-08-01 14:16:05,491 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 14:16:05,492 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 14:16:05,492 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 14:16:05,495 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 14:16:05,495 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 14:16:05,496 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 14:16:05,509 INFO finish loading name cache, total file size: 1
+2026-08-01 14:16:05,510 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 14:16:05,574 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785564965553_127.0.0.1_56777
+2026-08-01 14:16:05,600 INFO receive stream server request, connection_id:1785564965553_127.0.0.1_56777, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 14:16:05,711 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785564965553_127.0.0.1_56777
+2026-08-01 14:16:05,712 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 14:16:05,713 INFO rpc client notify [connected] event to listeners
+2026-08-01 14:16:05,793 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU4Mjk2NX0.FzTiowTPmXMwXNUB3z5CK2Q5q6i3nJRZQmMlk6GNf3Q, TTL: 18000, force_refresh: False
+2026-08-01 14:16:05,794 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU4Mjk2NX0.FzTiowTPmXMwXNUB3z5CK2Q5q6i3nJRZQmMlk6GNf3Q, TTL: 18000, force_refresh: True
+2026-08-01 14:16:11,161 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 14:16:11,168 INFO close Nacos python naming grpc client...
+2026-08-01 14:16:21,697 INFO log directory: data/logs/nacos\.
+2026-08-01 14:16:21,698 INFO create new rpc client: 4a56c1aa-fd7b-4983-b992-86f4fb00e192
+2026-08-01 14:16:21,698 INFO init app conn labels from client config,None
+2026-08-01 14:16:21,699 INFO init app conn labels from env,{}
+2026-08-01 14:16:21,699 INFO final app conn labels: {}
+2026-08-01 14:16:21,699 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 14:16:21,699 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 14:16:21,700 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 14:16:21,702 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 14:16:21,702 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 14:16:21,703 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 14:16:21,706 INFO finish loading name cache, total file size: 1
+2026-08-01 14:16:21,706 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 14:16:21,726 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785564981707_127.0.0.1_56803
+2026-08-01 14:16:21,730 INFO receive stream server request, connection_id:1785564981707_127.0.0.1_56803, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 14:16:21,777 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU4Mjk4MX0.4bvw9mDQF_McwbtBbFZ30_J3DOWBaJVJhadABttAcfk, TTL: 18000, force_refresh: True
+2026-08-01 14:16:21,832 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785564981707_127.0.0.1_56803
+2026-08-01 14:16:21,833 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 14:16:21,833 INFO rpc client notify [connected] event to listeners
+2026-08-01 16:58:46,615 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 16:58:46,730 INFO close Nacos python naming grpc client...
+2026-08-01 16:59:02,284 INFO log directory: data/logs/nacos\.
+2026-08-01 16:59:02,285 INFO create new rpc client: 6347ef40-21c5-4897-b975-b0b536e19741
+2026-08-01 16:59:02,285 INFO init app conn labels from client config,None
+2026-08-01 16:59:02,285 INFO init app conn labels from env,{}
+2026-08-01 16:59:02,286 INFO final app conn labels: {}
+2026-08-01 16:59:02,286 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 16:59:02,286 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 16:59:02,286 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 16:59:02,289 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 16:59:02,289 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 16:59:02,290 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 16:59:02,312 INFO finish loading name cache, total file size: 1
+2026-08-01 16:59:02,314 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 16:59:02,394 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785574742376_127.0.0.1_64072
+2026-08-01 16:59:02,481 INFO receive stream server request, connection_id:1785574742376_127.0.0.1_64072, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 16:59:02,584 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785574742376_127.0.0.1_64072
+2026-08-01 16:59:02,585 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 16:59:02,586 INFO rpc client notify [connected] event to listeners
+2026-08-01 16:59:02,763 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5Mjc0Mn0.0eakggCeM1ZLQyaf8E_J15AiQEvhTRZ7qVsn6kUHhdk, TTL: 18000, force_refresh: True
+2026-08-01 16:59:02,764 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5Mjc0Mn0.0eakggCeM1ZLQyaf8E_J15AiQEvhTRZ7qVsn6kUHhdk, TTL: 18000, force_refresh: False
+2026-08-01 17:00:18,010 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:00:18,016 INFO close Nacos python naming grpc client...
+2026-08-01 17:00:31,429 INFO log directory: data/logs/nacos\.
+2026-08-01 17:00:31,430 INFO create new rpc client: 74d423a6-fb9a-4dc8-bfef-9df8fc706216
+2026-08-01 17:00:31,430 INFO init app conn labels from client config,None
+2026-08-01 17:00:31,431 INFO init app conn labels from env,{}
+2026-08-01 17:00:31,431 INFO final app conn labels: {}
+2026-08-01 17:00:31,432 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:00:31,432 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:00:31,432 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:00:31,435 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:00:31,435 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:00:31,436 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:00:31,440 INFO finish loading name cache, total file size: 1
+2026-08-01 17:00:31,441 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:00:31,466 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785574831447_127.0.0.1_64203
+2026-08-01 17:00:31,472 INFO receive stream server request, connection_id:1785574831447_127.0.0.1_64203, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:00:31,522 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5MjgzMX0.Uj0SG12qxm90AkJhcqK51JFcLibICo1dV9j27M58tBQ, TTL: 18000, force_refresh: True
+2026-08-01 17:00:31,576 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785574831447_127.0.0.1_64203
+2026-08-01 17:00:31,577 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:00:31,580 INFO rpc client notify [connected] event to listeners
+2026-08-01 17:00:38,867 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:00:38,875 INFO close Nacos python naming grpc client...
+2026-08-01 17:00:50,808 INFO log directory: data/logs/nacos\.
+2026-08-01 17:00:50,809 INFO create new rpc client: 4b13cd5a-a0bd-48de-9256-adf8ef9e35e6
+2026-08-01 17:00:50,809 INFO init app conn labels from client config,None
+2026-08-01 17:00:50,810 INFO init app conn labels from env,{}
+2026-08-01 17:00:50,810 INFO final app conn labels: {}
+2026-08-01 17:00:50,810 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:00:50,810 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:00:50,811 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:00:50,812 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:00:50,813 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:00:50,813 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:00:50,816 INFO finish loading name cache, total file size: 1
+2026-08-01 17:00:50,816 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:00:50,836 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785574850818_127.0.0.1_64250
+2026-08-01 17:00:50,842 INFO receive stream server request, connection_id:1785574850818_127.0.0.1_64250, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:00:50,884 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5Mjg1MH0.uPlDmotu03wRE6s2QDWf2uOMAUTQ22pBFFpFZQacGTk, TTL: 18000, force_refresh: True
+2026-08-01 17:00:50,945 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785574850818_127.0.0.1_64250
+2026-08-01 17:00:50,946 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:00:50,946 INFO rpc client notify [connected] event to listeners
+2026-08-01 17:02:36,146 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:02:36,152 INFO close Nacos python naming grpc client...
+2026-08-01 17:02:48,553 INFO log directory: data/logs/nacos\.
+2026-08-01 17:02:48,553 INFO create new rpc client: 9ed2100a-8e2e-425b-a53a-f180efcfe4ed
+2026-08-01 17:02:48,553 INFO init app conn labels from client config,None
+2026-08-01 17:02:48,554 INFO init app conn labels from env,{}
+2026-08-01 17:02:48,554 INFO final app conn labels: {}
+2026-08-01 17:02:48,554 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:02:48,555 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:02:48,555 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:02:48,557 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:02:48,557 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:02:48,558 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:02:48,561 INFO finish loading name cache, total file size: 1
+2026-08-01 17:02:48,562 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:02:48,605 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785574968566_127.0.0.1_64955
+2026-08-01 17:02:48,614 INFO receive stream server request, connection_id:1785574968566_127.0.0.1_64955, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:02:48,643 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5Mjk2OH0.mtytkbTQOm6IqzRCncCp0PdRzUmaai98iiaSingr98E, TTL: 18000, force_refresh: True
+2026-08-01 17:02:48,715 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785574968566_127.0.0.1_64955
+2026-08-01 17:02:48,716 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:02:48,716 INFO rpc client notify [connected] event to listeners
+2026-08-01 17:03:39,876 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:03:39,886 INFO close Nacos python naming grpc client...
+2026-08-01 17:03:54,363 INFO log directory: data/logs/nacos\.
+2026-08-01 17:03:54,363 INFO create new rpc client: 48cfd60e-5bc5-4706-a0e3-97dd251d265e
+2026-08-01 17:03:54,364 INFO init app conn labels from client config,None
+2026-08-01 17:03:54,364 INFO init app conn labels from env,{}
+2026-08-01 17:03:54,364 INFO final app conn labels: {}
+2026-08-01 17:03:54,364 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:03:54,365 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:03:54,365 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:03:54,367 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:03:54,367 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:03:54,368 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:03:54,378 INFO finish loading name cache, total file size: 1
+2026-08-01 17:03:54,379 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:03:54,411 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785575034391_127.0.0.1_65056
+2026-08-01 17:03:54,418 INFO receive stream server request, connection_id:1785575034391_127.0.0.1_65056, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:03:54,478 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5MzAzNH0.qr_hdQn5lgr5wQGwqf8goknJmP8rPgQoPO8iesNaScQ, TTL: 18000, force_refresh: True
+2026-08-01 17:03:54,517 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785575034391_127.0.0.1_65056
+2026-08-01 17:03:54,518 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:03:54,518 INFO rpc client notify [connected] event to listeners
+2026-08-01 17:04:11,876 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:04:11,882 INFO close Nacos python naming grpc client...
+2026-08-01 17:04:24,885 INFO log directory: data/logs/nacos\.
+2026-08-01 17:04:24,885 INFO create new rpc client: cafb36b8-948c-4379-8b48-92d7c32279ce
+2026-08-01 17:04:24,885 INFO init app conn labels from client config,None
+2026-08-01 17:04:24,886 INFO init app conn labels from env,{}
+2026-08-01 17:04:24,886 INFO final app conn labels: {}
+2026-08-01 17:04:24,886 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:04:24,887 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:04:24,887 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:04:24,889 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:04:24,889 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:04:24,890 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:04:24,893 INFO finish loading name cache, total file size: 1
+2026-08-01 17:04:24,894 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:04:24,915 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785575064895_127.0.0.1_65107
+2026-08-01 17:04:24,919 INFO receive stream server request, connection_id:1785575064895_127.0.0.1_65107, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:04:24,963 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5MzA2NH0.tcP11kH5YH3HaEZ-ianiMxDIHRlFDIsTGhsn6H09v08, TTL: 18000, force_refresh: True
+2026-08-01 17:04:25,018 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785575064895_127.0.0.1_65107
+2026-08-01 17:04:25,018 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:04:25,019 INFO rpc client notify [connected] event to listeners
+2026-08-01 17:04:32,083 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:04:32,090 INFO close Nacos python naming grpc client...
+2026-08-01 17:04:44,735 INFO log directory: data/logs/nacos\.
+2026-08-01 17:04:44,735 INFO create new rpc client: 232d70bf-1ac6-4847-a881-19112ac694dc
+2026-08-01 17:04:44,736 INFO init app conn labels from client config,None
+2026-08-01 17:04:44,736 INFO init app conn labels from env,{}
+2026-08-01 17:04:44,737 INFO final app conn labels: {}
+2026-08-01 17:04:44,737 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:04:44,738 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:04:44,738 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:04:44,741 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:04:44,742 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:04:44,743 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:04:44,747 INFO finish loading name cache, total file size: 1
+2026-08-01 17:04:44,747 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:04:44,774 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785575084752_127.0.0.1_65139
+2026-08-01 17:04:44,779 INFO receive stream server request, connection_id:1785575084752_127.0.0.1_65139, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:04:44,824 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5MzA4NH0.iRUWG4vlZY_HEYtewviYzjrdRhRmwODZO3LBdGUK2u4, TTL: 18000, force_refresh: True
+2026-08-01 17:04:44,889 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785575084752_127.0.0.1_65139
+2026-08-01 17:04:44,890 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:04:44,891 INFO rpc client notify [connected] event to listeners
+2026-08-01 17:05:11,775 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:05:11,778 INFO close Nacos python naming grpc client...
+2026-08-01 17:05:23,987 INFO log directory: data/logs/nacos\.
+2026-08-01 17:05:23,988 INFO create new rpc client: ba769516-20e0-41a8-be95-17dc8e787651
+2026-08-01 17:05:23,988 INFO init app conn labels from client config,None
+2026-08-01 17:05:23,989 INFO init app conn labels from env,{}
+2026-08-01 17:05:23,989 INFO final app conn labels: {}
+2026-08-01 17:05:23,989 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:05:23,989 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:05:23,990 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:05:23,992 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:05:23,992 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:05:23,993 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:05:23,997 INFO finish loading name cache, total file size: 1
+2026-08-01 17:05:23,997 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:05:24,017 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785575123999_127.0.0.1_65209
+2026-08-01 17:05:24,023 INFO receive stream server request, connection_id:1785575123999_127.0.0.1_65209, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:05:24,069 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5MzEyNH0.cJNCOgEP3GaWnfm4G4aib40IcMxtddSRfeHPf_y2eBc, TTL: 18000, force_refresh: True
+2026-08-01 17:05:24,136 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785575123999_127.0.0.1_65209
+2026-08-01 17:05:24,137 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:05:24,138 INFO rpc client notify [connected] event to listeners
+2026-08-01 17:05:58,742 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:05:58,747 INFO close Nacos python naming grpc client...
+2026-08-01 17:06:10,721 INFO log directory: data/logs/nacos\.
+2026-08-01 17:06:10,721 INFO create new rpc client: 25583876-c794-47f9-9978-04c7cd89d62f
+2026-08-01 17:06:10,722 INFO init app conn labels from client config,None
+2026-08-01 17:06:10,722 INFO init app conn labels from env,{}
+2026-08-01 17:06:10,723 INFO final app conn labels: {}
+2026-08-01 17:06:10,723 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:06:10,723 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:06:10,723 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:06:10,726 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:06:10,726 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:06:10,728 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:06:10,731 INFO finish loading name cache, total file size: 1
+2026-08-01 17:06:10,732 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:06:10,753 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785575170733_127.0.0.1_65285
+2026-08-01 17:06:10,759 INFO receive stream server request, connection_id:1785575170733_127.0.0.1_65285, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:06:10,805 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5MzE3MH0.86D-K13xRcI2lop3Js-6tPwp49vOtXB99gTunJwvNTs, TTL: 18000, force_refresh: True
+2026-08-01 17:06:10,864 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785575170733_127.0.0.1_65285
+2026-08-01 17:06:10,864 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:06:10,864 INFO rpc client notify [connected] event to listeners
+2026-08-01 17:09:53,211 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:09:53,225 INFO close Nacos python naming grpc client...
+2026-08-01 17:10:06,083 INFO log directory: data/logs/nacos\.
+2026-08-01 17:10:06,084 INFO create new rpc client: 815b44e2-a07a-4e62-8cee-4c3aa7471022
+2026-08-01 17:10:06,084 INFO init app conn labels from client config,None
+2026-08-01 17:10:06,084 INFO init app conn labels from env,{}
+2026-08-01 17:10:06,085 INFO final app conn labels: {}
+2026-08-01 17:10:06,085 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:10:06,085 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:10:06,085 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:10:06,088 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:10:06,088 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:10:06,089 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:10:06,094 INFO finish loading name cache, total file size: 1
+2026-08-01 17:10:06,095 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:10:06,121 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785575406100_127.0.0.1_49560
+2026-08-01 17:10:06,127 INFO receive stream server request, connection_id:1785575406100_127.0.0.1_49560, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:10:06,185 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5MzQwNn0.EeHqp46e2PjLBNZLqxFmS1C4acM1AzVgcfOne41d79o, TTL: 18000, force_refresh: True
+2026-08-01 17:10:06,225 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785575406100_127.0.0.1_49560
+2026-08-01 17:10:06,225 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:10:06,226 INFO rpc client notify [connected] event to listeners
+2026-08-01 17:21:48,214 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:21:48,287 INFO close Nacos python naming grpc client...
+2026-08-01 17:22:08,388 INFO log directory: data/logs/nacos\.
+2026-08-01 17:22:08,389 INFO create new rpc client: 2dcd5fa0-4b63-410f-b9a8-ffd445eb8bd8
+2026-08-01 17:22:08,390 INFO init app conn labels from client config,None
+2026-08-01 17:22:08,390 INFO init app conn labels from env,{}
+2026-08-01 17:22:08,391 INFO final app conn labels: {}
+2026-08-01 17:22:08,391 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:22:08,392 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:22:08,392 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:22:08,395 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:22:08,396 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:22:08,397 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:22:08,418 INFO finish loading name cache, total file size: 1
+2026-08-01 17:22:08,419 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:22:08,496 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785576128471_127.0.0.1_51959
+2026-08-01 17:22:08,525 INFO receive stream server request, connection_id:1785576128471_127.0.0.1_51959, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:22:08,630 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785576128471_127.0.0.1_51959
+2026-08-01 17:22:08,631 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:22:08,632 INFO rpc client notify [connected] event to listeners
+2026-08-01 17:22:08,764 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5NDEyOH0.tHieF7R8eENeGSVp08IjZNl1E5uUheUPUVVCi4u6tUI, TTL: 18000, force_refresh: False
+2026-08-01 17:22:08,765 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5NDEyOH0.tHieF7R8eENeGSVp08IjZNl1E5uUheUPUVVCi4u6tUI, TTL: 18000, force_refresh: True
+2026-08-01 17:22:15,191 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:22:15,195 INFO close Nacos python naming grpc client...
+2026-08-01 17:22:28,550 INFO log directory: data/logs/nacos\.
+2026-08-01 17:22:28,550 INFO create new rpc client: ac4dcb9b-f0cf-4ad8-aa05-ec436c2e0243
+2026-08-01 17:22:28,551 INFO init app conn labels from client config,None
+2026-08-01 17:22:28,551 INFO init app conn labels from env,{}
+2026-08-01 17:22:28,552 INFO final app conn labels: {}
+2026-08-01 17:22:28,552 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:22:28,553 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:22:28,553 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:22:28,555 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:22:28,556 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:22:28,557 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:22:28,561 INFO finish loading name cache, total file size: 1
+2026-08-01 17:22:28,561 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:22:28,588 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785576148564_127.0.0.1_52008
+2026-08-01 17:22:28,595 INFO receive stream server request, connection_id:1785576148564_127.0.0.1_52008, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:22:28,633 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5NDE0OH0.OoHo50prJ2GxRuAQrUMv6Xu-bVigs9l6z83NPu4YoII, TTL: 18000, force_refresh: True
+2026-08-01 17:22:28,691 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785576148564_127.0.0.1_52008
+2026-08-01 17:22:28,691 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:22:28,692 INFO rpc client notify [connected] event to listeners
+2026-08-01 17:24:14,069 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:24:14,076 INFO close Nacos python naming grpc client...
+2026-08-01 17:24:27,698 INFO log directory: data/logs/nacos\.
+2026-08-01 17:24:27,699 INFO create new rpc client: ad7c785b-0911-4cb2-bd02-899000d235a0
+2026-08-01 17:24:27,699 INFO init app conn labels from client config,None
+2026-08-01 17:24:27,700 INFO init app conn labels from env,{}
+2026-08-01 17:24:27,700 INFO final app conn labels: {}
+2026-08-01 17:24:27,700 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:24:27,701 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:24:27,701 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:24:27,703 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:24:27,704 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:24:27,704 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:24:27,723 INFO finish loading name cache, total file size: 1
+2026-08-01 17:24:27,724 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:24:27,755 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785576267733_127.0.0.1_52676
+2026-08-01 17:24:27,761 INFO receive stream server request, connection_id:1785576267733_127.0.0.1_52676, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:24:27,809 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5NDI2N30.8AK-aqoV45g5ePU-5BFC8SBTxyZdT2HCW1ctWqKpjmo, TTL: 18000, force_refresh: True
+2026-08-01 17:24:27,869 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785576267733_127.0.0.1_52676
+2026-08-01 17:24:27,870 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:24:27,871 INFO rpc client notify [connected] event to listeners
+2026-08-01 17:25:10,735 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:25:10,739 INFO close Nacos python naming grpc client...
+2026-08-01 17:25:24,102 INFO log directory: data/logs/nacos\.
+2026-08-01 17:25:24,103 INFO create new rpc client: 63f53756-9356-454b-bb10-8d7914655222
+2026-08-01 17:25:24,104 INFO init app conn labels from client config,None
+2026-08-01 17:25:24,104 INFO init app conn labels from env,{}
+2026-08-01 17:25:24,105 INFO final app conn labels: {}
+2026-08-01 17:25:24,105 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:25:24,105 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:25:24,106 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:25:24,112 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:25:24,113 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:25:24,113 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:25:24,124 INFO finish loading name cache, total file size: 1
+2026-08-01 17:25:24,125 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:25:24,155 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785576324125_127.0.0.1_52738
+2026-08-01 17:25:24,160 INFO receive stream server request, connection_id:1785576324125_127.0.0.1_52738, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:25:24,200 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5NDMyNH0.DdngJAG96D62vMHTSUXwcW_IAgRdfz5UAUS8SVogbjQ, TTL: 18000, force_refresh: True
+2026-08-01 17:25:24,282 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785576324125_127.0.0.1_52738
+2026-08-01 17:25:24,282 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:25:24,283 INFO rpc client notify [connected] event to listeners
+2026-08-01 17:27:33,050 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:27:33,055 INFO close Nacos python naming grpc client...
+2026-08-01 17:27:45,689 INFO log directory: data/logs/nacos\.
+2026-08-01 17:27:45,690 INFO create new rpc client: dc232b9d-7e0d-4afc-9b0a-ba5eadcd7037
+2026-08-01 17:27:45,690 INFO init app conn labels from client config,None
+2026-08-01 17:27:45,691 INFO init app conn labels from env,{}
+2026-08-01 17:27:45,691 INFO final app conn labels: {}
+2026-08-01 17:27:45,691 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:27:45,691 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:27:45,692 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:27:45,694 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:27:45,694 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:27:45,694 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:27:45,698 INFO finish loading name cache, total file size: 1
+2026-08-01 17:27:45,698 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:27:45,720 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785576465699_127.0.0.1_53279
+2026-08-01 17:27:45,728 INFO receive stream server request, connection_id:1785576465699_127.0.0.1_53279, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:27:45,774 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5NDQ2NX0.-fi3CAwylaaAGjxDooNNsMywoGwkyBajh7TTEj4g7Nw, TTL: 18000, force_refresh: True
+2026-08-01 17:27:45,842 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785576465699_127.0.0.1_53279
+2026-08-01 17:27:45,842 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:27:45,843 INFO rpc client notify [connected] event to listeners
+2026-08-01 17:30:07,357 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:30:07,364 INFO close Nacos python naming grpc client...
+2026-08-01 17:30:20,440 INFO log directory: data/logs/nacos\.
+2026-08-01 17:30:20,441 INFO create new rpc client: c974a4f2-038b-45c6-a13c-725c0f3a1875
+2026-08-01 17:30:20,441 INFO init app conn labels from client config,None
+2026-08-01 17:30:20,442 INFO init app conn labels from env,{}
+2026-08-01 17:30:20,442 INFO final app conn labels: {}
+2026-08-01 17:30:20,442 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:30:20,443 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:30:20,443 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:30:20,447 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:30:20,448 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:30:20,449 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:30:20,474 INFO finish loading name cache, total file size: 1
+2026-08-01 17:30:20,475 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:30:20,519 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785576620491_127.0.0.1_53534
+2026-08-01 17:30:20,533 INFO receive stream server request, connection_id:1785576620491_127.0.0.1_53534, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:30:20,615 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785576620491_127.0.0.1_53534
+2026-08-01 17:30:20,615 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:30:20,617 INFO rpc client notify [connected] event to listeners
+2026-08-01 17:30:20,618 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5NDYyMH0.Dr9LMODbM5N9ByIiIPOO_0k0MEBJ1PfLeBTg1LSHUpg, TTL: 18000, force_refresh: True
+2026-08-01 17:30:20,866 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5NDYyMH0.Dr9LMODbM5N9ByIiIPOO_0k0MEBJ1PfLeBTg1LSHUpg, TTL: 18000, force_refresh: False
+2026-08-01 17:45:27,196 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:45:27,245 INFO close Nacos python naming grpc client...
+2026-08-01 17:45:54,233 INFO log directory: data/logs/nacos\.
+2026-08-01 17:45:54,234 INFO create new rpc client: ea80eff7-24ad-4d74-a738-932192af449d
+2026-08-01 17:45:54,234 INFO init app conn labels from client config,None
+2026-08-01 17:45:54,234 INFO init app conn labels from env,{}
+2026-08-01 17:45:54,235 INFO final app conn labels: {}
+2026-08-01 17:45:54,235 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:45:54,235 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:45:54,235 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:45:54,239 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:45:54,239 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:45:54,240 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:45:54,287 INFO finish loading name cache, total file size: 1
+2026-08-01 17:45:54,287 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:45:54,395 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785577554364_127.0.0.1_59650
+2026-08-01 17:45:54,416 INFO receive stream server request, connection_id:1785577554364_127.0.0.1_59650, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:45:54,517 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785577554364_127.0.0.1_59650
+2026-08-01 17:45:54,518 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:45:54,519 INFO rpc client notify [connected] event to listeners
+2026-08-01 17:45:54,602 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5NTU1NH0.z788Hvhpi3_XvJpibMMUWzpKbIVVMp2ZC6khrsB_W7U, TTL: 18000, force_refresh: False
+2026-08-01 17:45:54,603 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5NTU1NH0.z788Hvhpi3_XvJpibMMUWzpKbIVVMp2ZC6khrsB_W7U, TTL: 18000, force_refresh: True
+2026-08-01 17:52:20,836 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:52:20,925 INFO close Nacos python naming grpc client...
+2026-08-01 17:52:40,908 INFO log directory: data/logs/nacos\.
+2026-08-01 17:52:40,909 INFO create new rpc client: 37d0becc-9f45-4849-a703-693388f3d5a0
+2026-08-01 17:52:40,909 INFO init app conn labels from client config,None
+2026-08-01 17:52:40,910 INFO init app conn labels from env,{}
+2026-08-01 17:52:40,910 INFO final app conn labels: {}
+2026-08-01 17:52:40,910 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:52:40,911 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:52:40,911 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:52:40,914 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:52:40,914 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:52:40,915 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:52:40,939 INFO finish loading name cache, total file size: 1
+2026-08-01 17:52:40,940 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:52:41,007 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785577960981_127.0.0.1_63500
+2026-08-01 17:52:41,026 INFO receive stream server request, connection_id:1785577960981_127.0.0.1_63500, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:52:41,131 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785577960981_127.0.0.1_63500
+2026-08-01 17:52:41,131 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:52:41,133 INFO rpc client notify [connected] event to listeners
+2026-08-01 17:52:41,189 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5NTk2MX0.KoMy-q5vWVZg9iGNZToeK675oHsxMoDQEuWm6bbS4-Y, TTL: 18000, force_refresh: True
+2026-08-01 17:52:41,209 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5NTk2MX0.KoMy-q5vWVZg9iGNZToeK675oHsxMoDQEuWm6bbS4-Y, TTL: 18000, force_refresh: False
+2026-08-01 17:53:24,266 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:53:24,272 INFO close Nacos python naming grpc client...
+2026-08-01 17:53:44,759 INFO log directory: data/logs/nacos\.
+2026-08-01 17:53:44,761 INFO create new rpc client: c1deb564-420e-45a7-a6e5-bc693b37c17c
+2026-08-01 17:53:44,761 INFO init app conn labels from client config,None
+2026-08-01 17:53:44,762 INFO init app conn labels from env,{}
+2026-08-01 17:53:44,763 INFO final app conn labels: {}
+2026-08-01 17:53:44,763 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:53:44,764 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:53:44,764 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:53:44,778 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:53:44,779 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:53:44,780 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:53:44,815 INFO finish loading name cache, total file size: 1
+2026-08-01 17:53:44,815 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:53:44,884 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785578024824_127.0.0.1_63911
+2026-08-01 17:53:44,897 INFO receive stream server request, connection_id:1785578024824_127.0.0.1_63911, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:53:44,915 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5NjAyNH0.fhg6Sf6A8D8m-2rqzOLecf_QNjxBjldBKhyrQf_mhsQ, TTL: 18000, force_refresh: True
+2026-08-01 17:53:45,009 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785578024824_127.0.0.1_63911
+2026-08-01 17:53:45,009 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:53:45,011 INFO rpc client notify [connected] event to listeners
+2026-08-01 17:56:29,106 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:56:29,116 INFO close Nacos python naming grpc client...
+2026-08-01 17:56:52,642 INFO log directory: data/logs/nacos\.
+2026-08-01 17:56:52,643 INFO create new rpc client: 5e6db5c2-c6b1-451a-afa2-6c4dfff56d54
+2026-08-01 17:56:52,644 INFO init app conn labels from client config,None
+2026-08-01 17:56:52,644 INFO init app conn labels from env,{}
+2026-08-01 17:56:52,645 INFO final app conn labels: {}
+2026-08-01 17:56:52,645 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:56:52,646 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:56:52,646 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:56:52,654 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:56:52,654 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:56:52,656 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:56:52,707 INFO finish loading name cache, total file size: 1
+2026-08-01 17:56:52,709 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:56:53,220 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785578213178_127.0.0.1_49229
+2026-08-01 17:56:53,310 INFO receive stream server request, connection_id:1785578213178_127.0.0.1_49229, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:56:53,418 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785578213178_127.0.0.1_49229
+2026-08-01 17:56:53,419 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:56:53,421 INFO rpc client notify [connected] event to listeners
+2026-08-01 17:56:53,866 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5NjIxM30.bPtDd1tfSMC8ueuRIvFDxYHmDUUAnPSCCd2zUGdB7e0, TTL: 18000, force_refresh: False
+2026-08-01 17:56:53,893 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5NjIxM30.bPtDd1tfSMC8ueuRIvFDxYHmDUUAnPSCCd2zUGdB7e0, TTL: 18000, force_refresh: True
+2026-08-01 17:57:51,429 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 17:57:51,435 INFO close Nacos python naming grpc client...
+2026-08-01 17:58:08,520 INFO log directory: data/logs/nacos\.
+2026-08-01 17:58:08,521 INFO create new rpc client: 2f2a572d-77a1-4946-b7cb-b9d8d61f465b
+2026-08-01 17:58:08,522 INFO init app conn labels from client config,None
+2026-08-01 17:58:08,522 INFO init app conn labels from env,{}
+2026-08-01 17:58:08,522 INFO final app conn labels: {}
+2026-08-01 17:58:08,523 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 17:58:08,523 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 17:58:08,524 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 17:58:08,527 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 17:58:08,528 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 17:58:08,529 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 17:58:08,550 INFO finish loading name cache, total file size: 1
+2026-08-01 17:58:08,551 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 17:58:08,580 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785578288555_127.0.0.1_50089
+2026-08-01 17:58:08,584 INFO receive stream server request, connection_id:1785578288555_127.0.0.1_50089, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 17:58:08,620 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5NjI4OH0.MkCmnGGrUognDZe3mvncd_T68xsqDy9xkw49rlkWU2A, TTL: 18000, force_refresh: True
+2026-08-01 17:58:08,701 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785578288555_127.0.0.1_50089
+2026-08-01 17:58:08,702 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 17:58:08,703 INFO rpc client notify [connected] event to listeners
+2026-08-01 20:45:46,098 INFO receive stream server request, connection_id:1785578288555_127.0.0.1_50089, original info: metadata {
+  type: "ClientDetectionRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"requestId\":\"8\",\"module\":\"internal\"}"
+}
+
+2026-08-01 21:17:25,351 INFO deregister ephemeral instance ip:127.0.0.1, port:8002, service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public
+2026-08-01 21:17:25,386 ERROR connection is unregistered, switch server, connectionId=1785578288555_127.0.0.1_50089, request=InstanceRequest
+2026-08-01 21:17:25,495 ERROR send request fail, request=InstanceRequest{headers{'accessToken': 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5NjI4OH0.MkCmnGGrUognDZe3mvncd_T68xsqDy9xkw49rlkWU2A'}, retryTimes=0, errorMessage=Error [500]: Connection is unregistered.
+2026-08-01 21:17:25,603 ERROR send request fail, request=InstanceRequest{headers{'accessToken': 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5NjI4OH0.MkCmnGGrUognDZe3mvncd_T68xsqDy9xkw49rlkWU2A'}, retryTimes=1, errorMessage=Error [-401]: client not connected,status:RpcClientStatus.UNHEALTHY
+2026-08-01 21:17:25,713 ERROR send request fail, request=InstanceRequest{headers{'accessToken': 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTU5NjI4OH0.MkCmnGGrUognDZe3mvncd_T68xsqDy9xkw49rlkWU2A'}, retryTimes=2, errorMessage=Error [-401]: client not connected,status:RpcClientStatus.UNHEALTHY
+2026-08-01 21:17:25,714 ERROR failed to invoke nacos naming server : Error [-401]: client not connected,status:RpcClientStatus.UNHEALTHY
+2026-08-01 21:17:54,386 INFO log directory: data/logs/nacos\.
+2026-08-01 21:17:54,387 INFO create new rpc client: 527cbb41-0f23-491e-843a-8bae25b1447c
+2026-08-01 21:17:54,388 INFO init app conn labels from client config,None
+2026-08-01 21:17:54,388 INFO init app conn labels from env,{}
+2026-08-01 21:17:54,389 INFO final app conn labels: {}
+2026-08-01 21:17:54,389 INFO rpc client init label, labels : {'source': 'sdk', 'module': 'naming'}
+2026-08-01 21:17:54,389 INFO rpc client register server push request: NotifySubscriberRequest handler: NamingPushRequestHandler
+2026-08-01 21:17:54,390 INFO rpc client register connection listener: NamingGrpcRedoService
+2026-08-01 21:17:54,394 INFO rpc client register server push request: ConnectResetRequest handler: ConnectResetRequestHandler
+2026-08-01 21:17:54,395 INFO rpc client register server push request: ClientDetectionRequest handler: ClientDetectionRequestHandler
+2026-08-01 21:17:54,396 INFO rpc client start to connect server, server: 127.0.0.1:9848
+2026-08-01 21:17:54,420 INFO finish loading name cache, total file size: 1
+2026-08-01 21:17:54,421 INFO [load_cache_from_disk] loaded {1} entries cache from disk.
+2026-08-01 21:17:54,462 INFO connect to server success,labels:{'source': 'sdk', 'module': 'naming'},tenant:,connection_id:1785590274426_127.0.0.1_49251
+2026-08-01 21:17:54,582 INFO receive stream server request, connection_id:1785590274426_127.0.0.1_49251, original info: metadata {
+  type: "SetupAckRequest"
+  clientIp: "192.168.249.1"
+}
+body {
+  value: "{\"headers\":{},\"abilityTable\":{\"supportPersistentInstanceByGrpc\":true,\"agent\":true,\"fuzzyWatch\":true,\"lock\":true,\"mcp\":true},\"module\":\"internal\"}"
+}
+
+2026-08-01 21:17:54,687 INFO rpc client successfully connected to server:127.0.0.1:9848, connection_id:1785590274426_127.0.0.1_49251
+2026-08-01 21:17:54,688 INFO register ephemeral instance service_name:paper-collector-agent, group_name:DEFAULT_GROUP, namespace:public, instance:Instance(instanceId='', ip='127.0.0.1', port=8002, weight=1.0, healthy=True, enabled=True, ephemeral=True, clusterName='DEFAULT', serviceName='', metadata={'framework': 'fastapi', 'version': '1.0.0', 'health': '/health'})
+2026-08-01 21:17:54,690 INFO rpc client notify [connected] event to listeners
+2026-08-01 21:17:54,984 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTYwODI3NH0.HA8nca2nW8Un64SbXXchDTiV8EuDfPAYOyyjeEWEdlo, TTL: 18000, force_refresh: True
+2026-08-01 21:17:54,985 INFO [get_access_token] AccessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJuYWNvcyIsImV4cCI6MTc4NTYwODI3NH0.HA8nca2nW8Un64SbXXchDTiV8EuDfPAYOyyjeEWEdlo, TTL: 18000, force_refresh: False

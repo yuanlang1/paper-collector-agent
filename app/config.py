@@ -48,14 +48,6 @@ class Settings(BaseSettings):
     PAPER_SERVICE_GRPC_TIMEOUT_SECONDS: float
     PAPER_SERVICE_GRPC_MAX_RECEIVE_MESSAGE_LENGTH: int
 
-    # LightRAG
-    LIGHTRAG_BASE_URL: str = ""
-    LIGHTRAG_API_KEY: str = ""
-    LIGHTRAG_REQUEST_TIMEOUT_SECONDS: float = 120.0
-    LIGHTRAG_INDEX_POLL_INTERVAL_SECONDS: float = 2.0
-    LIGHTRAG_INDEX_MAX_POLLS: int = 150
-    LIGHTRAG_INDEX_LEASE_SECONDS: int = 900
-
     SERPAPI_SEARCH_URL: str
     SERPAPI_API_KEY: str
     ARXIV_API_URL: str
@@ -89,6 +81,22 @@ class Settings(BaseSettings):
     LANGSMITH_TRACING: bool
     LANGSMITH_API_KEY: str
     LANGSMITH_PROJECT: str
+
+    # mineru settings
+    MINERU_SINGLE_TASK_PATH: str
+    MINERU_BATCH_TASK_PATH: str
+    MINERU_BATCH_RESULT_PATH: str
+    MINERU_TOKEN: str
+    MINERU_MAX_BATCH_SIZE: int = 50
+    MINERU_MAX_PARALLEL_BATCHES: int = 2
+    MINERU_BASE_URL: str
+
+    # embedding settings
+    QDRANT_URL: str = "http://localhost:6333"
+    QDRANT_API_KEY: str | None = None
+    DENSE_EMBEDDING_MODEL_NAME: str = "BAAI/bge-m3"
+    SPARSE_EMBEDDING_MODEL_NAME: str = "Qdrant/bm25"
+    EMBEDDING_DEVICE: str = "cpu"
 
     @model_validator(mode="after")
     def validate_paper_search_pagination(self) -> "Settings":
