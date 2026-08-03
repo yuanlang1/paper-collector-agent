@@ -1,6 +1,6 @@
 import unittest
 
-from app.infrastructure.venue_service_grpc_client import (
+from app.infrastructure.grpc.venue_service_grpc_client import (
     VenueServiceGrpcClient,
 )
 

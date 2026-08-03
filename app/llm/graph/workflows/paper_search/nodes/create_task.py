@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from app.infrastructure.task_service_grpc_client import (
+from app.infrastructure.grpc.task_service_grpc_client import (
     TaskServiceGrpcClient,
     TaskState,
     task_service_grpc_client,

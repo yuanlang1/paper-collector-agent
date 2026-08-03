@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock
 
-from app.infrastructure.rag_grpc_client import RagGrpcClient
+from app.infrastructure.grpc.rag_grpc_client import RagGrpcClient
 from app.protos.rag.v1 import rag_pb2
 
 

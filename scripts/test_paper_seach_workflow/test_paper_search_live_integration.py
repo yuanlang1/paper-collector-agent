@@ -14,7 +14,7 @@ import uuid
 import unittest
 
 from app.config import settings
-from app.infrastructure.grpc_channel_pool import paper_service_grpc_channel_pool
+from app.infrastructure.grpc.grpc_channel_pool import paper_service_grpc_channel_pool
 from app.infrastructure.nacos_registry import nacos_registry
 from app.llm.graph.workflows.paper_search.workflow import (
     build_paper_search_workflow,

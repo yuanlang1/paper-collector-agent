@@ -4,9 +4,8 @@ from langchain_core.documents import Document
 from qdrant_client import AsyncQdrantClient, models
 from langchain_core.embeddings import Embeddings
 
+from app.config import settings
 from app.rag.index_construction.base import BaseQdrantIndexConstructionModule
-
-
 
 class PaperIndexConstructionModule(
     BaseQdrantIndexConstructionModule
@@ -14,7 +13,7 @@ class PaperIndexConstructionModule(
     def __init__(
         self,
         *,
-        collection_name: str = "paper",
+        collection_name: str = settings.PAPER_COLLECTION_NAME,
         batch_size: int = 32,
     ) -> None:
         super().__init__(

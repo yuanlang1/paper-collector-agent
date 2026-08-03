@@ -67,10 +67,10 @@ class RagGrpcClient:
             raise ValueError(f"{status} result requires an error")
 
         return rag_pb2.RagPaperResult(
-            paper_id=paper_id,
-            status=_RESULT_STATUS_CODES[status],
-            chunk_count=chunk_count,
-            error=error,
+            paper_id = paper_id,
+            status = _RESULT_STATUS_CODES[status],
+            chunk_count = chunk_count,
+            error = error,
         )
 
     async def claim_task_rag_papers(
@@ -98,12 +98,12 @@ class RagGrpcClient:
             stub = await self._get_stub()
             response = await stub.ClaimTaskRagPapers(
                 rag_pb2.ClaimTaskRagPapersRequest(
-                    task_id=task_id,
-                    batch_id=batch_id,
-                    limit=limit,
-                    lease_seconds=lease_seconds,
+                    task_id = task_id,
+                    batch_id = batch_id,
+                    limit = limit,
+                    lease_seconds = lease_seconds,
                 ),
-                timeout=settings.PAPER_SERVICE_GRPC_TIMEOUT_SECONDS,
+                timeout = settings.PAPER_SERVICE_GRPC_TIMEOUT_SECONDS,
             )
 
             if not response.success:
@@ -159,11 +159,11 @@ class RagGrpcClient:
             stub = await self._get_stub()
             response = await stub.CompleteTaskRagBatch(
                 rag_pb2.CompleteTaskRagBatchRequest(
-                    task_id=task_id,
-                    batch_id=batch_id,
-                    results=grpc_results,
+                    task_id = task_id,
+                    batch_id = batch_id,
+                    results = grpc_results,
                 ),
-                timeout=settings.PAPER_SERVICE_GRPC_TIMEOUT_SECONDS,
+                timeout = settings.PAPER_SERVICE_GRPC_TIMEOUT_SECONDS,
             )
 
             if not response.success:
@@ -218,7 +218,7 @@ class RagGrpcClient:
             "result": None,
             "error": (
                 f"gRPC call failed: "
-                f"code={exc.code().name}, details={exc.details()}"
+                f"code = {exc.code().name}, details = {exc.details()}"
             ),
             "metadata": cls._metadata(),
         }

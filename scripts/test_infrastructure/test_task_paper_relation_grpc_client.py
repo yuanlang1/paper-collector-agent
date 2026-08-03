@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock
 
-from app.infrastructure.task_paper_relation_grpc_client import (
+from app.infrastructure.grpc.task_paper_relation_grpc_client import (
     TaskPaperRelationGrpcClient,
 )
 from app.protos.task_paper_relation.v1 import task_paper_relation_pb2

@@ -7,6 +7,7 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from qdrant_client import AsyncQdrantClient, models
 
+from app.config import settings
 from app.rag.index_construction.base import BaseQdrantIndexConstructionModule, IndexConstructionResult
 
 logger = logging.getLogger(__name__)
@@ -17,7 +18,7 @@ class PaperContentIndexConstructionModule(
     def __init__(
         self,
         *,
-        collection_name: str = "paper_content",
+        collection_name: str = settings.PAPER_CONTENT_COLLECTION_NAME,
         batch_size: int = 32,
     ) -> None:
         super().__init__(

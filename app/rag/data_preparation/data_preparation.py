@@ -71,7 +71,7 @@ class DataPreparationModule:
         document: Document,
     ) -> list[Document]:
         paper_id = str(document.metadata["paper_id"])
-        parent_id = str(document.metadata.get("parent_id", paper_id,))
+        parent_id = str(document.metadata.get("parent_id", paper_id))
 
         markdown = self._clean_markdown(document.page_content)
         section_documents = self.header_splitter.split_text(markdown)
@@ -96,9 +96,9 @@ class DataPreparationModule:
                     "paper_id": paper_id,
                     "parent_id": parent_id,
                     "chunk_id": self._build_chunk_id(
-                        paper_id=paper_id,
-                        chunk_index=chunk_index,
-                        content=content,
+                        paper_id = paper_id,
+                        chunk_index = chunk_index,
+                        content = content,
                     ),
                     "chunk_index": chunk_index,
                     "doc_type": "child",

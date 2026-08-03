@@ -49,7 +49,7 @@ from app.llm.graph.workflows.paper_search.nodes.recommend import (
 from app.llm.graph.workflows.paper_search.state import (
     PaperSearchWorkflowState,
 )
-from app.infrastructure.task_service_grpc_client import (
+from app.infrastructure.grpc.task_service_grpc_client import (
     TaskServiceGrpcClient,
 )
 

@@ -5,9 +5,7 @@ import grpc
 from google.protobuf.wrappers_pb2 import BoolValue, Int32Value
 
 from app.config import settings
-from app.infrastructure.grpc_channel_pool import (
-    paper_service_grpc_channel_pool,
-)
+from app.infrastructure.grpc.grpc_channel_pool import paper_service_grpc_channel_pool
 from app.protos.task.v1 import task_pb2, task_pb2_grpc
 
 

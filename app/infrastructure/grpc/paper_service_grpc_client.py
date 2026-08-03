@@ -6,9 +6,7 @@ from google.protobuf.timestamp_pb2 import Timestamp
 from google.protobuf.wrappers_pb2 import Int32Value
 
 from app.config import settings
-from app.infrastructure.grpc_channel_pool import (
-    paper_service_grpc_channel_pool,
-)
+from app.infrastructure.grpc.grpc_channel_pool import paper_service_grpc_channel_pool
 from app.protos.paper.v1 import paper_pb2, paper_pb2_grpc
 
 

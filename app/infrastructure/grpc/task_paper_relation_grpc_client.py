@@ -3,9 +3,7 @@ from typing import Any
 import grpc
 
 from app.config import settings
-from app.infrastructure.grpc_channel_pool import (
-    paper_service_grpc_channel_pool,
-)
+from app.infrastructure.grpc.grpc_channel_pool import paper_service_grpc_channel_pool
 from app.protos.task_paper_relation.v1 import (
     task_paper_relation_pb2,
     task_paper_relation_pb2_grpc,

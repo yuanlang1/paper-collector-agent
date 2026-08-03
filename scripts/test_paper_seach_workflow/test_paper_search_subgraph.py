@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from app.infrastructure.task_service_grpc_client import TaskState
+from app.infrastructure.grpc.task_service_grpc_client import TaskState
 from app.llm.graph.workflows.paper_search.nodes.search import (
     SEARCH_HANDLERS,
 )

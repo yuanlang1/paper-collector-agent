@@ -4,9 +4,7 @@ from typing import Any
 import grpc
 
 from app.config import settings
-from app.infrastructure.grpc_channel_pool import (
-    paper_service_grpc_channel_pool,
-)
+from app.infrastructure.grpc.grpc_channel_pool import paper_service_grpc_channel_pool
 from app.protos.venue.v1 import venue_pb2, venue_pb2_grpc
 
 

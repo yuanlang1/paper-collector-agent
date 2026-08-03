@@ -1,6 +1,6 @@
 import unittest
 
-from app.infrastructure.paper_service_grpc_client import PaperServiceGrpcClient
+from app.infrastructure.grpc.paper_service_grpc_client import PaperServiceGrpcClient
 
 
 class PaperServiceGrpcClientTests(unittest.TestCase):

@@ -6,13 +6,13 @@ from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from app.infrastructure.paper_service_grpc_client import (
+from app.infrastructure.grpc.paper_service_grpc_client import (
     paper_service_grpc_client,
 )
-from app.infrastructure.task_service_grpc_client import (
+from app.infrastructure.grpc.task_service_grpc_client import (
     task_service_grpc_client,
 )
-from app.infrastructure.venue_service_grpc_client import (
+from app.infrastructure.grpc.venue_service_grpc_client import (
     venue_service_grpc_client,
 )
 from app.llm.artifacts.store import LocalArtifactStore

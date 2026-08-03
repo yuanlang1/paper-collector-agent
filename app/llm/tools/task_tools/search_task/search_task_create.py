@@ -2,7 +2,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.infrastructure.task_service_grpc_client import (
+from app.infrastructure.grpc.task_service_grpc_client import (
     task_service_grpc_client,
 )
 from app.llm.tools.base import AppToolSpec

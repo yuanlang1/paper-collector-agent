@@ -94,6 +94,8 @@ class Settings(BaseSettings):
     # embedding settings
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str | None = None
+    PAPER_COLLECTION_NAME: str
+    PAPER_CONTENT_COLLECTION_NAME: str
     DENSE_EMBEDDING_MODEL_NAME: str = "BAAI/bge-m3"
     SPARSE_EMBEDDING_MODEL_NAME: str = "Qdrant/bm25"
     EMBEDDING_DEVICE: str = "cpu"
@@ -111,8 +113,6 @@ class Settings(BaseSettings):
                 )
         return self
 
-    
-
     model_config = SettingsConfigDict(
         env_file=str(DEFAULT_ENV_FILE),
         env_file_encoding="utf-8",
@@ -120,9 +120,7 @@ class Settings(BaseSettings):
     )
 
 settings = Settings()
-os.environ["LANGSMITH_TRACING"] = str(
-    settings.LANGSMITH_TRACING
-).lower()
+os.environ["LANGSMITH_TRACING"] = str(settings.LANGSMITH_TRACING).lower()
 os.environ["LANGSMITH_API_KEY"] = settings.LANGSMITH_API_KEY
 os.environ["LANGSMITH_PROJECT"] = settings.LANGSMITH_PROJECT
 DATABASE_URL = settings.DATABASE_URL

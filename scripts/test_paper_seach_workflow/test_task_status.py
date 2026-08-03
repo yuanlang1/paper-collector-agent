@@ -1,6 +1,6 @@
 import unittest
 
-from app.infrastructure.task_service_grpc_client import (
+from app.infrastructure.grpc.task_service_grpc_client import (
     TaskServiceGrpcClient,
     TaskState,
 )
@@ -46,6 +46,15 @@ class _RecordingClient:
     async def update_task_status(self, **kwargs):
         self.calls.append(kwargs)
         return self.result
+
+
+class _RecordingRagRunner:
+    def __init__(self) -> None:
+        self.task_ids: list[int] = []
+
+    async def notify(self, task_id: int) -> bool:
+        self.task_ids.append(task_id)
+        return True
 
 
 class _CreateTaskClient:
@@ -206,8 +215,10 @@ class TaskStatusTests(unittest.IsolatedAsyncioTestCase):
 
         for state, expected in cases:
             client = _RecordingClient()
+            rag_runner = _RecordingRagRunner()
             result = await UpdatePaperSearchTaskStatusNode(
-                client=client
+                client=client,
+                rag_runner=rag_runner,
             )(
                 {
                     "paper_service_task_id": 38,
@@ -224,6 +235,10 @@ class TaskStatusTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 result["remote_task_state"],
                 expected.name,
+            )
+            self.assertEqual(
+                rag_runner.task_ids,
+                [38] if expected is TaskState.SEARCH_COMPLETED else [],
             )
 
     async def test_terminal_node_keeps_workflow_result_when_update_fails(self) -> None:
