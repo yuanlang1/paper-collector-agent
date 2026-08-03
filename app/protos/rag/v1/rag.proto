@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package papercollector.rag.v1;
+
+import "google/protobuf/struct.proto";
+
+option java_multiple_files = true;
+option java_package = "com.yl.paperservice.grpc.rag.v1";
+
+service RagInternalService {
+  rpc ClaimTaskRagPapers(ClaimTaskRagPapersRequest)
+      returns (ClaimTaskRagPapersResponse);
+
+  rpc CompleteTaskRagBatch(CompleteTaskRagBatchRequest)
+      returns (CompleteTaskRagBatchResponse);
+}
+
+message ClaimTaskRagPapersRequest {
+  int64 task_id = 1;
+  string batch_id = 2;
+  int32 limit = 3;
+  int32 lease_seconds = 4;
+}
+
+message PaperRagInput {
+  int64 paper_id = 1;
+  string title = 2;
+  string url = 3;
+  string paper_abstract = 4;
+}
+
+message ClaimTaskRagPapersResponse {
+  int32 code = 1;
+  bool success = 2;
+  int64 task_id = 3;
+  string batch_id = 4;
+  repeated PaperRagInput papers = 5;
+  int32 claimed_count = 6;
+  int32 task_state = 7;
+  string message = 8;
+  google.protobuf.Struct other = 9;
+}
+
+enum RagBatchResultStatus {
+  RAG_BATCH_RESULT_STATUS_UNSPECIFIED = 0;
+  RAG_BATCH_RESULT_READY = 1;
+  RAG_BATCH_RESULT_SKIPPED = 2;
+  RAG_BATCH_RESULT_FAILED = 3;
+}
+
+message RagPaperResult {
+  int64 paper_id = 1;
+  RagBatchResultStatus status = 2;
+  int32 chunk_count = 3;
+  string error = 4;
+}
+
+message CompleteTaskRagBatchRequest {
+  int64 task_id = 1;
+  string batch_id = 2;
+  repeated RagPaperResult results = 3;
+}
+
+message CompleteTaskRagBatchResponse {
+  int32 code = 1;
+  bool success = 2;
+  int64 task_id = 3;
+  string batch_id = 4;
+  int32 task_state = 5;
+  int32 total_count = 6;
+  int32 pending_count = 7;
+  int32 indexing_count = 8;
+  int32 ready_count = 9;
+  int32 skipped_count = 10;
+  int32 failed_count = 11;
+  double progress_percent = 12;
+  string message = 13;
+}
