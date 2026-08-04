@@ -1,12 +1,17 @@
-flowchart LR
-    U["User / Agent request"] --> I["Review request: task_id + topic"]
-    I --> P["Load task.paper_ids via gRPC"]
-    P --> G{"RAG indexes ready?"}
-    G -->|"ready / partial"| F["Generate framework once"]
-    G -->|"not ready"| W["Return indexed coverage or wait"]
+flowchart TD
+    U["User / Agent request"] --> I["Initialize review: task_id, topic, options"]
+    I --> P["Load and freeze task.paper_ids"]
+    P --> G{"RAG coverage sufficient?"}
+    G -->|"ready / allowed partial"| F["Generate framework once"]
+    G -->|"not ready"| W["Blocked: wait for indexing"]
     F --> C["Generate claims per section"]
-    C --> R["Filtered hybrid retrieval\npaper + paper_content\npaper_ids only"]
-    R --> E["Evidence ledger\nclaims + chunks + citations"]
-    E --> D["Render sections from evidence"]
+    C --> R["Filtered hybrid RAG\npaper + paper_content\npaper_ids snapshot only"]
+    R --> E["Build evidence ledger"]
+    E --> D["Render affected sections"]
     D --> A["Assemble review + references"]
-    A --> O["Review artifact"]
+    A --> Q["Reflect review\nevidence, citations, coverage, coherence"]
+    Q -->|"approved"| O["Final review artifact"]
+    Q -->|"citation or prose revision"| D
+    Q -->|"evidence insufficient"| R
+    Q -->|"claim must weaken or remove"| C
+    Q -->|"max rounds reached"| X["Failed / partial with quality report"]

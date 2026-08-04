@@ -14,6 +14,8 @@ service PaperInternalService {
       returns (GetExistingPapersResponse);
   rpc BatchSavePapers(BatchSavePapersRequest)
       returns (BatchSavePapersResponse);
+  rpc GetTaskReviewPapers(GetTaskReviewPapersRequest)
+      returns (GetTaskReviewPapersResponse);
 }
 
 message GetExistingPapersRequest {
@@ -83,4 +85,28 @@ message BatchSavePapersResponse {
   repeated PaperSaveItem data = 3;
   string message = 4;
   google.protobuf.Struct other = 5;
+}
+
+message GetTaskReviewPapersRequest {
+  int64 task_id = 1;
+}
+
+message TaskReviewPaperItem {
+  int64 paper_id = 1;
+  string title = 2;
+  repeated string authors = 3;
+  google.protobuf.Timestamp published_date = 4;
+  string doi = 5;
+  string rag_status = 6;
+  int32 chunk_count = 7;
+}
+
+message GetTaskReviewPapersResponse {
+  int32 code = 1;
+  bool success = 2;
+  string message = 3;
+
+  int64 task_id = 4;
+  string task_status = 5;
+  repeated TaskReviewPaperItem papers = 6;
 }

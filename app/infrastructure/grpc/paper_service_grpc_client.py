@@ -29,6 +29,23 @@ class PaperServiceGrpcClient:
         return str(value or "").strip()
 
     @staticmethod
+    def _validate_task_id(task_id: int) -> None:
+        if (
+            not isinstance(task_id, int)
+            or isinstance(task_id, bool)
+            or task_id <= 0
+        ):
+            raise ValueError("task_id must be a positive integer")
+
+    @staticmethod
+    def _timestamp_to_iso8601(value: Timestamp) -> str:
+        return (
+            value.ToDatetime(tzinfo=timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+
+    @staticmethod
     def _timestamp(value: Any) -> Timestamp | None:
         if value is None or value == "":
             return None
@@ -169,6 +186,84 @@ class PaperServiceGrpcClient:
             }
 
         except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            return {
+                "ok": False,
+                "result": None,
+                "error": str(exc),
+                "metadata": {"source": "paper_service_grpc"},
+            }
+
+    async def get_task_review_papers(
+        self,
+        task_id: int,
+    ) -> dict[str, Any]:
+        try:
+            self._validate_task_id(task_id)
+
+            stub = await self._get_stub()
+            response = await stub.GetTaskReviewPapers(
+                paper_pb2.GetTaskReviewPapersRequest(task_id=task_id),
+                timeout=settings.PAPER_SERVICE_GRPC_TIMEOUT_SECONDS,
+            )
+
+            if not response.success:
+                return {
+                    "ok": False,
+                    "result": None,
+                    "error": response.message or "Get task review papers failed",
+                    "metadata": {
+                        "source": "paper_service_grpc",
+                        "code": response.code,
+                    },
+                }
+
+            return {
+                "ok": True,
+                "result": {
+                    "task_id": response.task_id,
+                    "task_status": response.task_status,
+                    "papers": [
+                        {
+                            "paper_id": item.paper_id,
+                            "title": item.title,
+                            "authors": [
+                                author.strip()
+                                for author in item.authors
+                                if author.strip()
+                            ],
+                            "published_date": (
+                                self._timestamp_to_iso8601(
+                                    item.published_date
+                                )
+                                if item.HasField("published_date")
+                                else None
+                            ),
+                            "doi": item.doi or None,
+                            "rag_status": item.rag_status,
+                            "chunk_count": item.chunk_count,
+                        }
+                        for item in response.papers
+                    ],
+                },
+                "error": None,
+                "metadata": {
+                    "source": "paper_service_grpc",
+                    "code": response.code,
+                },
+            }
+
+        except grpc.aio.AioRpcError as exc:
+            return {
+                "ok": False,
+                "result": None,
+                "error": (
+                    f"gRPC call failed: "
+                    f"code={exc.code().name}, details={exc.details()}"
+                ),
+                "metadata": {"source": "paper_service_grpc"},
+            }
+
+        except (RuntimeError, TypeError, ValueError) as exc:
             return {
                 "ok": False,
                 "result": None,

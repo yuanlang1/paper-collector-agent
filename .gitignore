@@ -33,3 +33,9 @@ Thumbs.db
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+data 
+scripts
+.codex
+.pytest_cache
+.agents

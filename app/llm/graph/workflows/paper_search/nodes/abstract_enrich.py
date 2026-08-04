@@ -40,7 +40,7 @@ FALLBACK_ABSTRACT_SYSTEM_PROMPT = """
 
 
 class AiAbstractResult(BaseModel):
-    ai_abstract: str = Field(min_length=1, max_length=3_000)
+    ai_abstract: str = Field(min_length = 1, max_length = 3_000)
 
 
 def _text(value: Any) -> str | None:
@@ -84,14 +84,14 @@ def _extract_original_abstract(initial_pdf_text: str) -> str:
         \babstract\b
         \s*[:\-—]?\s*
         (?P<abstract>.+?)
-        (?=
+        (? = 
             \n\s*(?:keywords?|index\s+terms?)\b
             |\n\s*(?:\d+|[ivxlcdm]+)\.?\s*introduction\b
             |\n\s*introduction\b
         )
         """,
         initial_pdf_text,
-        flags=re.VERBOSE,
+        flags = re.VERBOSE,
     )
 
     if match is None:
@@ -120,7 +120,7 @@ class AbstractEnrichNode:
         self.artifact_store = artifact_store or LocalArtifactStore()
         self.model = model or create_structured_chat_model(
             AiAbstractResult,
-            temperature=0,
+            temperature = 0,
         )
 
     async def _generate_ai_abstract(
@@ -132,10 +132,10 @@ class AbstractEnrichNode:
         result = await self.model.ainvoke(
             [
                 SystemMessage(
-                    content=AI_ABSTRACT_SYSTEM_PROMPT,
+                    content = AI_ABSTRACT_SYSTEM_PROMPT,
                 ),
                 HumanMessage(
-                    content=json.dumps(
+                    content = json.dumps(
                         {
                             "title": paper_info.get("title"),
                             "authors": paper_info.get("authors"),
@@ -144,7 +144,7 @@ class AbstractEnrichNode:
                             ),
                             "pdf_front_pages": initial_pdf_text,
                         },
-                        ensure_ascii=False,
+                        ensure_ascii = False,
                     )
                 ),
             ]
@@ -165,10 +165,10 @@ class AbstractEnrichNode:
         result = await self.model.ainvoke(
             [
                 SystemMessage(
-                    content=FALLBACK_ABSTRACT_SYSTEM_PROMPT,
+                    content = FALLBACK_ABSTRACT_SYSTEM_PROMPT,
                 ),
                 HumanMessage(
-                    content=json.dumps(
+                    content = json.dumps(
                         {
                             "title": paper_info.get("title"),
                             "authors": paper_info.get("authors"),
@@ -178,7 +178,7 @@ class AbstractEnrichNode:
                                 "paper_abstract"
                             ),
                         },
-                        ensure_ascii=False,
+                        ensure_ascii = False,
                     )
                 ),
             ]
@@ -225,7 +225,7 @@ class AbstractEnrichNode:
             def read_manifest() -> dict[str, Any]:
                 with manifest_path.open(
                     "r",
-                    encoding="utf-8",
+                    encoding = "utf-8",
                 ) as file:
                     return json.load(file)
 
@@ -313,8 +313,8 @@ class AbstractEnrichNode:
                     if initial_pdf_text:
                         paper_info["ai_abstract"] = (
                             await self._generate_ai_abstract(
-                                paper_info=paper_info,
-                                initial_pdf_text=initial_pdf_text,
+                                paper_info = paper_info,
+                                initial_pdf_text = initial_pdf_text,
                             )
                         )
                         ai_summary_source = "pdf_front_pages"
@@ -352,13 +352,13 @@ class AbstractEnrichNode:
             manifest["step_key"] = "abstract_enrichment"
 
             artifact = await self.artifact_store.write_json(
-                run_id=run_id,
-                step_key="abstract_enrichment",
-                source="abstract",
-                kind="paper_info_abstract_manifest_json",
-                payload=manifest,
-                count=len(papers),
-                metadata={
+                run_id = run_id,
+                step_key = "abstract_enrichment",
+                source = "abstract",
+                kind = "paper_info_abstract_manifest_json",
+                payload = manifest,
+                count = len(papers),
+                metadata = {
                     "input_manifest": artifact_uri,
                     "source_abstract_count": source_abstract_count,
                     "extracted_abstract_count": (
