@@ -1,6 +1,0 @@
-{
-  "run_id": "live-paper-search-rag-72459613976a4f579ceaaf84db678a26",
-  "search_task_id": 34,
-  "input_manifest": "artifact://live-paper-search-rag-72459613976a4f579ceaaf84db678a26/enqueue_rag_index/lightrag_20260727T080410Z_b209882db895.json",
-  "results": []
-}
