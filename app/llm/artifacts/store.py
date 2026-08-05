@@ -128,3 +128,15 @@ class LocalArtifactStore:
 
         with path.open("r", encoding="utf-8") as f:
             return json.load(f)
+
+    async def read_json_uri(
+        self,
+        artifact_uri: str,
+    ) -> dict[str, Any]:
+        path = self.base_dir / artifact_uri.removeprefix("artifact://")
+
+        return await asyncio.to_thread(
+            lambda: json.loads(
+                path.read_text(encoding="utf-8")
+            )
+        )

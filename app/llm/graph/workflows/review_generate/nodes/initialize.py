@@ -99,7 +99,6 @@ async def initialize_review_node(
         # 论文集
         "paper_ids_snapshot": [],
         "corpus_artifact_ref": None,
-        "corpus_coverage_artifact_ref": None,
 
         # Framework / Claims / Evidence
         "framework_artifact_ref": None,
@@ -115,7 +114,6 @@ async def initialize_review_node(
         # 草稿与质量报告
         "section_draft_artifact_refs": {},
         "review_draft_artifact_ref": None,
-        "integrity_report_artifact_ref": None,
         "reflection_report_artifact_ref": None,
         "revision_plan_artifact_ref": None,
 

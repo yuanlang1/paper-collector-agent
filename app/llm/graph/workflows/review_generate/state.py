@@ -13,13 +13,14 @@ class TaskReviewRequestState(TypedDict):
 
 class TaskReviewWorkflowState(TypedDict):
     run_id: str
-    task_id: str
+    task_id: int
     topic: str
     language: str
     citation_style: str
     review_type: str
     allow_abstract_evidence: bool
     max_reflection_rounds: int
+    reflection_round: int
 
     # 阶段与结果
     stage: str
@@ -30,7 +31,6 @@ class TaskReviewWorkflowState(TypedDict):
     # 固定语料范围
     paper_ids_snapshot: list[str]
     corpus_artifact_ref: str | None
-    corpus_coverage_artifact_ref: str | None
 
     # Framework
     framework_artifact_ref: str | None
@@ -49,8 +49,7 @@ class TaskReviewWorkflowState(TypedDict):
     section_draft_artifact_refs: dict[str, str]
     review_draft_artifact_ref: str | None
 
-    # 质量检查与反思
-    integrity_report_artifact_ref: str | None
+    # 反思与修订
     reflection_report_artifact_ref: str | None
     revision_plan_artifact_ref: str | None
 

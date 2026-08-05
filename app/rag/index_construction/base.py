@@ -94,7 +94,7 @@ class BaseQdrantIndexConstructionModule(ABC):
         self,
         documents: list[Document],
     ) -> IndexConstructionResult:
-        logger.info(f"Build index number: {documents.count()}")
+        logger.info(f"Build index number: {len(documents)}")
 
         if not documents:
             return IndexConstructionResult(
@@ -190,10 +190,7 @@ class BaseQdrantIndexConstructionModule(ABC):
             },
         )
 
-        for (
-            field_name,
-            field_schema,
-        ) in self._payload_indexes():
+        for (field_name, field_schema) in self._payload_indexes():
             await self.client.create_payload_index(
                 collection_name = self.collection_name,
                 field_name = field_name,
