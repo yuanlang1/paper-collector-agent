@@ -15,7 +15,7 @@ class ToolFactory:
         tools = []
 
         for spec in get_tool_specs(allowed_tools):
-            async def _call(_spec=spec, **kwargs: Any):
+            async def _call(_spec = spec, **kwargs: Any):
                 params = {
                     k: v for k, v in kwargs.items()
                     if v is not None and v != "" and v != []
@@ -26,10 +26,10 @@ class ToolFactory:
 
             tools.append(
                 StructuredTool.from_function(
-                    coroutine=_call,
-                    name=spec.name,
-                    description=spec.description,
-                    args_schema=spec.args_schema,
+                    coroutine = _call,
+                    name = spec.name,
+                    description = spec.description,
+                    args_schema = spec.args_schema,
                 )
             )
 

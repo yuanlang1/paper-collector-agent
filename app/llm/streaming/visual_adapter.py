@@ -49,6 +49,29 @@ PAPER_SEARCH_NODE_PHASE = {
     "finalize_handoff": "finalize",
 }
 
+TASK_REVIEW_PHASES = (
+    ("prepare", "初始化与语料校验"),
+    ("framework", "生成综述框架"),
+    ("claims", "生成论点"),
+    ("evidence", "检索证据"),
+    ("render", "撰写章节"),
+    ("review", "反思与修订"),
+    ("finalize", "生成最终综述"),
+)
+
+TASK_REVIEW_NODE_PHASE = {
+    "initialize": "prepare",
+    "load_task_corpus": "prepare",
+    "generate_framework": "framework",
+    "generate_claims": "claims",
+    "retrieve_evidence": "evidence",
+    "render_sections": "render",
+    "assemble_review": "render",
+    "reflect_review": "review",
+    "finalizing_handoff": "finalize",
+    "finalize_task_review": "finalize",
+}
+
 class AgentStreamAdapter:
     def __init__(self):
         self._seen_action_results: set[str] = set()
@@ -60,20 +83,6 @@ class AgentStreamAdapter:
         update: dict[str, Any],
     ) -> list[StreamEvent]:
         events: list[StreamEvent] = []
-
-        decision = to_jsonable(update.get("solve_decision"))
-        pending = to_jsonable(update.get("pending_action"))
-
-        if isinstance(decision, dict):
-            events.append((
-                    "decision",
-                    self._decision_payload(
-                        decision=decision,
-                        pending=pending,
-                        node_name=node_name,
-                    ),
-                )
-            )
 
         result = to_jsonable(update.get("last_action_result"))
 
@@ -158,8 +167,14 @@ class AgentStreamAdapter:
         checkpoint_namespace: str,
         node_name: str,
         update: dict[str, Any],
+        workflow: str = "paper_search",
     ) -> StreamEvent:
-        phase_key = PAPER_SEARCH_NODE_PHASE.get(
+        phases, node_phases = (
+            (TASK_REVIEW_PHASES, TASK_REVIEW_NODE_PHASE)
+            if workflow == "task_review"
+            else (PAPER_SEARCH_PHASES, PAPER_SEARCH_NODE_PHASE)
+        )
+        phase_key = node_phases.get(
             node_name,
             "prepare",
         )
@@ -167,21 +182,21 @@ class AgentStreamAdapter:
             (
                 index
                 for index, (key, _label) in enumerate(
-                    PAPER_SEARCH_PHASES,
+                    phases,
                     start=1,
                 )
                 if key == phase_key
             ),
             1,
         )
-        phase_label = dict(PAPER_SEARCH_PHASES)[phase_key]
+        phase_label = dict(phases)[phase_key]
         stage = update.get("stage")
-        terminal = node_name == "finalize_handoff"
+        terminal = node_name in {"finalize_handoff", "finalize_task_review"}
         progress_percent = (
             100
             if terminal
             else round(
-                phase_index / len(PAPER_SEARCH_PHASES) * 100
+                phase_index / len(phases) * 100
             )
         )
 
@@ -189,7 +204,7 @@ class AgentStreamAdapter:
             "subagent_progress",
             {
                 "subagent": subagent,
-                "workflow": "paper_search",
+                "workflow": workflow,
                 "delegation_id": action_id,
                 "child_thread_id": child_thread_id,
                 "checkpoint_namespace": checkpoint_namespace,
@@ -197,10 +212,10 @@ class AgentStreamAdapter:
                 "phase": phase_key,
                 "phase_label": phase_label,
                 "phase_index": phase_index,
-                "phase_count": len(PAPER_SEARCH_PHASES),
+                "phase_count": len(phases),
                 "progress_percent": progress_percent,
                 "terminal": terminal,
-                "task_id": update.get("paper_service_task_id"),
+                "task_id": update.get("paper_service_task_id") or update.get("task_id"),
                 "stage": stage,
                 "status": update.get("status"),
                 "progress": to_jsonable(update.get("progress") or {}),
@@ -225,39 +240,6 @@ class AgentStreamAdapter:
                 ),
             },
         )
-
-    @staticmethod
-    def _decision_payload(
-        *,
-        decision: dict[str, Any],
-        pending: Any,
-        node_name: str,
-    ) -> dict[str, Any]:
-        action = decision.get("action")
-
-        payload: dict[str, Any] = {
-            "node": node_name,
-            "action": action,
-            "reason": decision.get("decision_reason"),
-        }
-
-        if isinstance(pending, dict):
-            payload.update({
-                    "action_id": pending.get("action_id"),
-                    "requires_confirmation": bool(pending.get("requires_confirmation")),
-                }
-            )
-
-        if action == "tool":
-            payload["name"] = decision.get("tool_name")
-
-        elif action == "subagent":
-            payload["name"] = decision.get("subagent_name")
-        return {
-            key: value
-            for key, value
-            in payload.items() if value is not None
-        }
 
     @staticmethod
     def _result_payload(

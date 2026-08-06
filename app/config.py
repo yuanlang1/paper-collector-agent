@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str
     OPENAI_BASE_URL: str
     OPENAI_MODEL: str
+    THINKING_TYPE: str
+    REASONING_EFFORT: str
 
     # Nacos
     NACOS_ENABLED: bool

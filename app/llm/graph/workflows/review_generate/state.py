@@ -11,8 +11,10 @@ class TaskReviewRequestState(TypedDict):
     max_reflection_rounds: int
 
 
-class TaskReviewWorkflowState(TypedDict):
+class TaskReviewWorkflowState(TypedDict, total=False):
     run_id: str
+    task_review_request: dict | None
+    task_review_handoff: dict | None
     task_id: int
     topic: str
     language: str

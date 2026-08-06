@@ -309,10 +309,19 @@ class GenerateClaimsNode:
                 "error": f"claim generation failed: {exc}",
             }
 
+        retrieve_claim_ids = list(
+            dict.fromkeys(
+                [
+                    *state.get("retrieve_claim_ids", []),
+                    *revise_claim_ids,
+                ]
+            )
+        )
+
         return {
             "claims_artifact_ref": artifact.artifact_uri,
             "revise_claim_ids": [],
-            "retrieve_claim_ids": revise_claim_ids,
+            "retrieve_claim_ids": retrieve_claim_ids,
             "render_section_ids": list(
                 dict.fromkeys(
                     [

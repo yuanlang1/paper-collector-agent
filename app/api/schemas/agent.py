@@ -4,7 +4,6 @@ from pydantic import (
     BaseModel,
     Field,
 )
-from app.llm.subagents.paper_search.contracts import PaperSearchConstraints
 
 
 AgentStatus = Literal[
@@ -58,14 +57,6 @@ class ActionResultView(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length = 1)
     conversation_id: str | None = None
-    subagent: "ForcedSubAgentRequest | None" = None
-
-
-class ForcedSubAgentRequest(BaseModel):
-    name: Literal["paper_search_agent"]
-    constraints: PaperSearchConstraints = Field(
-        default_factory=PaperSearchConstraints
-    )
 
 
 class ChatResumeRequest(BaseModel):

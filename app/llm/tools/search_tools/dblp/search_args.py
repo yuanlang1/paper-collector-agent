@@ -23,9 +23,8 @@ class DblpSearchArgs(BaseModel):
         ...,
         min_length=1,
         max_length=500,
-        description=(
-            "DBLP 出版物查询词，例如论文标题、作者名、研究主题或会议/期刊名称。"
-        ),
+        description="DBLP 出版物查询词，例如论文标题、作者名、研究主题或会议/期刊名称。"
+        
     )
 
     f: int = Field(
@@ -67,16 +66,14 @@ class DblpSearchArgs(BaseModel):
         None,
         min_length=1,
         max_length=200,
-        description=(
-            "可选会议或期刊名称过滤，例如 ACL、CVPR、NeurIPS、ICML；在返回结果上本地过滤。"
-        ),
+        description="可选会议或期刊名称过滤，例如 ACL、CVPR、NeurIPS、ICML；在返回结果上本地过滤。"
+        ,
     )
 
     paper_type: DblpPaperType = Field(
         "all",
-        description=(
-            "可选出版物类型过滤；默认 all 表示不过滤。"
-        ),
+        description="可选出版物类型过滤；默认 all 表示不过滤。"
+        
     )
 
     @model_validator(mode="after")

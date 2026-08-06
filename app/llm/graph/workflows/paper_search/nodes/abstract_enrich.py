@@ -110,8 +110,6 @@ def _extract_original_abstract(initial_pdf_text: str) -> str:
 
 
 class AbstractEnrichNode:
-    """读取 PDF 前四页，补齐原始摘要并生成中文 AI 摘要。"""
-
     def __init__(
         self,
         artifact_store: LocalArtifactStore | None = None,

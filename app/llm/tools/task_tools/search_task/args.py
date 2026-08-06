@@ -239,3 +239,9 @@ class AddQueryTaskArgs(BaseModel):
         ...,
         description=("对用户检索要求的结构化理解，对应 paper-service 的 PromptUnderstandingDTO。")
     )
+
+
+class GetTaskRagStatusArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: int = Field(..., gt=0, description="要查询 RAG 状态的检索任务 ID。")
