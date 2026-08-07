@@ -26,8 +26,8 @@ class RetrieveEvidenceNode:
         max_concurrency: int = MAX_CONCURRENCY,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.paper_retrieval = paper_retrieval or PaperHybridRetrievalModule()
-        self.content_retrieval = content_retrieval or PaperContentHybridRetrievalModule()
+        self.paper_retrieval = paper_retrieval
+        self.content_retrieval = content_retrieval
         self.max_concurrency = max_concurrency
 
     async def __call__(
@@ -62,6 +62,11 @@ class RetrieveEvidenceNode:
                     "stage": "rendering_sections",
                     "status": "running",
                 }
+
+            if self.paper_retrieval is None:
+                self.paper_retrieval = PaperHybridRetrievalModule()
+            if self.content_retrieval is None:
+                self.content_retrieval = PaperContentHybridRetrievalModule()
 
             previous_evidence = {}
             if state.get("evidence_ledger_artifact_ref"):

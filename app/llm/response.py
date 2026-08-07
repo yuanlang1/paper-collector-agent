@@ -106,57 +106,17 @@ def _reply(
 def _pending_action(
     state: dict[str, Any],
 ) -> dict[str, Any] | None:
-    pending = to_jsonable(
-        state.get("pending_action")
-    )
-
-    if not isinstance(pending, dict):
-        return None
-
-    action_type = pending.get("action")
-
-    if action_type == "tool":
-        name = pending.get("tool_name")
-        action_input = (
-            pending.get("tool_arguments")
-            or {}
-        )
-    elif action_type == "subagent":
-        name = pending.get("subagent_name")
-        action_input = (
-            pending.get("subagent_input")
-            or {}
-        )
-    else:
-        return None
-
-    action_id = pending.get(
-        "action_id"
-    )
-
-    if not action_id or not name:
+    call = to_jsonable(state.get("active_tool_call"))
+    if not isinstance(call, dict):
         return None
 
     return {
-        "action_id": str(action_id),
-        "action_type": action_type,
-        "name": str(name),
-        "input": (
-            action_input
-            if isinstance(
-                action_input,
-                dict,
-            )
-            else {}
-        ),
-        "requires_confirmation": bool(
-            pending.get(
-                "requires_confirmation"
-            )
-        ),
-        "message": pending.get(
-            "confirmation_message"
-        ),
+        "action_id": str(call["id"]),
+        "action_type": str(call["kind"]),
+        "name": str(call["name"]),
+        "input": call["args"],
+        "requires_confirmation": bool(call["requires_confirmation"]),
+        "message": f"Allow {call['name']}?",
     }
 
 
@@ -313,6 +273,9 @@ def _build_payload(
         "reply": _reply(
             state,
             interrupt,
+        ),
+        "reasoning_content": str(
+            state.get("reasoning_content") or ""
         ),
         "pending_action": (
             _pending_action(state)

@@ -232,7 +232,7 @@ class AssembleReviewNode:
                 "error": f"review draft persistence failed: {exc}",
             }
 
-        {
+        return {
             "review_draft_artifact_ref": artifact.artifact_uri,
             "stage": "reflecting_review",
             "status": "running",

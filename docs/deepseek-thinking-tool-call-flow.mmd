@@ -1,0 +1,18 @@
+sequenceDiagram
+    participant App as Application
+    participant Model as DeepSeek API
+    participant Tool as Local Tool
+
+    App->>Model: messages + tools + thinking enabled
+    Model-->>App: assistant message (reasoning_content + tool_calls)
+    App->>App: Append the complete assistant message
+    App->>Tool: Execute each requested tool
+    Tool-->>App: Tool result
+    App->>App: Append role=tool, tool_call_id, content
+    App->>Model: Updated messages + tools
+    Model-->>App: Next thought, tool call, or final content
+    loop Until tool_calls is empty
+        App->>Tool: Execute requested tool
+        Tool-->>App: Tool result
+        App->>Model: Updated messages
+    end

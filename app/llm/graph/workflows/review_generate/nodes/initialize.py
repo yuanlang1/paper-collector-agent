@@ -60,16 +60,12 @@ async def initialize_review_node(
     if not isinstance(run_id, str) or not run_id.strip():
         return _initialization_failed("missing valid run_id")
 
-    raw_request = {
+    raw_request = state.get("task_review_request") or {
         "task_id": state.get("task_id"),
         "topic": state.get("topic"),
         "language": state.get("language", "zh-CN"),
         "citation_style": state.get("citation_style", "harvard"),
         "review_type": state.get("review_type", "narrative"),
-        "allow_abstract_evidence": state.get(
-            "allow_abstract_evidence",
-            False,
-        ),
         "max_reflection_rounds": state.get(
             "max_reflection_rounds",
             2,
@@ -87,7 +83,7 @@ async def initialize_review_node(
         "language": request.language,
         "citation_style": request.citation_style,
         "review_type": request.review_type,
-        "allow_abstract_evidence": request.allow_abstract_evidence,
+        "allow_abstract_evidence": False,
         "max_reflection_rounds": request.max_reflection_rounds,
 
         "stage": "loading_corpus",

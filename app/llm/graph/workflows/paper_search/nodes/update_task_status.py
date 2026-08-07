@@ -19,7 +19,6 @@ def _is_valid_task_id(value: Any) -> bool:
 
 
 class UpdatePaperSearchTaskStatusNode:
-    """Persist the paper-search workflow terminal state to paper-service."""
 
     def __init__(
         self,

@@ -222,6 +222,7 @@ class FinalizingHandoffNode:
 
         author = self._author_key(
             paper["authors"],
+            paper["title"],
             citation_style,
         )
         return f"({author}, {self._year(paper['published_date'])})"
@@ -243,28 +244,40 @@ class FinalizingHandoffNode:
         )
 
         if citation_style == "ieee":
-            return f'[{number}] {authors}, "{title}," {year}.{doi}'
+            author_prefix = f"{authors}, " if authors else ""
+            return f'[{number}] {author_prefix}"{title}," {year}.{doi}'
 
         if citation_style == "vancouver":
-            return f"{number}. {authors}. {title}. {year}.{doi}"
+            author_prefix = f"{authors}. " if authors else ""
+            return f"{number}. {author_prefix}{title}. {year}.{doi}"
 
         if citation_style == "apa":
-            return f"{authors} ({year}). {title}.{doi}"
+            if authors:
+                return f"{authors} ({year}). {title}.{doi}"
+            return f"{title}. ({year}).{doi}"
 
         if citation_style == "chicago":
-            return f"{authors}. {year}. {title}.{doi}"
+            if authors:
+                return f"{authors}. {year}. {title}.{doi}"
+            return f"{title}. {year}.{doi}"
 
-        return f"{authors} ({year}) {title}.{doi}"
+        if authors:
+            return f"{authors} ({year}) {title}.{doi}"
+        return f"{title} ({year}).{doi}"
 
     def _author_key(
         self,
         authors: list[str],
+        title: str,
         citation_style: str,
     ) -> str:
         surnames = [
             author.split()[-1]
             for author in authors
         ]
+
+        if not surnames:
+            return title
 
         if len(surnames) == 1:
             return surnames[0]

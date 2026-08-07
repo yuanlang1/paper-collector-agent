@@ -1,5 +1,4 @@
 from collections.abc import AsyncIterator
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -12,7 +11,7 @@ from app.api.schemas.agent import (
 )
 from app.core.response import ServiceResponse
 from app.database import get_db
-from app.llm.agent import get_agent_service
+from app.runtime import get_agent_runtime
 
 
 router = APIRouter(
@@ -26,19 +25,6 @@ SSE_HEADERS = {
     "Connection": "keep-alive",
     "X-Accel-Buffering": "no",
 }
-
-
-def generate_conversation_id() -> str:
-    return f"conv_{uuid4().hex}"
-
-
-def resolve_conversation_id(
-    conversation_id: str | None,
-) -> str:
-    if conversation_id:
-        return conversation_id
-
-    return generate_conversation_id()
 
 
 def build_streaming_response(
@@ -59,29 +45,11 @@ async def agent_chat(
     payload: ChatRequest,
     db: Session = Depends(get_db),
 ) -> ServiceResponse[ChatResponse]:
-    conversation_id = resolve_conversation_id(
-        payload.conversation_id
-    )
+    runtime = get_agent_runtime()
 
-    service = get_agent_service()
-
-    result = await service.chat(
+    result = await runtime.chat(
         message=payload.message,
-        conversation_id=conversation_id,
-        forced_subagent=(
-            {
-                "name": payload.subagent.name,
-                "input": {
-                    "prompt": payload.message,
-                    "constraints": payload.subagent.constraints.model_dump(
-                        mode="json",
-                        exclude_none=True,
-                    ),
-                },
-            }
-            if payload.subagent is not None
-            else None
-        ),
+        conversation_id=payload.conversation_id,
         db=db,
     )
 
@@ -100,30 +68,12 @@ async def stream_chat(
     payload: ChatRequest,
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
-    conversation_id = resolve_conversation_id(
-        payload.conversation_id
-    )
-
-    service = get_agent_service()
+    runtime = get_agent_runtime()
 
     return build_streaming_response(
-        service.chat_stream(
+        runtime.chat_stream(
             message=payload.message,
-            conversation_id=conversation_id,
-            forced_subagent=(
-                {
-                    "name": payload.subagent.name,
-                    "input": {
-                        "prompt": payload.message,
-                        "constraints": payload.subagent.constraints.model_dump(
-                            mode="json",
-                            exclude_none=True,
-                        ),
-                    },
-                }
-                if payload.subagent is not None
-                else None
-            ),
+            conversation_id=payload.conversation_id,
             db=db,
         )
     )
@@ -137,9 +87,9 @@ async def chat_resume(
     payload: ChatResumeRequest,
     db: Session = Depends(get_db),
 ) -> ServiceResponse[ChatResponse]:
-    service = get_agent_service()
+    runtime = get_agent_runtime()
 
-    result = await service.resume_chat(
+    result = await runtime.resume_chat(
         conversation_id=payload.conversation_id,
         resume_payload=payload.model_dump(
             exclude={"conversation_id"},
@@ -163,10 +113,10 @@ async def chat_resume_stream(
     payload: ChatResumeRequest,
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
-    service = get_agent_service()
+    runtime = get_agent_runtime()
 
     return build_streaming_response(
-        service.resume_chat_stream(
+        runtime.resume_chat_stream(
             conversation_id=payload.conversation_id,
             resume_payload=payload.model_dump(
                 exclude={"conversation_id"},
