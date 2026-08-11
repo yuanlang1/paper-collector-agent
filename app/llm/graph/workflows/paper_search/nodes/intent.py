@@ -5,7 +5,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.llm.model_factory import create_structured_chat_model
+from app.llm.model_factory import create_validated_structured_chat_model
 from app.llm.subagents.paper_search.contracts import PaperSearchConstraints
 from app.llm.tools.task_tools.search_task.args import PromptUnderstandingArgs
 
@@ -32,7 +32,10 @@ class IntentUnderstandingNode:
         self,
          model: Any | None = None
     ) -> None:
-        self.model = model or create_structured_chat_model(PromptUnderstandingArgs, temperature=0,)
+        self.model = model or create_validated_structured_chat_model(
+            PromptUnderstandingArgs,
+            temperature=0,
+        )
 
     async def __call__(self, state: Mapping[str, Any]) -> dict[str, Any]:
         try:

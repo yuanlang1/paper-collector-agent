@@ -245,3 +245,23 @@ class GetTaskRagStatusArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     task_id: int = Field(..., gt=0, description="要查询 RAG 状态的检索任务 ID。")
+
+
+class StartTaskRagArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    taskId: int = Field(
+        ...,
+        gt=0,
+        description="要启动 RAG 流程的检索任务 ID；任务状态必须为 SEARCH_COMPLETED。",
+    )
+
+
+class StartTaskRagArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    taskId: int = Field(
+        ...,
+        gt=0,
+        description="要启动 RAG 流程的检索任务 ID；任务状态必须为 SEARCH_COMPLETED。",
+    )

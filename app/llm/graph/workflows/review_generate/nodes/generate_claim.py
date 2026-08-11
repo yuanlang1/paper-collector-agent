@@ -12,7 +12,7 @@ from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.nodes.generate_framework import (
     ReviewFramework,
 )
-from app.llm.model_factory import create_structured_chat_model
+from app.llm.model_factory import create_validated_structured_chat_model
 
 
 CLAIMS_PROMPT = """
@@ -153,11 +153,11 @@ class GenerateClaimsNode:
         revision_model: Any | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = model or create_structured_chat_model(
+        self.model = model or create_validated_structured_chat_model(
             ClaimsPlan,
             temperature = 0,
         )
-        self.revision_model = revision_model or create_structured_chat_model(
+        self.revision_model = revision_model or create_validated_structured_chat_model(
             RevisedClaims,
             temperature = 0,
         )

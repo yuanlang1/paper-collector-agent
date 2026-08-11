@@ -81,6 +81,13 @@ def _parse_publish_date(value: Any) -> str | None:
         return None
 
 
+def _published_at(paper_info: Mapping[str, Any]) -> date:
+    published_date = _parse_publish_date(
+        paper_info.get("publish_date")
+    )
+    return date.fromisoformat(published_date) if published_date else date.min
+
+
 def _parse_year(value: Any) -> int | None:
     match = re.search(r"\b(19|20)\d{2}\b", str(value or ""))
     return int(match.group(0)) if match else None
@@ -515,15 +522,32 @@ class NormalizeDeduplicateFilterNode:
                         and matched_doi
                         and incoming_doi != matched_doi
                     ):
+                        keep_incoming_doi = _published_at(
+                            paper_info
+                        ) > _published_at(
+                            title_author_match["paper_info"]
+                        )
+                        if keep_incoming_doi:
+                            old_doi_key = f"doi:{matched_doi}"
+                            if papers_by_doi.get(old_doi_key) is title_author_match:
+                                papers_by_doi.pop(old_doi_key)
+                            title_author_match["paper_info"]["doi"] = (
+                                incoming_doi
+                            )
+
                         identity_conflicts.append(
                             {
                                 "title": paper_info["title"],
                                 "title_author_key": title_author_key or "",
                                 "existing_doi": matched_doi,
                                 "incoming_doi": incoming_doi,
+                                "selected_doi": (
+                                    incoming_doi
+                                    if keep_incoming_doi
+                                    else matched_doi
+                                ),
                             }
                         )
-                        title_author_match = None
 
                     target = doi_match or title_author_match
 

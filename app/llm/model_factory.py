@@ -8,7 +8,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
 from app.config import settings
-from app.llm.structured_output import ValidatedJsonInvoker
+from app.llm.structured_output import StructuredOutputT, ValidatedJsonInvoker
 
 StructuredModelT = TypeVar("StructuredModelT", bound = BaseModel)
 
@@ -99,13 +99,15 @@ def create_structured_chat_model(
 
 
 def create_validated_structured_chat_model(
-    schema: type[StructuredModelT],
+    schema: type[StructuredOutputT],
     *,
     temperature: float = 0,
-    max_attempts: int = 2,
-) -> ValidatedJsonInvoker[StructuredModelT]:
+    max_attempts: int = 4,
+) -> ValidatedJsonInvoker[StructuredOutputT]:
     return ValidatedJsonInvoker(
-        model = create_chat_model(temperature = temperature),
+        model = create_chat_model(
+            temperature = temperature,
+        ),
         schema = schema,
         max_attempts = max_attempts,
     )

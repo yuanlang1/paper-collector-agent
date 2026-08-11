@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package papercollector.review.v1;
+
+import "google/protobuf/struct.proto";
+
+option java_multiple_files = true;
+option java_package = "com.yl.paperservice.grpc.review.v1";
+
+service ReviewInternalService {
+  rpc AddReview(AddReviewRequest) returns (AddReviewResponse);
+}
+
+message AddReviewRequest {
+  int64 task_id = 1;
+  string topic = 2;
+  string title = 3;
+  int32 version_number = 4;
+  string language = 5;
+  int32 review_type = 6;
+  int32 citation_style = 7;
+  string scope = 8;
+  string abstract_content = 9;
+  string body_markdown = 10;
+  string conclusion = 11;
+  string markdown = 12;
+  string sections = 13;
+  string paper_ids_snapshot = 14;
+  string citation_paper_ids = 15;
+  string citation_labels = 16;
+  string references = 17;
+  string framework_hash = 18;
+}
+
+message AddReviewResponse {
+  int32 code = 1;
+  bool success = 2;
+  int64 review_id = 3;
+  string message = 4;
+  google.protobuf.Struct other = 5;
+  int32 version_number = 6;
+}

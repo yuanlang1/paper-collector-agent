@@ -11,7 +11,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.model_factory import create_structured_chat_model
+from app.llm.model_factory import create_validated_structured_chat_model
+from pypdf import PdfReader
 
 
 PDF_READ_PAGE_COUNT = 4
@@ -54,13 +55,6 @@ def _text(value: Any) -> str | None:
 def _extract_initial_pdf_text(
     pdf_path: Path,
 ) -> tuple[str, int]:
-    try:
-        from pypdf import PdfReader
-    except ImportError as exc:
-        raise RuntimeError(
-            "缺少 pypdf，无法读取 PDF 内容。"
-        ) from exc
-
     reader = PdfReader(str(pdf_path))
     pages = reader.pages[:PDF_READ_PAGE_COUNT]
     text = "\n".join(
@@ -116,7 +110,7 @@ class AbstractEnrichNode:
         model: Any | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = model or create_structured_chat_model(
+        self.model = model or create_validated_structured_chat_model(
             AiAbstractResult,
             temperature = 0,
         )

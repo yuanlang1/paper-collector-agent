@@ -369,11 +369,21 @@ class PersistRecommendedPapersNode:
                     _add_error(entry["outcome"], f"paper cache failed: {exc}")
                     cache_failed += 1
 
-            relation_requests = [
-                entry["relation"]
-                for entry in entries
-                if _is_valid_id(entry["paper_id"])
-            ]
+            relation_requests_by_key: dict[
+                tuple[int, int],
+                dict[str, Any],
+            ] = {}
+            for entry in entries:
+                paper_id = entry["paper_id"]
+                if not _is_valid_id(paper_id):
+                    continue
+
+                relation = entry["relation"]
+                relation_requests_by_key.setdefault(
+                    (relation["task_id"], paper_id),
+                    relation,
+                )
+            relation_requests = list(relation_requests_by_key.values())
             relation_response = (
                 await self.save_task_papers(relation_requests)
                 if relation_requests
@@ -433,11 +443,7 @@ class PersistRecommendedPapersNode:
         except Exception as exc:
             return {"stage": "failed", "status": "failed", "error": str(exc)}
 
-        degraded = (
-            bool(state.get("degraded"))
-            or failure_count > 0
-            or cache_failed > 0
-        )
+        degraded = failure_count > 0 or cache_failed > 0
         if failure_count and not persisted_count:
             stage = "failed"
         elif degraded:
@@ -470,6 +476,6 @@ class PersistRecommendedPapersNode:
                 if failure_count
                 else "paper cache update failure"
                 if cache_failed
-                else state.get("error")
+                else None
             ),
         }

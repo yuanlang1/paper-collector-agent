@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import json
 from typing import Any, Generic, TypeVar
 
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
 
 
 StructuredOutputT = TypeVar(
     "StructuredOutputT",
-    bound=BaseModel,
+    bound = BaseModel,
 )
 
 
@@ -37,7 +38,7 @@ def _format_validation_error(
         return str(error)
 
     lines = []
-    for item in error.errors(include_url=False):
+    for item in error.errors(include_url = False):
         location = ".".join(
             str(part)
             for part in item["loc"]
@@ -58,16 +59,31 @@ def build_repair_prompt(
         "不要输出解释、Markdown 或代码块。"
     )
 
+def build_json_mode_instruction(
+    schema: type[BaseModel],
+) -> str:
+    schema_json = json.dumps(
+        schema.model_json_schema(),
+        ensure_ascii=False,
+    )
+
+    return (
+        "Return only a valid JSON object.\n"
+        "The JSON must conform to the following schema:\n"
+        f"{schema_json}\n"
+        "Do not output Markdown, code fences, or explanations."
+    )
 
 class ValidatedJsonInvoker(
     Generic[StructuredOutputT],
 ):
+    
     def __init__(
         self,
         *,
         model: Any,
         schema: type[StructuredOutputT],
-        max_attempts: int = 2,
+        max_attempts: int = 4,
     ) -> None:
         if max_attempts < 1:
             raise ValueError("max_attempts must be at least 1")
@@ -76,15 +92,19 @@ class ValidatedJsonInvoker(
         self.max_attempts = max_attempts
         self.model = model.with_structured_output(
             schema,
-            method="json_mode",
-            include_raw=True,
+            method = "json_mode",
+            include_raw = True,
         )
+
 
     async def ainvoke(
         self,
         messages: Sequence[BaseMessage],
     ) -> StructuredOutputT:
-        current_messages = list(messages)
+        current_messages = [
+            SystemMessage(content = build_json_mode_instruction(self.schema)),
+            *messages,
+        ]
 
         for attempt in range(1, self.max_attempts + 1):
             result = await self.model.ainvoke(current_messages)
@@ -99,18 +119,18 @@ class ValidatedJsonInvoker(
 
             if attempt == self.max_attempts:
                 raise StructuredOutputError(
-                    schema_name=self.schema.__name__,
-                    attempts=attempt,
-                    error=error,
+                    schema_name = self.schema.__name__,
+                    attempts = attempt,
+                    error = error,
                 ) from error
 
             current_messages.extend(
                 [
                     result["raw"],
                     HumanMessage(
-                        content=build_repair_prompt(
-                            schema_name=self.schema.__name__,
-                            error=error,
+                        content = build_repair_prompt(
+                            schema_name = self.schema.__name__,
+                            error = error,
                         )
                     ),
                 ]

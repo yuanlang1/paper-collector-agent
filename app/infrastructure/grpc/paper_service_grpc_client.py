@@ -239,7 +239,7 @@ class PaperServiceGrpcClient:
                                 else None
                             ),
                             "doi": item.doi or None,
-                            "rag_status": item.rag_status,
+                            "rag_status": (item.rag_status or "PENDING").strip().lower(),
                             "chunk_count": item.chunk_count,
                         }
                         for item in response.papers

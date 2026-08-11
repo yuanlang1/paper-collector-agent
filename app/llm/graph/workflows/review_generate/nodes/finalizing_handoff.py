@@ -63,18 +63,8 @@ class FinalizingHandoffNode:
 
         return {
             "final_review_artifact_ref": artifact.artifact_uri,
-            "handoff": {
-                "action": "upsert_review",
-                "task_id": state["task_id"],
-                "review_artifact_ref": artifact.artifact_uri,
-                "title": final_review["title"],
-                "status": "completed",
-                "citation_paper_ids": (
-                    final_review["citation_paper_ids"]
-                ),
-            },
-            "stage": "completed",
-            "status": "completed",
+            "stage": "persisting_review",
+            "status": "running",
             "error": None,
         }
 

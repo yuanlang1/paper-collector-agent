@@ -57,6 +57,8 @@ class TaskReviewWorkflowState(TypedDict, total=False):
 
     # 最终交接
     final_review_artifact_ref: str | None
+    review_id: int | None
+    review_version_number: int
     handoff: dict | None
 
 

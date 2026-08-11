@@ -9,7 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, model_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.model_factory import create_structured_chat_model
+from app.llm.model_factory import create_validated_structured_chat_model
 
 
 FRAMEWORK_PROMPT = """
@@ -128,7 +128,7 @@ class GenerateFrameworkNode:
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
         
-        self.model = model or create_structured_chat_model(
+        self.model = model or create_validated_structured_chat_model(
             ReviewFramework,
             temperature = 0,
         )

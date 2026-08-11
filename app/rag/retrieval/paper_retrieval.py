@@ -3,6 +3,7 @@ from __future__ import annotations
 from langchain_core.documents import Document
 from qdrant_client import models
 
+from app.config import settings
 from app.rag.retrieval.base import BaseHybridRetrievalModule
 
 class PaperHybridRetrievalModule(
@@ -11,7 +12,7 @@ class PaperHybridRetrievalModule(
     def __init__(
         self,
         *,
-        collection_name: str = "paper",
+        collection_name: str = settings.PAPER_COLLECTION_NAME,
         default_top_k: int = 10,
     ) -> None:
         super().__init__(

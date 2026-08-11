@@ -64,6 +64,9 @@ class FileParser:
         self,
         requests: list[FileParseRequest],
     ) -> BatchDocumentParseResult:
+
+        
+
         if not requests:
             return BatchDocumentParseResult(
                 total = 0,

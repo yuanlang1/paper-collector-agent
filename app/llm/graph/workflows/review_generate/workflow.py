@@ -28,6 +28,9 @@ from app.llm.graph.workflows.review_generate.nodes.initialize import (
 from app.llm.graph.workflows.review_generate.nodes.load import (
     LoadTaskCorpusNode,
 )
+from app.llm.graph.workflows.review_generate.nodes.persist_review import (
+    PersistReviewNode,
+)
 from app.llm.graph.workflows.review_generate.nodes.reflect_review import (
     ReflectReviewNode,
 )
@@ -113,6 +116,10 @@ def build_task_review_workflow(
         node("finalizing_handoff", FinalizingHandoffNode),
     )
     builder.add_node(
+        "persist_review",
+        node("persist_review", PersistReviewNode),
+    )
+    builder.add_node(
         "finalize_task_review",
         node("finalize_task_review", lambda: finalize_task_review_node),
     )
@@ -185,7 +192,8 @@ def build_task_review_workflow(
             "finalize": "finalize_task_review",
         },
     )
-    builder.add_edge("finalizing_handoff", "finalize_task_review")
+    builder.add_edge("finalizing_handoff", "persist_review")
+    builder.add_edge("persist_review", "finalize_task_review")
     builder.add_edge("finalize_task_review", END)
 
     return builder.compile(checkpointer=checkpointer)

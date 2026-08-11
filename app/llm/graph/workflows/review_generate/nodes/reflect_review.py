@@ -7,10 +7,10 @@ from collections.abc import Mapping
 from typing import Any, Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.model_factory import create_structured_chat_model
+from app.llm.model_factory import create_validated_structured_chat_model
 
 
 REF_PATTERN = re.compile(r"\[\[REF_([^\]]+)\]\]")
@@ -18,18 +18,34 @@ REF_PATTERN = re.compile(r"\[\[REF_([^\]]+)\]\]")
 
 class ReflectionIssue(BaseModel):
     severity: Literal["critical", "major", "minor"]
-    category: str
+    category: str = "uncategorized"
     description: str
 
 
 class ReflectionResult(BaseModel):
     satisfied: bool
-    summary: str
+    summary: str = ""
     issues: list[ReflectionIssue] = Field(default_factory = list)
 
     retrieve_claim_ids: list[str] = Field(default_factory = list)
     revise_claim_ids: list[str] = Field(default_factory = list)
     render_section_ids: list[str] = Field(default_factory = list)
+
+    @model_validator(mode="after")
+    def provide_summary_when_missing(self) -> "ReflectionResult":
+        if self.summary.strip():
+            return self
+
+        if self.issues:
+            self.summary = "；".join(
+                issue.description
+                for issue in self.issues
+            )
+        else:
+            self.summary = (
+                "Review passed." if self.satisfied else "Review requires revision."
+            )
+        return self
 
 
 REFLECT_REVIEW_PROMPT = """
@@ -49,7 +65,24 @@ REFLECT_REVIEW_PROMPT = """
     6. Claim 本身过宽、过强或不应保留时，将其 ID 放入 revise_claim_ids。
     7. 需要修改论述、引用绑定、章节连贯性时，将章节 ID 放入 render_section_ids。
     8. 只选择实际需要修订的目标，不要重写无关章节。
-    9. 仅返回结构化输出。
+    9. 仅返回结构化输出，且必须包含所有字段。即使没有问题，也要返回空数组；
+       每个 issue 必须包含 severity、category 和 description。
+
+    输出格式：
+    {
+      "satisfied": false,
+      "summary": "简要说明是否达到交付标准",
+      "issues": [
+        {
+          "severity": "major",
+          "category": "claim_evidence_mismatch",
+          "description": "问题说明"
+        }
+      ],
+      "retrieve_claim_ids": [],
+      "revise_claim_ids": ["claim_001"],
+      "render_section_ids": ["section_id"]
+    }
 """.strip()
 
 
@@ -61,7 +94,7 @@ class ReflectReviewNode:
         model: Any | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = model or create_structured_chat_model(
+        self.model = model or create_validated_structured_chat_model(
             ReflectionResult,
             temperature = 0,
         )

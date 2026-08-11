@@ -1,9 +1,7 @@
 from collections.abc import AsyncIterator
 from typing import Any, Optional
 from uuid import uuid4
-
 from sqlalchemy.orm import Session as DbSession
-
 from app.llm.agent import AgentService
 from app.runtime.session import Session
 

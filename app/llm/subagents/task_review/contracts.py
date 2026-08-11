@@ -22,7 +22,7 @@ class TaskReviewDelegation(BaseModel):
         "scoping",
         "critical",
     ] = "narrative"
-    max_reflection_rounds: int = Field(default=2, ge=1, le=3)
+    max_reflection_rounds: int = Field(default=5, ge=1, le=5)
 
 
 class TaskReviewHandoff(BaseModel):

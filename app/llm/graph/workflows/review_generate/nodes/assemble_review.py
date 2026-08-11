@@ -11,24 +11,24 @@ from pydantic import BaseModel
 
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.nodes.generate_framework import ReviewFramework
-from app.llm.model_factory import create_structured_chat_model
+from app.llm.model_factory import create_validated_structured_chat_model
 
 
 REF_PATTERN = re.compile(r"\[\[REF_(\d+)\]\]")
 
 ASSEMBLE_REVIEW_PROMPT = """
-你是一位学术综述编辑。
+    你是一位学术综述编辑。
 
-请根据已经写好的综述正文，为其生成摘要和结论。
+    请根据已经写好的综述正文，为其生成摘要和结论。
 
-严格规则：
-1. 只能概括输入正文已经表达的内容，不得引入新事实、新方法、新论文、新数据或新研究结论。
-2. 不得虚构作者、年份、论文标题、引用或 [[REF_id]] 锚点。
-3. 摘要应概括综述主题、覆盖范围、主要组织维度和总体讨论内容。
-4. 结论应归纳正文已经呈现的主要认识、分歧、局限或待解决问题；只有正文已有依据时才能表达。
-5. 如果结论中的具体判断需要引用，请保留正文中已有的 [[REF_id]] 锚点。
-6. 使用指定输出语言。
-7. 仅返回结构化输出，不添加解释。
+    严格规则：
+    1. 只能概括输入正文已经表达的内容，不得引入新事实、新方法、新论文、新数据或新研究结论。
+    2. 不得虚构作者、年份、论文标题、引用或 [[REF_id]] 锚点。
+    3. 摘要应概括综述主题、覆盖范围、主要组织维度和总体讨论内容。
+    4. 结论应归纳正文已经呈现的主要认识、分歧、局限或待解决问题；只有正文已有依据时才能表达。
+    5. 如果结论中的具体判断需要引用，请保留正文中已有的 [[REF_id]] 锚点。
+    6. 使用指定输出语言。
+    7. 仅返回结构化输出，不添加解释。
 """.strip()
 
 
@@ -45,7 +45,7 @@ class AssembleReviewNode:
         model: Any | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = model or create_structured_chat_model(
+        self.model = model or create_validated_structured_chat_model(
             ReviewSynthesis,
             temperature = 0,
         )

@@ -10,7 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.model_factory import create_structured_chat_model
+from app.llm.model_factory import create_validated_structured_chat_model
 from app.llm.tools.task_tools.search_task.args import (
     PromptUnderstandingArgs,
 )
@@ -57,7 +57,7 @@ class RecommendationNode:
         model: Any | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = model or create_structured_chat_model(
+        self.model = model or create_validated_structured_chat_model(
             PaperRecommendationResult,
             temperature=0,
         )

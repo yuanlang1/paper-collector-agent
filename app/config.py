@@ -98,9 +98,17 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: str | None = None
     PAPER_COLLECTION_NAME: str
     PAPER_CONTENT_COLLECTION_NAME: str
-    DENSE_EMBEDDING_MODEL_NAME: str = "BAAI/bge-m3"
+    MODEL_DIR: str = "models"
     SPARSE_EMBEDDING_MODEL_NAME: str = "Qdrant/bm25"
     EMBEDDING_DEVICE: str = "cpu"
+
+    EMBEDDING_PROVIDER: str = "siliconflow"
+    SILICONFLOW_API_KEY: str
+    SILICONFLOW_EMBEDDING_BASE_URL: str =  "https://api.siliconflow.cn/v1"
+    SILICONFLOW_EMBEDDING_MODEL: str = "BAAI/bge-m3"
+    SILICONFLOW_EMBEDDING_TIMEOUT_SECONDS: float = 30.0
+    SILICONFLOW_EMBEDDING_BATCH_SIZE: int = 32
+    SILICONFLOW_EMBEDDING_MAX_RETRIES: int = 3
 
     @model_validator(mode="after")
     def validate_paper_search_pagination(self) -> "Settings":

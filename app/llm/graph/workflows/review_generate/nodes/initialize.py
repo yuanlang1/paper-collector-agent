@@ -29,9 +29,9 @@ class ReviewInitializeInput(BaseModel):
 
     allow_abstract_evidence: bool = False
     max_reflection_rounds: int = Field(
-        default = 2,
+        default = 5,
         ge = 1,
-        le = 3,
+        le = 5,
     )
 
     @field_validator("topic")
@@ -68,7 +68,7 @@ async def initialize_review_node(
         "review_type": state.get("review_type", "narrative"),
         "max_reflection_rounds": state.get(
             "max_reflection_rounds",
-            2,
+            5,
         ),
     }
 
@@ -115,5 +115,7 @@ async def initialize_review_node(
 
         # 最终结果
         "final_review_artifact_ref": None,
+        "review_id": None,
+        "review_version_number": 1,
         "handoff": None,
     }

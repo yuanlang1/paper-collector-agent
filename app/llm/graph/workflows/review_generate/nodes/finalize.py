@@ -22,7 +22,8 @@ async def finalize_task_review_node(
             data={
                 "task_id": state["task_id"],
                 "final_review_artifact_ref": final_review_artifact_ref,
-                "upsert_review_handoff": state.get("handoff"),
+                "review_id": state.get("review_id"),
+                "version_number": state.get("review_version_number"),
             },
             artifact_refs=[
                 artifact_ref

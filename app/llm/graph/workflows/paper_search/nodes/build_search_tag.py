@@ -5,7 +5,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.llm.model_factory import create_structured_chat_model
+from app.llm.model_factory import create_validated_structured_chat_model
 from app.llm.subagents.paper_search.contracts import PaperSearchConstraints
 from app.llm.tools.task_tools.search_task.args import (
     PromptUnderstandingArgs,
@@ -16,7 +16,7 @@ from app.llm.tools.task_tools.search_task.args import (
 SEARCH_TAG_SYSTEM_PROMPT = """
 你负责根据用户的论文检索请求生成 search_tag。
 
-- 仅输出 SearchTagArgs 定义的字段。
+- 仅输出 SearchTagArgs 定义的字段。 
 - yearTag 必须与 query_understanding 中明确的年份范围一致；未指定年份时为 0。
 - paperTag 选择用户明确需要的论文类型；若未限定，保留期刊论文和会议论文。
 - sourceTag 选择适合主题与用户要求的检索来源；若未限定，使用 arXiv、DBLP 和 Google Scholar。
@@ -61,7 +61,7 @@ class BuildSearchTagNode:
         *,
         skip_confirmation: bool = False,
     ) -> None:
-        self.model = model or create_structured_chat_model(
+        self.model = model or create_validated_structured_chat_model(
             SearchTagArgs,
             temperature=0,
         )

@@ -64,7 +64,10 @@ class UpdatePaperSearchTaskStatusNode:
 
         if result.get("ok") is True:
             rag_task_started = False
-            if task_state is TaskState.SEARCH_COMPLETED:
+            if task_state in {
+                TaskState.SEARCH_COMPLETED,
+                TaskState.SEARCH_PARTIAL_COMPLETED,
+            }:
                 runner = self.rag_runner or get_task_rag_batch_runner()
                 rag_task_started = await runner.notify(task_id)
 

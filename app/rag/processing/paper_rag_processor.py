@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import dataclass
+import logging
 from typing import Literal
 
 from langchain_core.documents import Document
@@ -10,6 +11,8 @@ from app.rag.file_parser.file_parser import FileParser
 from app.rag.index_construction.paper_content_index_construction import PaperContentIndexConstructionModule
 from app.rag.index_construction.paper_index_construction import PaperIndexConstructionModule
 from app.schemas.file_parser import FileParseRequest
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen = True, slots = True)
@@ -130,6 +133,8 @@ class PaperRagProcessor:
         parsed_document: Document,
     ) -> PaperRagResult:
         try:
+            logger.info("paper: %s start RAG process.", paper.paper_id)
+
             parent_document = self._bind_paper_metadata(
                 parsed_document,
                 paper,

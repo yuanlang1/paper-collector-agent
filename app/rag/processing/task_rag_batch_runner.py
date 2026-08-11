@@ -67,6 +67,7 @@ class TaskRagBatchRunner:
     ) -> None:
         try:
             while True:
+                logger.info("Task %s RAG worker start.", task_id)
                 result = await self._run_once(task_id)
 
                 if not result["ok"]:
@@ -88,7 +89,6 @@ class TaskRagBatchRunner:
         task_id: int
     ) -> dict[str, Any]:
         batch_id = str(uuid.uuid4())
-
         claim = await self.client.claim_task_rag_papers(
             task_id = task_id,
             batch_id = batch_id,
@@ -123,6 +123,13 @@ class TaskRagBatchRunner:
         ]
 
         try:
+            logger.info(
+                "Task %s RAG processing start %s claim, batch id: %s",
+                task_id,
+                len(inputs),
+                batch_id,
+            )
+
             processed = await self._get_processor().process_many(inputs)
         except Exception as exc:
             logger.exception(
@@ -135,7 +142,13 @@ class TaskRagBatchRunner:
                 "ok": False,
                 "error": str(exc)
             }
-
+        
+        logger.info(
+            "Task %s RAG processing end, start saved, papers: %s, batch_id: %s",
+            task_id,
+            len(processed),
+            batch_id,
+        )
         complete = await self.client.complete_task_rag_batch(
             task_id = task_id,
             batch_id = batch_id,
@@ -155,6 +168,14 @@ class TaskRagBatchRunner:
                 "ok": False,
                 "error": complete["error"],
             }
+
+        logger.info(
+            "Task %s RAG processing end, saved, papers: %s, batch_id: %s, task state: %s",
+            task_id,
+            len(processed),
+            batch_id,
+            complete["result"]["task_state"],
+        )
 
         return {
             "ok": True,

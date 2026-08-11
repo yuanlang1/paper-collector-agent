@@ -36,6 +36,7 @@ Thumbs.db
 .ruff_cache/
 
 data/
+models/
 scripts/
 .codex
 .pytest_cache
