@@ -106,7 +106,7 @@ async def paper_search_confirm_node(
         }
 
     return {
-        "stage": "creating_task",
+        "stage": "generating_source_queries",
         "status": "running",
         "confirmation_required": False,
         "confirmation_decision": "approved",

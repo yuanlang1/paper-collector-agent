@@ -230,7 +230,9 @@ class PersistRecommendedPapersNode:
         try:
             run_id = state.get("run_id")
             task_id = state.get("paper_service_task_id")
-            artifact_uri = state.get("recommendation_manifest_artifact_ref")
+            artifact_uri = state.get(
+                "task_bound_recommendation_manifest_artifact_ref"
+            ) or state.get("recommendation_manifest_artifact_ref")
             if not isinstance(run_id, str) or not run_id:
                 raise ValueError("missing valid run_id")
             if not _is_valid_id(task_id):
@@ -443,7 +445,7 @@ class PersistRecommendedPapersNode:
         except Exception as exc:
             return {"stage": "failed", "status": "failed", "error": str(exc)}
 
-        degraded = failure_count > 0 or cache_failed > 0
+        degraded = bool(state.get("degraded")) or failure_count > 0 or cache_failed > 0
         if failure_count and not persisted_count:
             stage = "failed"
         elif degraded:

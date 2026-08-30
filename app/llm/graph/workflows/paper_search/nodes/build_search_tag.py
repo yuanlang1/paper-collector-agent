@@ -134,7 +134,7 @@ class BuildSearchTagNode:
 
         return {
             "stage": (
-                "creating_task"
+                "generating_source_queries"
                 if self.skip_confirmation
                 else "awaiting_confirmation"
             ),

@@ -6,6 +6,7 @@ from langchain_core.messages import ToolMessage
 from pydantic import ValidationError
 
 from app.llm.graph.main.state import MainAgentState
+from app.llm.graph.main.nodes.safe_subgraph import build_subagent_error_handoff
 from app.llm.subagents.paper_search.contracts import (
     PaperSearchDelegation,
     PaperSearchHandoff,
@@ -38,9 +39,17 @@ async def prepare_paper_search_node(state: MainAgentState) -> dict:
 
 
 async def complete_paper_search_node(state: MainAgentState) -> dict:
-    handoff = PaperSearchHandoff.model_validate(state["paper_search_handoff"])
-    result = handoff.model_dump(mode="json")
     tool_call_id = state["paper_search_tool_call_id"]
+    try:
+        handoff = PaperSearchHandoff.model_validate(state["paper_search_handoff"])
+        result = handoff.model_dump(mode="json")
+    except Exception as exc:
+        result = build_subagent_error_handoff(
+            subagent="paper_search_agent",
+            error_code="PAPER_SEARCH_HANDOFF_INVALID",
+            summary="论文检索工作流返回了无法处理的结果。",
+            exception=exc,
+        )
 
     return {
         "messages": [

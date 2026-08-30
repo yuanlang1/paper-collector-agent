@@ -17,6 +17,8 @@ from pypdf import PdfReader
 
 PDF_READ_PAGE_COUNT = 4
 MAX_ABSTRACT_CHARS = 8_000
+MAX_KEYWORDS = 12
+MAX_KEYWORD_CHARS = 1_000
 
 
 AI_ABSTRACT_SYSTEM_PROMPT = """
@@ -40,8 +42,24 @@ FALLBACK_ABSTRACT_SYSTEM_PROMPT = """
 """.strip()
 
 
+KEYWORD_GENERATION_SYSTEM_PROMPT = """
+    根据论文标题、原始摘要和前几页正文生成论文关键词。
+
+    规则：
+    - 仅使用输入中有证据支持的术语，不得虚构方法、数据集、指标或结论；
+    - 生成 3 到 8 个简洁的学术短语，而不是完整句子；
+    - 优先保持论文原文语言；英文论文使用英文术语；
+    - 不要输出“Keywords”“Index Terms”等标题文本；
+    - 不要重复、不要编号、不要包含解释。
+""".strip()
+
+
 class AiAbstractResult(BaseModel):
     ai_abstract: str = Field(min_length = 1, max_length = 3_000)
+
+
+class KeywordGenerationResult(BaseModel):
+    keywords: list[str] = Field(min_length=3, max_length=8)
 
 
 def _text(value: Any) -> str | None:
@@ -103,16 +121,72 @@ def _extract_original_abstract(initial_pdf_text: str) -> str:
     return abstract[:MAX_ABSTRACT_CHARS]
 
 
+def _normalize_keywords(value: Any) -> list[str]:
+    values = value if isinstance(value, list) else [value]
+    keywords: list[str] = []
+    seen: set[str] = set()
+
+    for item in values:
+        for candidate in re.split(r"[,;，；\n|•·]+", str(item or "")):
+            normalized = re.sub(r"\s+", " ", candidate).strip(" .:-—")
+            key = normalized.casefold()
+            if (
+                not normalized
+                or len(normalized) > 160
+                or key in seen
+            ):
+                continue
+            seen.add(key)
+            keywords.append(normalized)
+            if len(keywords) >= MAX_KEYWORDS:
+                return keywords
+
+    return keywords
+
+
+def _keywords_text(keywords: list[str]) -> str | None:
+    value = ", ".join(keywords).strip()
+    return value[:MAX_KEYWORD_CHARS] or None
+
+
+def _extract_original_keywords(initial_pdf_text: str) -> list[str]:
+    match = re.search(
+        r"""
+        (?is)
+        (?:^|\n)\s*(?:keywords?|key\s*words?|index\s+terms?|关键词)
+        \s*[:：\-—]?\s*
+        (?P<keywords>.+?)
+        (?=
+            \n\s*(?:\d+|[ivxlcdm]+)\.?\s*(?:introduction|引言)\b
+            |\n\s*(?:introduction|引言)\b
+            |\n{2,}
+            |\Z
+        )
+        """,
+        initial_pdf_text,
+        flags=re.VERBOSE,
+    )
+    if match is None:
+        return []
+
+    return _normalize_keywords(match.group("keywords"))
+
+
 class AbstractEnrichNode:
     def __init__(
         self,
         artifact_store: LocalArtifactStore | None = None,
         model: Any | None = None,
+        keyword_model: Any | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
         self.model = model or create_validated_structured_chat_model(
             AiAbstractResult,
             temperature = 0,
+        )
+        self.keyword_model = keyword_model or create_validated_structured_chat_model(
+            KeywordGenerationResult,
+            temperature=0,
         )
 
     async def _generate_ai_abstract(
@@ -184,6 +258,39 @@ class AbstractEnrichNode:
 
         return output.ai_abstract.strip()
 
+    async def _generate_keywords(
+        self,
+        *,
+        paper_info: Mapping[str, Any],
+        initial_pdf_text: str | None,
+    ) -> list[str]:
+        result = await self.keyword_model.ainvoke(
+            [
+                SystemMessage(content=KEYWORD_GENERATION_SYSTEM_PROMPT),
+                HumanMessage(
+                    content=json.dumps(
+                        {
+                            "title": paper_info.get("title"),
+                            "paper_abstract": paper_info.get(
+                                "paper_abstract"
+                            ),
+                            "pdf_front_pages": initial_pdf_text,
+                        },
+                        ensure_ascii=False,
+                    )
+                ),
+            ]
+        )
+        output = (
+            result
+            if isinstance(result, KeywordGenerationResult)
+            else KeywordGenerationResult.model_validate(result)
+        )
+        keywords = _normalize_keywords(output.keywords)
+        if len(keywords) < 3:
+            raise ValueError("generated fewer than three valid keywords")
+        return keywords
+
     async def __call__(
         self,
         state: Mapping[str, Any],
@@ -232,6 +339,10 @@ class AbstractEnrichNode:
             missing_abstract_count = 0
             front_pages_read_count = 0
             ai_abstract_count = 0
+            source_keyword_count = 0
+            extracted_keyword_count = 0
+            generated_keyword_count = 0
+            missing_keyword_count = 0
             warnings: list[str] = []
 
             for paper in papers:
@@ -262,6 +373,13 @@ class AbstractEnrichNode:
                 else:
                     abstract_source = "missing"
                     extraction_status = "pending"
+
+                source_keywords = _normalize_keywords(
+                    paper_info.get("keywords")
+                )
+                keyword_source = "missing"
+                keyword_extraction_status = "pending"
+                keyword_error: str | None = None
 
                 try:
                     if not local_pdf_path:
@@ -301,6 +419,50 @@ class AbstractEnrichNode:
                     else:
                         extraction_status = "front_pages_read_failed"
 
+                if source_keywords:
+                    paper_info["keywords"] = _keywords_text(source_keywords)
+                    keyword_source = "source_metadata"
+                    keyword_extraction_status = "not_needed"
+                    source_keyword_count += 1
+                elif initial_pdf_text:
+                    extracted_keywords = _extract_original_keywords(
+                        initial_pdf_text
+                    )
+                    if extracted_keywords:
+                        paper_info["keywords"] = _keywords_text(
+                            extracted_keywords
+                        )
+                        keyword_source = "pdf_extracted"
+                        keyword_extraction_status = "success"
+                        extracted_keyword_count += 1
+                    else:
+                        keyword_extraction_status = "not_found"
+                        keyword_error = (
+                            "keywords section not found in PDF front pages"
+                        )
+
+                if keyword_source == "missing":
+                    try:
+                        generated_keywords = await self._generate_keywords(
+                            paper_info=paper_info,
+                            initial_pdf_text=initial_pdf_text,
+                        )
+                        paper_info["keywords"] = _keywords_text(
+                            generated_keywords
+                        )
+                        keyword_source = "generated_from_paper"
+                        keyword_extraction_status = "generated"
+                        keyword_error = None
+                        generated_keyword_count += 1
+                    except Exception as exc:
+                        paper_info["keywords"] = None
+                        keyword_extraction_status = "failed"
+                        keyword_error = str(exc)
+                        missing_keyword_count += 1
+                        warnings.append(
+                            f"{paper_info.get('title')} 的论文关键词生成失败：{exc}"
+                        )
+
                 try:
                     if initial_pdf_text:
                         paper_info["ai_abstract"] = (
@@ -339,6 +501,12 @@ class AbstractEnrichNode:
                     "ai_summary_source": ai_summary_source,
                     "error": extraction_error,
                 }
+                paper["keyword_resolution"] = {
+                    "source": keyword_source,
+                    "extraction_status": keyword_extraction_status,
+                    "pdf_pages_read": page_count,
+                    "error": keyword_error,
+                }
 
             manifest["papers"] = papers
             manifest["step_key"] = "abstract_enrichment"
@@ -359,6 +527,10 @@ class AbstractEnrichNode:
                     "missing_abstract_count": missing_abstract_count,
                     "front_pages_read_count": front_pages_read_count,
                     "ai_abstract_count": ai_abstract_count,
+                    "source_keyword_count": source_keyword_count,
+                    "extracted_keyword_count": extracted_keyword_count,
+                    "generated_keyword_count": generated_keyword_count,
+                    "missing_keyword_count": missing_keyword_count,
                 },
             )
 
@@ -387,6 +559,10 @@ class AbstractEnrichNode:
                 "abstract_missing": missing_abstract_count,
                 "pdf_front_pages_read": front_pages_read_count,
                 "ai_abstract_generated": ai_abstract_count,
+                "keywords_from_source": source_keyword_count,
+                "keywords_extracted_from_pdf": extracted_keyword_count,
+                "keywords_generated": generated_keyword_count,
+                "keywords_missing": missing_keyword_count,
             },
             "warnings": [
                 *state.get("warnings", []),

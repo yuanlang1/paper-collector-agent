@@ -110,6 +110,9 @@ class Settings(BaseSettings):
     SILICONFLOW_EMBEDDING_BATCH_SIZE: int = 32
     SILICONFLOW_EMBEDDING_MAX_RETRIES: int = 3
 
+    LANGGRAPH_CHECKPOINT_PATH: str = "data/langgraph-checkpoints.db"
+    CHAT_HISTORY_DB_PATH: str = "data/chat-history.db"
+
     @model_validator(mode="after")
     def validate_paper_search_pagination(self) -> "Settings":
         for source in ("ARXIV", "DBLP", "GOOGLE_SCHOLAR"):

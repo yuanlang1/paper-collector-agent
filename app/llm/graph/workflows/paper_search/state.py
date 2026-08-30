@@ -15,7 +15,6 @@ PaperSearchStage = Literal[
     "building_search_tag",
     "generating_source_queries",
     "awaiting_confirmation",
-    "creating_task",
     "searching",
     "normalizing",
     "reviewing_search",
@@ -105,6 +104,7 @@ class PaperSearchWorkflowState(TypedDict, total=False):
     venue_manifest_artifact_ref: str | None
     abstract_manifest_artifact_ref: str | None
     recommendation_manifest_artifact_ref: str | None
+    task_bound_recommendation_manifest_artifact_ref: str | None
     persisted_papers_manifest_artifact_ref: str | None
     downloaded_pdf_paths: list[str]
     pdf_cleanup_error: str | None

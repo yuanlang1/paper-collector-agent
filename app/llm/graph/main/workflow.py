@@ -24,6 +24,7 @@ from app.llm.graph.main.nodes.paper_search import (
     complete_paper_search_node,
     prepare_paper_search_node,
 )
+from app.llm.graph.main.nodes.safe_subgraph import SafeSubgraphNode
 from app.llm.graph.main.nodes.task_review import (
     complete_task_review_node,
     prepare_task_review_node,
@@ -52,7 +53,16 @@ def build_main_agent_workflow(
         "prepare_paper_search",
         prepare_paper_search_node,
     )
-    builder.add_node("paper_search", paper_search_graph)
+    builder.add_node(
+        "paper_search",
+        SafeSubgraphNode(
+            subgraph=paper_search_graph,
+            handoff_key="paper_search_handoff",
+            subagent="paper_search_agent",
+            error_code="PAPER_SEARCH_SUBGRAPH_FAILED",
+            summary="论文检索工作流执行失败，未完成结果保存。",
+        ),
+    )
     builder.add_node(
         "complete_paper_search",
         complete_paper_search_node,
@@ -61,7 +71,16 @@ def build_main_agent_workflow(
         "prepare_task_review",
         prepare_task_review_node,
     )
-    builder.add_node("task_review", task_review_graph)
+    builder.add_node(
+        "task_review",
+        SafeSubgraphNode(
+            subgraph=task_review_graph,
+            handoff_key="task_review_handoff",
+            subagent="task_review_agent",
+            error_code="TASK_REVIEW_SUBGRAPH_FAILED",
+            summary="文献综述工作流执行失败，未完成结果保存。",
+        ),
+    )
     builder.add_node(
         "complete_task_review",
         complete_task_review_node,

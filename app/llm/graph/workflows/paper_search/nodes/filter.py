@@ -158,27 +158,6 @@ def _identity_keys(paper: dict[str, Any]) -> tuple[str | None, str | None]:
     return doi_key, title_author_key
 
 
-def _build_keywords(
-    understanding: PromptUnderstandingArgs,
-) -> str | None:
-    values = list(
-        dict.fromkeys(
-            [
-                *understanding.keywords,
-                *understanding.includeTerms,
-            ]
-        )
-    )
-    keywords = ", ".join(values).strip()
-
-    if len(keywords) > 1000:
-        raise ValueError(
-            "keywords 超过 paper_info.keywords 最大长度。"
-        )
-
-    return keywords or None
-
-
 def _matches_filters(
     paper: dict[str, Any],
     understanding: PromptUnderstandingArgs,
@@ -207,7 +186,6 @@ def _matches_filters(
 def _to_paper_info_draft(
     paper: dict[str, Any],
     source: str,
-    keywords: str | None,
 ) -> dict[str, Any]:
     title = _text(paper.get("title"))
 
@@ -250,7 +228,7 @@ def _to_paper_info_draft(
         "doi": _normalize_doi(paper.get("doi")),
         "venue_id": None,
         "citations": _as_int(paper.get("citation_count")),
-        "keywords": keywords,
+        "keywords": None,
         "source": source,
         "pdf_url": pdf_url,
         "abstract_url": abstract_url,
@@ -391,8 +369,6 @@ class NormalizeDeduplicateFilterNode:
                 raise ValueError("缺少分源检索结果 artifact。")
 
             base_dir = self.artifact_store.base_dir.resolve()
-            keywords = _build_keywords(understanding)
-
             def read_artifact_uri(uri: str) -> dict[str, Any]:
                 if not uri.startswith("artifact://"):
                     raise ValueError(f"不支持的 artifact URI：{uri}")
@@ -444,7 +420,6 @@ class NormalizeDeduplicateFilterNode:
                         paper_info = _to_paper_info_draft(
                             paper=paper,
                             source=source,
-                            keywords=keywords,
                         )
 
                         doi_key, title_author_key = _identity_keys(paper)

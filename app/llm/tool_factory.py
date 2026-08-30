@@ -9,7 +9,7 @@ from app.llm.tools.registry import get_tool_specs
 class ToolFactory:
     def build(
         self,
-        db: Session,
+        db: Session | None = None,
         allowed_tools: list[str] | None = None,
     ) -> list[StructuredTool]:
         tools = []

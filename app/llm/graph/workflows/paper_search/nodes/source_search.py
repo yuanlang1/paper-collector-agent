@@ -61,8 +61,7 @@ class _SourceSearchNode:
         arguments = dict(plan["arguments"])
         page_size_key = {"arXiv": "max_results", "DBLP": "h", "Google Scholar": "num"}[self.source]
         page_size = int(arguments[page_size_key])
-        db = config.get("configurable", {}).get("db")
-        result = await handler(arguments, db)
+        result = await handler(arguments, None)
         metadata = result.get("metadata") or {}
         pagination = dict(metadata.get("pagination") or {})
         papers = [

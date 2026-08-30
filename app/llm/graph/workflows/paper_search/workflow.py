@@ -25,6 +25,10 @@ from app.llm.graph.workflows.paper_search.nodes.update_task_status import Update
 from app.llm.graph.workflows.paper_search.nodes.venue import VenueResolutionNode
 from app.llm.graph.workflows.paper_search.state import PaperSearchWorkflowState
 from app.rag.processing.task_rag_batch_runner import TaskRagBatchRunner
+from app.llm.streaming.timeline import (
+    PAPER_SEARCH_TIMELINE,
+    instrument_timeline_node,
+)
 
 
 def _route(stage: str, target: str):
@@ -44,6 +48,9 @@ def _route_paths(target: str) -> dict[str, str]:
 
 
 def _terminal_target(state: PaperSearchWorkflowState) -> str:
+    if state.get("downloaded_pdf_paths"):
+        return "cleanup_downloaded_pdfs"
+
     task_id = state.get("paper_service_task_id")
     if (
         isinstance(task_id, int)
@@ -97,7 +104,12 @@ def build_paper_search_workflow(
     node_overrides = node_overrides or {}
 
     def node(name, default):
-        return node_overrides.get(name, default)
+        return instrument_timeline_node(
+            workflow="paper_search",
+            node_name=name,
+            node=node_overrides.get(name, default),
+            timeline=PAPER_SEARCH_TIMELINE,
+        )
 
     builder = StateGraph(PaperSearchWorkflowState)
     builder.add_node(
@@ -172,8 +184,8 @@ def build_paper_search_workflow(
     if skip_confirmation:
         builder.add_conditional_edges(
             "build_search_tag",
-            _route("creating_task", "create_task"),
-            _route_paths("create_task"),
+            _route("generating_source_queries", "generate_queries"),
+            _route_paths("generate_queries"),
         )
     else:
         builder.add_conditional_edges(
@@ -183,14 +195,9 @@ def build_paper_search_workflow(
         )
         builder.add_conditional_edges(
             "confirm",
-            _route("creating_task", "create_task"),
-            _route_paths("create_task"),
+            _route("generating_source_queries", "generate_queries"),
+            _route_paths("generate_queries"),
         )
-    builder.add_conditional_edges(
-        "create_task",
-        _route("generating_source_queries", "generate_queries"),
-        _route_paths("generate_queries"),
-    )
     builder.add_conditional_edges(
         "generate_queries",
         _route("searching", "search_arxiv"),
@@ -256,6 +263,11 @@ def build_paper_search_workflow(
     )
     builder.add_conditional_edges(
         "recommend",
+        _route("persisting_papers", "create_task"),
+        _route_paths("create_task"),
+    )
+    builder.add_conditional_edges(
+        "create_task",
         _route("persisting_papers", "persist"),
         _route_paths("persist"),
     )

@@ -3,6 +3,14 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, Query
+from app.api.schemas.chat_history import (
+    ChatMessageListResponse,
+    ChatMessageView,
+    ConversationListResponse,
+    ConversationView,
+)
+from app.history.store import get_history_store
 
 from app.api.schemas.agent import (
     ChatRequest,
@@ -124,4 +132,54 @@ async def chat_resume_stream(
             ),
             db=db,
         )
+    )
+
+@router.get(
+    "/conversations",
+    response_model=ServiceResponse[ConversationListResponse],
+)
+async def list_conversations(
+    limit: int = Query(default=30, ge=1, le=100),
+) -> ServiceResponse[ConversationListResponse]:
+    history_store = get_history_store()
+    items = await history_store.list_conversations(limit=limit)
+
+    return ServiceResponse[ConversationListResponse].build_success_response(
+        data=ConversationListResponse(
+            items=[
+                ConversationView.model_validate(item)
+                for item in items
+            ]
+        ),
+        message="OK",
+    )
+
+
+@router.get(
+    "/conversations/{conversation_id}/messages",
+    response_model=ServiceResponse[ChatMessageListResponse],
+)
+async def list_conversation_messages(
+    conversation_id: str,
+    limit: int = Query(default=100, ge=1, le=100),
+    before_id: int | None = Query(default=None, ge=1),
+) -> ServiceResponse[ChatMessageListResponse]:
+    history_store = get_history_store()
+
+    items, next_before_id = await history_store.list_messages(
+        conversation_id=conversation_id,
+        limit=limit,
+        before_id=before_id,
+    )
+
+    return ServiceResponse[ChatMessageListResponse].build_success_response(
+        data=ChatMessageListResponse(
+            conversation_id=conversation_id,
+            items=[
+                ChatMessageView.model_validate(item)
+                for item in items
+            ],
+            next_before_id=next_before_id,
+        ),
+        message="OK",
     )

@@ -1,18 +1,12 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 import logging
 from typing import Any
-
-from langgraph.checkpoint.memory import InMemorySaver
 
 from app.llm.graph.main.native_tools import build_native_tool_schemas
 from app.llm.graph.main.nodes.solve import SolveNode
 from app.llm.graph.main.workflow import build_main_agent_workflow
-from app.llm.graph.workflows.paper_search.workflow import (
-    build_paper_search_workflow,
-)
-from app.llm.graph.workflows.review_generate.workflow import (
-    build_task_review_workflow,
-)
+from app.llm.graph.workflows.paper_search.workflow import build_paper_search_workflow
+from app.llm.graph.workflows.review_generate.workflow import build_task_review_workflow
 from app.llm.model_factory import create_chat_model
 from app.llm.response import build_chat_response, build_done_payload
 from app.llm.streaming import AgentStreamAdapter
@@ -28,18 +22,18 @@ from app.runtime.session import Session
 logger = logging.getLogger(__name__)
 
 
+TerminalCallback = Callable[[dict[str, Any]], Awaitable[None]]
+
+
 class AgentService:
     def __init__(
         self,
+        checkpointer,
         subagent_registry: SubAgentRegistry | None = None,
     ):
-        self.checkpointer = InMemorySaver()
-        self.subagent_registry = subagent_registry or SubAgentRegistry(
-            ALL_SUBAGENTS,
-        )
-        model = create_chat_model(temperature=0).bind_tools(
-            build_native_tool_schemas(),
-        )
+        self.checkpointer = checkpointer
+        self.subagent_registry = subagent_registry or SubAgentRegistry(ALL_SUBAGENTS)
+        model = create_chat_model(temperature=0).bind_tools(build_native_tool_schemas())
         self.graph = build_main_agent_workflow(
             solve_node=SolveNode(model=model),
             paper_search_graph=build_paper_search_workflow(
@@ -63,7 +57,12 @@ class AgentService:
             run_id=str(session.run_id),
         )
 
-    async def stream(self, session: Session) -> AsyncIterator[str]:
+    async def stream(
+        self,
+        session: Session,
+        *,
+        on_terminal: TerminalCallback | None = None,
+    ) -> AsyncIterator[str]:
         adapter = AgentStreamAdapter()
         latest_root_state: dict[str, Any] = {}
         paper_search_tool_call_id: str | None = None
@@ -96,9 +95,52 @@ class AgentService:
 
                 if stream_type == "custom":
                     for event_name, payload in adapter.handle_custom(chunk):
+                        timeline_context: dict[str, Any] = {}
+                        if event_name == "timeline_step":
+                            workflow = payload.get("workflow")
+                            if workflow == "paper_search":
+                                timeline_context = {
+                                    "delegation_id": paper_search_tool_call_id,
+                                    "child_thread_id": (
+                                        f"{session.conversation_id}:paper_search_agent:"
+                                        f"{paper_search_tool_call_id}"
+                                        if paper_search_tool_call_id is not None
+                                        else next(
+                                            (
+                                                str(item)
+                                                for item in namespace
+                                                if str(item).split(":", 1)[0]
+                                                == "paper_search"
+                                            ),
+                                            None,
+                                        )
+                                    ),
+                                }
+                            elif workflow == "task_review":
+                                timeline_context = {
+                                    "delegation_id": task_review_tool_call_id,
+                                    "child_thread_id": (
+                                        f"{session.conversation_id}:task_review_agent:"
+                                        f"{task_review_tool_call_id}"
+                                        if task_review_tool_call_id is not None
+                                        else next(
+                                            (
+                                                str(item)
+                                                for item in namespace
+                                                if str(item).split(":", 1)[0]
+                                                == "task_review"
+                                            ),
+                                            None,
+                                        )
+                                    ),
+                                }
                         yield session.encode_sse(
                             event_name,
-                            {**payload, "namespace": list(namespace)},
+                            {
+                                **payload,
+                                **timeline_context,
+                                "namespace": list(namespace),
+                            },
                         )
                     continue
 
@@ -107,6 +149,17 @@ class AgentService:
 
                 interrupt_payload = extract_interrupt_payload(chunk)
                 if interrupt_payload is not None:
+                    response = build_done_payload(
+                        state={
+                            **latest_root_state,
+                            "run_id": session.run_id,
+                            "__interrupt__": [interrupt_payload],
+                        },
+                        conversation_id=session.conversation_id,
+                        run_id=str(session.run_id),
+                    )
+                    await self._notify_terminal(on_terminal, response)
+
                     event_name, payload = adapter.confirmation_required(
                         interrupt_payload,
                     )
@@ -220,9 +273,10 @@ class AgentService:
             )
             event_name = (
                 "run_failed"
-                if str(final_state.get("run_status")) == "failed"
+                if response["status"] == "failed"
                 else "run_completed"
             )
+            await self._notify_terminal(on_terminal, response)
             yield session.encode_sse(event_name, response)
 
         except Exception as exc:
@@ -231,9 +285,44 @@ class AgentService:
                 session.conversation_id,
                 session.run_id,
             )
+
+            response = {
+                "conversation_id": session.conversation_id,
+                "run_id": str(session.run_id),
+                "status": "failed",
+                "reply": "本次任务执行失败，请稍后重试。",
+                "pending_action": None,
+                "last_action_result": None,
+                "artifact_refs": [],
+                "interrupt": None,
+                "error": str(exc),
+            }
+
+            await self._notify_terminal(on_terminal, response)
+
             yield session.encode_sse(
                 "run_failed",
-                {"status": "failed", "error": str(exc)},
+                {
+                    "status": "failed",
+                    "error": str(exc),
+                },
+            )
+
+    async def _notify_terminal(
+        self,
+        callback: TerminalCallback | None,
+        payload: dict[str, Any],
+    ) -> None:
+        if callback is None:
+            return
+
+        try:
+            await callback(payload)
+        except Exception:
+            logger.exception(
+                "Terminal callback failed: conversation_id=%s, run_id=%s",
+                payload.get("conversation_id"),
+                payload.get("run_id"),
             )
 
     async def _read_final_state(

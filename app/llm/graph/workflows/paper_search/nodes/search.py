@@ -73,7 +73,6 @@ class MultiSourceSearchNode:
     ) -> dict[str, Any]:
         query_plans = state.get("source_query_plans") or []
         run_id = state.get("run_id")
-        db = config.get("configurable", {}).get("db")
 
         if not isinstance(run_id, str) or not run_id:
             return {
@@ -107,7 +106,7 @@ class MultiSourceSearchNode:
             try:
                 raw_result = await handler(
                     plan["arguments"],
-                    db,
+                    None,
                 )
 
                 ok = bool(raw_result.get("ok"))

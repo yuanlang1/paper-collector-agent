@@ -43,6 +43,10 @@ from app.llm.graph.workflows.review_generate.nodes.retrieve_evidence import (
 from app.llm.graph.workflows.review_generate.state import (
     TaskReviewWorkflowState,
 )
+from app.llm.streaming.timeline import (
+    TASK_REVIEW_TIMELINE,
+    instrument_timeline_node,
+)
 
 
 def _route(expected_stage: str, target: str):
@@ -75,8 +79,15 @@ def build_task_review_workflow(
 
     def node(name: str, factory):
         if name in node_overrides:
-            return node_overrides[name]
-        return factory()
+            target = node_overrides[name]
+        else:
+            target = factory()
+        return instrument_timeline_node(
+            workflow="task_review",
+            node_name=name,
+            node=target,
+            timeline=TASK_REVIEW_TIMELINE,
+        )
 
     builder = StateGraph(TaskReviewWorkflowState)
     builder.add_node("initialize", node("initialize", lambda: initialize_review_node))

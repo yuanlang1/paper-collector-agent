@@ -8,11 +8,9 @@ from app.infrastructure.nacos_registry import nacos_registry
 from app.core.exceptions import register_exception_handlers
 from app.rag.index_construction.base import close_index_resources
 from app.rag.processing.task_rag_batch_runner import close_task_rag_batch_runner
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-)
+from app.runtime.agent_runtime import initialize_agent_runtime
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from app.history.store import initialize_history_store
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,14 +25,28 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await nacos_registry.start()
-    try:
-        yield
-    finally:
-        await close_task_rag_batch_runner()
-        await paper_service_grpc_channel_pool.close()
-        await nacos_registry.stop()
-        await close_index_resources()
+    async with AsyncSqliteSaver.from_conn_string(
+        settings.LANGGRAPH_CHECKPOINT_PATH,
+    ) as checkpointer:
+        await checkpointer.setup()
+
+        history_store = initialize_history_store(
+            settings.CHAT_HISTORY_DB_PATH,
+        )
+
+        initialize_agent_runtime(
+            checkpointer=checkpointer,
+            history_store=history_store,
+        )
+
+        await nacos_registry.start()
+        try:
+            yield
+        finally:
+            await close_task_rag_batch_runner()
+            await paper_service_grpc_channel_pool.close()
+            await nacos_registry.stop()
+            await close_index_resources()
 
 app = FastAPI(lifespan = lifespan)
 

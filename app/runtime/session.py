@@ -66,7 +66,6 @@ class Session:
     def graph_config(self) -> dict[str, Any]:
         configurable: dict[str, Any] = {
             "thread_id": self.conversation_id,
-            "db": self.db,
         }
         metadata: dict[str, Any] = {
             "conversation_id": self.conversation_id,

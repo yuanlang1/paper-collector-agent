@@ -28,7 +28,7 @@ PAPER_SEARCH_NODE_PHASE = {
     "intent_understanding": "prepare",
     "build_search_tag": "prepare",
     "confirm": "prepare",
-    "create_task": "prepare",
+    "create_task": "persist",
     "generate_queries": "plan",
     "search_arxiv": "search",
     "search_dblp": "search",
@@ -234,6 +234,11 @@ class AgentStreamAdapter:
                 "supplemental_search_round": update.get(
                     "supplemental_search_round",
                     0,
+                ),
+                "iteration": (
+                    int(update.get("reflection_round", 0)) + 1
+                    if workflow == "task_review"
+                    else int(update.get("supplemental_search_round", 0)) + 1
                 ),
                 "source_stats": to_jsonable(
                     update.get("source_search_stats") or {}

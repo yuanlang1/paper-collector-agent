@@ -18,7 +18,6 @@ async def tool_node(
         result = {"ok": False, "error": "UNKNOWN_TOOL"}
     else:
         tools = ToolFactory().build(
-            db=config["configurable"]["db"],
             allowed_tools=[call["name"]],
         )
         tool = next(
