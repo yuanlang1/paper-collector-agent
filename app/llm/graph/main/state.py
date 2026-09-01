@@ -36,6 +36,7 @@ class MainAgentState(TypedDict):
 
     pending_tool_calls: list[PendingToolCallState]
     active_tool_call: PendingToolCallState | None
+    iteration_count: int
     reasoning_content: str
 
     last_action_result: dict[str, Any] | None

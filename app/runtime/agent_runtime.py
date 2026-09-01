@@ -1,12 +1,19 @@
+import asyncio
+import logging
 import time
 
+from app.database import SessionLocal
 from app.history.store import ChatHistoryStore
-from collections.abc import AsyncIterator
-from typing import Any, Optional
+from collections.abc import AsyncIterator, Awaitable
+from typing import Any, Callable, Optional
 from uuid import uuid4
 from sqlalchemy.orm import Session as DbSession
 from app.llm.agent import AgentService
 from app.runtime.session import Session
+from app.runtime.threaded_stream import DetachedStreamRun
+
+
+logger = logging.getLogger(__name__)
 
 
 class AgentRuntime:
@@ -14,9 +21,13 @@ class AgentRuntime:
         self,
         agent_service: AgentService,
         history_store: ChatHistoryStore,
+        db_factory: Callable[[], DbSession] = SessionLocal,
     ) -> None:
         self.agent_service = agent_service
         self.history_store = history_store
+        self.db_factory = db_factory
+        self._active_stream_runs: set[DetachedStreamRun] = set()
+        self._active_stream_tasks: set[asyncio.Task[None]] = set()
 
     async def chat(
         self,
@@ -61,62 +72,59 @@ class AgentRuntime:
         conversation_id: str | None,
         db: DbSession,
     ) -> AsyncIterator[str]:
-        session = Session.create(
-            message=message,
-            conversation_id=self.resolve_conversation_id(conversation_id),
-            db=db,
-        )
-
+        del db
+        resolved_conversation_id = self.resolve_conversation_id(conversation_id)
+        run_id = f"run_{uuid4().hex}"
         assistant_message_id = await self.history_store.start_turn(
-            conversation_id=session.conversation_id,
-            run_id=str(session.run_id),
+            conversation_id=resolved_conversation_id,
+            run_id=run_id,
             user_content=message,
         )
-        started_at = time.perf_counter()
-        terminal_persisted = False
 
-        async def persist_terminal(response: dict[str, Any]) -> None:
-            nonlocal terminal_persisted
+        stream_run = DetachedStreamRun(run_id)
+        self._register_stream_run(stream_run)
+        self._start_stream_task(
+            self._run_stream_task(
+                stream_run=stream_run,
+                message=message,
+                conversation_id=resolved_conversation_id,
+                run_id=run_id,
+                resume_payload=None,
+                resume_action_id=None,
+                assistant_message_id=assistant_message_id,
+            ),
+            run_id=run_id,
+        )
 
-            if terminal_persisted:
-                return
-
-            await self.history_store.complete_assistant_message(
-                message_id=assistant_message_id,
-                response=response,
-                latency_ms=self._elapsed_ms(started_at),
-            )
-            terminal_persisted = True
-
-        try:
-            async for event in self.agent_service.stream(
-                session,
-                on_terminal=persist_terminal,
-            ):
-                yield event
-        finally:
-            if not terminal_persisted:
-                await self.history_store.mark_interrupted(
-                    message_id=assistant_message_id,
-                )
+        async for event in stream_run.subscribe():
+            yield event
 
     async def resume_chat(
         self,
         *,
         conversation_id: str,
         resume_payload: dict[str, Any],
+        requested_run_id: str | None = None,
+        requested_action_id: str | None = None,
         db: DbSession,
     ) -> dict[str, Any]:
-        session = await self._resume_session(
+        session, action_id = await self._resume_session(
             conversation_id=conversation_id,
             resume_payload=resume_payload,
+            requested_run_id=requested_run_id,
+            requested_action_id=requested_action_id,
             db=db,
         )
-        assistant_message_id = await self.history_store.start_resume(
+        claim = await self.history_store.claim_pending_action(
             conversation_id=conversation_id,
             run_id=str(session.run_id),
-            source="resume",
+            action_id=action_id,
+            decision=str(resume_payload["decision"]),
+            comment=resume_payload.get("comment"),
         )
+        if not claim.claimed:
+            raise ValueError("The requested approval is already being processed")
+        assistant_message_id = claim.message_id
         started_at = time.perf_counter()
 
         try:
@@ -131,7 +139,7 @@ class AgentRuntime:
             message_id=assistant_message_id,
             response=response,
             latency_ms=self._elapsed_ms(started_at),
-            extra_meta=self._resume_meta(resume_payload),
+            extra_meta=self._resume_meta(resume_payload, action_id),
         )
 
         return response
@@ -141,24 +149,183 @@ class AgentRuntime:
         *,
         conversation_id: str,
         resume_payload: dict[str, Any],
+        requested_run_id: str | None = None,
+        requested_action_id: str | None = None,
         db: DbSession,
     ) -> AsyncIterator[str]:
-        session = await self._resume_session(
+        session, action_id = await self._resume_session(
             conversation_id=conversation_id,
             resume_payload=resume_payload,
+            requested_run_id=requested_run_id,
+            requested_action_id=requested_action_id,
             db=db,
         )
-        assistant_message_id = await self.history_store.start_resume(
+        run_id = str(session.run_id)
+        claim = await self.history_store.claim_pending_action(
             conversation_id=conversation_id,
-            run_id=str(session.run_id),
-            source="resume",
+            run_id=run_id,
+            action_id=action_id,
+            decision=str(resume_payload["decision"]),
+            comment=resume_payload.get("comment"),
         )
+        if not claim.claimed:
+            raise ValueError("The requested approval is already being processed")
+        assistant_message_id = claim.message_id
+
+        stream_run = DetachedStreamRun(run_id)
+        self._register_stream_run(stream_run)
+        self._start_stream_task(
+            self._run_stream_task(
+                stream_run=stream_run,
+                message=None,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                resume_payload=resume_payload,
+                resume_action_id=action_id,
+                assistant_message_id=assistant_message_id,
+            ),
+            run_id=run_id,
+        )
+
+        async for event in stream_run.subscribe():
+            yield event
+
+    def _register_stream_run(self, stream_run: DetachedStreamRun) -> None:
+        self._active_stream_runs.add(stream_run)
+
+    def _unregister_stream_run(self, stream_run: DetachedStreamRun) -> None:
+        self._active_stream_runs.discard(stream_run)
+
+    def _start_stream_task(
+        self,
+        coroutine: Awaitable[None],
+        *,
+        run_id: str,
+    ) -> None:
+        task = asyncio.create_task(coroutine, name=f"agent-stream:{run_id}")
+        self._active_stream_tasks.add(task)
+        task.add_done_callback(self._active_stream_tasks.discard)
+
+    async def _run_stream_task(
+        self,
+        *,
+        stream_run: DetachedStreamRun,
+        message: str | None,
+        conversation_id: str,
+        run_id: str,
+        resume_payload: dict[str, Any] | None,
+        resume_action_id: str | None,
+        assistant_message_id: int,
+    ) -> None:
+        try:
+            await self._run_stream_worker(
+                stream_run=stream_run,
+                message=message,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                resume_payload=resume_payload,
+                resume_action_id=resume_action_id,
+                assistant_message_id=assistant_message_id,
+            )
+        except Exception:
+            logger.exception(
+                "Detached Agent task crashed: conversation_id=%s, run_id=%s",
+                conversation_id,
+                run_id,
+            )
+        finally:
+            stream_run.finish()
+            self._unregister_stream_run(stream_run)
+
+    async def _run_stream_worker(
+        self,
+        *,
+        stream_run: DetachedStreamRun,
+        message: str | None,
+        conversation_id: str,
+        run_id: str,
+        resume_payload: dict[str, Any] | None,
+        resume_action_id: str | None,
+        assistant_message_id: int,
+    ) -> None:
         started_at = time.perf_counter()
+        db: DbSession | None = None
+        try:
+            db = self.db_factory()
+            session = (
+                Session.resume(
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    resume_payload=resume_payload,
+                    db=db,
+                    assistant_message_id=assistant_message_id,
+                )
+                if resume_payload is not None
+                else Session.create(
+                    message=message or "",
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    db=db,
+                    assistant_message_id=assistant_message_id,
+                )
+            )
+            await self._consume_detached_stream(
+                stream_run=stream_run,
+                session=session,
+                assistant_message_id=assistant_message_id,
+                started_at=started_at,
+                extra_meta=(
+                    self._resume_meta(resume_payload, resume_action_id)
+                    if resume_payload is not None
+                    else None
+                ),
+            )
+        except Exception as exc:
+            logger.exception(
+                "Detached Agent task failed: conversation_id=%s, run_id=%s",
+                conversation_id,
+                run_id,
+            )
+            response = await self._persist_detached_failure(
+                assistant_message_id=assistant_message_id,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                latency_ms=self._elapsed_ms(started_at),
+                error=str(exc),
+                extra_meta=(
+                    self._resume_meta(resume_payload, resume_action_id)
+                    if resume_payload is not None
+                    else None
+                ),
+            )
+            stream_run.publish(
+                Session(
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    assistant_message_id=assistant_message_id,
+                    db=db,
+                ).encode_sse("run_failed", response)
+            )
+        finally:
+            if db is not None:
+                db.close()
+
+    async def _consume_detached_stream(
+        self,
+        *,
+        stream_run: DetachedStreamRun,
+        session: Session,
+        assistant_message_id: int,
+        started_at: float,
+        extra_meta: dict[str, Any] | None,
+    ) -> None:
         terminal_persisted = False
 
-        async def persist_terminal(response: dict[str, Any]) -> None:
+        async def persist_terminal(
+            response: dict[str, Any],
+            card_meta: dict[str, Any],
+        ) -> None:
             nonlocal terminal_persisted
-
             if terminal_persisted:
                 return
 
@@ -166,29 +333,98 @@ class AgentRuntime:
                 message_id=assistant_message_id,
                 response=response,
                 latency_ms=self._elapsed_ms(started_at),
-                extra_meta=self._resume_meta(resume_payload),
+                extra_meta={**card_meta, **(extra_meta or {})},
             )
             terminal_persisted = True
 
         try:
-            async for event in self.agent_service.stream(
-                session,
-                on_terminal=persist_terminal,
-            ):
-                yield event
-        finally:
-            if not terminal_persisted:
-                await self.history_store.mark_interrupted(
-                    message_id=assistant_message_id,
-                )
+            await self._stream_with_service(
+                service=self.agent_service,
+                stream_run=stream_run,
+                session=session,
+                persist_terminal=persist_terminal,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Detached Agent stream failed: conversation_id=%s, run_id=%s",
+                session.conversation_id,
+                session.run_id,
+            )
+            if terminal_persisted:
+                return
+
+            response = await self._persist_detached_failure(
+                assistant_message_id=assistant_message_id,
+                conversation_id=session.conversation_id,
+                run_id=str(session.run_id),
+                latency_ms=self._elapsed_ms(started_at),
+                error=str(exc),
+                extra_meta=extra_meta,
+            )
+            stream_run.publish(session.encode_sse("run_failed", response))
+
+    async def _stream_with_service(
+        self,
+        *,
+        service: AgentService,
+        stream_run: DetachedStreamRun,
+        session: Session,
+        persist_terminal,
+    ) -> None:
+        async for event in service.stream(
+            session,
+            on_terminal=persist_terminal,
+        ):
+            stream_run.publish(event)
+
+    async def _persist_detached_failure(
+        self,
+        *,
+        assistant_message_id: int,
+        conversation_id: str,
+        run_id: str,
+        latency_ms: int,
+        error: str,
+        extra_meta: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        response = {
+            "conversation_id": conversation_id,
+            "run_id": run_id,
+            "status": "failed",
+            "reply": "本次任务执行失败，请稍后重试。",
+            "pending_action": None,
+            "last_action_result": None,
+            "artifact_refs": [],
+            "interrupt": None,
+            "error": error,
+        }
+        await self.history_store.complete_assistant_message(
+            message_id=assistant_message_id,
+            response=response,
+            latency_ms=latency_ms,
+            extra_meta={
+                "schema_version": 1,
+                "card": {
+                    "status": "failed",
+                    "reasoning": [],
+                    "tools": [],
+                    "subagents": [],
+                    "error": error,
+                },
+                **(extra_meta or {}),
+            },
+        )
+        return response
 
     async def _resume_session(
         self,
         *,
         conversation_id: str,
         resume_payload: dict[str, Any],
+        requested_run_id: str | None,
+        requested_action_id: str | None,
         db: DbSession,
-    ) -> Session:
+    ) -> tuple[Session, str]:
         lookup = Session.for_resume_lookup(
             conversation_id=conversation_id,
             db=db,
@@ -198,11 +434,27 @@ class AgentRuntime:
         if not snapshot.values or not snapshot.next:
             raise ValueError("当前会话没有等待恢复的运行")
 
-        return Session.resume(
-            conversation_id=conversation_id,
-            run_id=str(snapshot.values["run_id"]),
-            resume_payload=resume_payload,
-            db=db,
+        run_id = str(snapshot.values["run_id"])
+        if requested_run_id is not None and requested_run_id != run_id:
+            raise ValueError("The requested run does not match the pending run")
+
+        active_tool_call = snapshot.values.get("active_tool_call")
+        if not isinstance(active_tool_call, dict):
+            raise ValueError("The current run has no pending action")
+        action_id = str(active_tool_call.get("id") or "")
+        if not action_id:
+            raise ValueError("The current pending action has no id")
+        if requested_action_id is not None and requested_action_id != action_id:
+            raise ValueError("The requested action does not match the pending action")
+
+        return (
+            Session.resume(
+                conversation_id=conversation_id,
+                run_id=run_id,
+                resume_payload=resume_payload,
+                db=db,
+            ),
+            action_id,
         )
 
     @staticmethod
@@ -221,10 +473,12 @@ class AgentRuntime:
     @staticmethod
     def _resume_meta(
         resume_payload: dict[str, Any],
+        action_id: str | None = None,
     ) -> dict[str, Any]:
         resume = {
             "decision": resume_payload.get("decision"),
             "comment": resume_payload.get("comment"),
+            "action_id": action_id,
             "has_query_understanding_override": (
                 resume_payload.get("query_understanding") is not None
             ),

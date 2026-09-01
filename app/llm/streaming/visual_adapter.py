@@ -74,6 +74,7 @@ TASK_REVIEW_NODE_PHASE = {
 
 class AgentStreamAdapter:
     def __init__(self):
+        self._seen_action_starts: set[str] = set()
         self._seen_action_results: set[str] = set()
 
     def handle_update(
@@ -83,6 +84,47 @@ class AgentStreamAdapter:
         update: dict[str, Any],
     ) -> list[StreamEvent]:
         events: list[StreamEvent] = []
+
+        active_call = to_jsonable(update.get("active_tool_call"))
+        if isinstance(active_call, dict):
+            action_id = active_call.get("id")
+            action_name = active_call.get("name")
+
+            if (
+                action_id
+                and action_name
+                and str(action_id) not in self._seen_action_starts
+            ):
+                self._seen_action_starts.add(str(action_id))
+                events.append(
+                    (
+                        "action_started",
+                        {
+                            "action_id": str(action_id),
+                            "action_type": str(
+                                active_call.get("kind") or "tool"
+                            ),
+                            "name": str(action_name),
+                            "input": to_jsonable(
+                                active_call.get("args") or {}
+                            ),
+                            "requires_confirmation": bool(
+                                active_call.get(
+                                    "requires_confirmation"
+                                )
+                            ),
+                            "workflow": (
+                                "paper_search"
+                                if action_name == "paper_search_agent"
+                                else (
+                                    "task_review"
+                                    if action_name == "task_review_agent"
+                                    else None
+                                )
+                            ),
+                        },
+                    )
+                )
 
         result = to_jsonable(update.get("last_action_result"))
 

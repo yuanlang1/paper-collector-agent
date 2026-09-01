@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 import logging
 from typing import Any
 
+from app.config import settings
 from app.llm.graph.main.native_tools import build_native_tool_schemas
 from app.llm.graph.main.nodes.solve import SolveNode
 from app.llm.graph.main.workflow import build_main_agent_workflow
@@ -10,6 +11,7 @@ from app.llm.graph.workflows.review_generate.workflow import build_task_review_w
 from app.llm.model_factory import create_chat_model
 from app.llm.response import build_chat_response, build_done_payload
 from app.llm.streaming import AgentStreamAdapter
+from app.llm.streaming.card_snapshot import CardMetaAccumulator
 from app.llm.streaming.utils import (
     content_to_text,
     extract_interrupt_payload,
@@ -22,7 +24,10 @@ from app.runtime.session import Session
 logger = logging.getLogger(__name__)
 
 
-TerminalCallback = Callable[[dict[str, Any]], Awaitable[None]]
+TerminalCallback = Callable[
+    [dict[str, Any], dict[str, Any]],
+    Awaitable[None],
+]
 
 
 class AgentService:
@@ -64,14 +69,23 @@ class AgentService:
         on_terminal: TerminalCallback | None = None,
     ) -> AsyncIterator[str]:
         adapter = AgentStreamAdapter()
+        card_meta = CardMetaAccumulator(
+            model=settings.OPENAI_MODEL,
+            provider=getattr(settings, "LLM_PROVIDER", None),
+        )
         latest_root_state: dict[str, Any] = {}
         paper_search_tool_call_id: str | None = None
         paper_search_states: dict[str, dict[str, Any]] = {}
         task_review_tool_call_id: str | None = None
         task_review_states: dict[str, dict[str, Any]] = {}
 
+        def emit(event: str, data: dict[str, Any]) -> str:
+            envelope = session.build_sse_envelope(event, data)
+            card_meta.observe(envelope)
+            return session.encode_sse_envelope(envelope)
+
         try:
-            yield session.encode_sse("run_started", {"status": "running"})
+            yield emit("run_started", {"status": "running"})
 
             async for namespace, stream_type, chunk in self.graph.astream(
                 session.graph_input,
@@ -90,7 +104,7 @@ class AgentService:
                         getattr(message_chunk, "content", ""),
                     )
                     if text:
-                        yield session.encode_sse("message", {"content": text})
+                        yield emit("message", {"content": text})
                     continue
 
                 if stream_type == "custom":
@@ -134,7 +148,7 @@ class AgentService:
                                         )
                                     ),
                                 }
-                        yield session.encode_sse(
+                        yield emit(
                             event_name,
                             {
                                 **payload,
@@ -158,15 +172,19 @@ class AgentService:
                         conversation_id=session.conversation_id,
                         run_id=str(session.run_id),
                     )
-                    await self._notify_terminal(on_terminal, response)
-
                     event_name, payload = adapter.confirmation_required(
                         interrupt_payload,
                     )
-                    yield session.encode_sse(
+                    terminal_event = emit(
                         event_name,
                         {**payload, "namespace": list(namespace)},
                     )
+                    await self._notify_terminal(
+                        on_terminal,
+                        response,
+                        card_meta.snapshot(response),
+                    )
+                    yield terminal_event
                     return
 
                 if not isinstance(chunk, dict):
@@ -215,7 +233,7 @@ class AgentService:
                             update=state,
                             workflow="paper_search",
                         )
-                        yield session.encode_sse(
+                        yield emit(
                             event_name,
                             {**payload, "namespace": list(namespace)},
                         )
@@ -248,7 +266,7 @@ class AgentService:
                             update=state,
                             workflow="task_review",
                         )
-                        yield session.encode_sse(
+                        yield emit(
                             event_name,
                             {**payload, "namespace": list(namespace)},
                         )
@@ -257,7 +275,7 @@ class AgentService:
                         node_name=node_name,
                         update=update,
                     ):
-                        yield session.encode_sse(
+                        yield emit(
                             event_name,
                             {**payload, "namespace": list(namespace)},
                         )
@@ -276,8 +294,13 @@ class AgentService:
                 if response["status"] == "failed"
                 else "run_completed"
             )
-            await self._notify_terminal(on_terminal, response)
-            yield session.encode_sse(event_name, response)
+            terminal_event = emit(event_name, response)
+            await self._notify_terminal(
+                on_terminal,
+                response,
+                card_meta.snapshot(response),
+            )
+            yield terminal_event
 
         except Exception as exc:
             logger.exception(
@@ -298,26 +321,25 @@ class AgentService:
                 "error": str(exc),
             }
 
-            await self._notify_terminal(on_terminal, response)
-
-            yield session.encode_sse(
-                "run_failed",
-                {
-                    "status": "failed",
-                    "error": str(exc),
-                },
+            terminal_event = emit("run_failed", response)
+            await self._notify_terminal(
+                on_terminal,
+                response,
+                card_meta.snapshot(response),
             )
+            yield terminal_event
 
     async def _notify_terminal(
         self,
         callback: TerminalCallback | None,
         payload: dict[str, Any],
+        card_meta: dict[str, Any],
     ) -> None:
         if callback is None:
             return
 
         try:
-            await callback(payload)
+            await callback(payload, card_meta)
         except Exception:
             logger.exception(
                 "Terminal callback failed: conversation_id=%s, run_id=%s",

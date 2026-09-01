@@ -100,9 +100,11 @@ async def chat_resume(
     result = await runtime.resume_chat(
         conversation_id=payload.conversation_id,
         resume_payload=payload.model_dump(
-            exclude={"conversation_id"},
+            exclude={"conversation_id", "run_id", "action_id"},
             exclude_none=True,
         ),
+        requested_run_id=payload.run_id,
+        requested_action_id=payload.action_id,
         db=db,
     )
 
@@ -127,9 +129,11 @@ async def chat_resume_stream(
         runtime.resume_chat_stream(
             conversation_id=payload.conversation_id,
             resume_payload=payload.model_dump(
-                exclude={"conversation_id"},
+                exclude={"conversation_id", "run_id", "action_id"},
                 exclude_none=True,
             ),
+            requested_run_id=payload.run_id,
+            requested_action_id=payload.action_id,
             db=db,
         )
     )

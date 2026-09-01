@@ -15,6 +15,7 @@ class Session:
     conversation_id: str
     db: DbSession
     run_id: str | None = None
+    assistant_message_id: int | None = None
     message: str | None = None
     resume_payload: dict[str, Any] | None = None
     event_sequence: int = 0
@@ -26,10 +27,13 @@ class Session:
         message: str,
         conversation_id: str,
         db: DbSession,
+        run_id: str | None = None,
+        assistant_message_id: int | None = None,
     ) -> "Session":
         return cls(
             conversation_id=conversation_id,
-            run_id=f"run_{uuid4().hex}",
+            run_id=run_id or f"run_{uuid4().hex}",
+            assistant_message_id=assistant_message_id,
             message=message,
             db=db,
         )
@@ -54,11 +58,13 @@ class Session:
         run_id: str,
         resume_payload: dict[str, Any],
         db: DbSession,
+        assistant_message_id: int | None = None,
     ) -> "Session":
         return cls(
             conversation_id=conversation_id,
             run_id=run_id,
             resume_payload=resume_payload,
+            assistant_message_id=assistant_message_id,
             db=db,
         )
 
@@ -99,6 +105,7 @@ class Session:
             "messages": [HumanMessage(content=self.message)],
             "pending_tool_calls": [],
             "active_tool_call": None,
+            "iteration_count": 0,
             "reasoning_content": "",
             "last_action_result": None,
             "artifact_refs": [],
@@ -107,22 +114,38 @@ class Session:
             "error": None,
         }
 
+    def build_sse_envelope(
+        self,
+        event: str,
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.event_sequence += 1
+
+        return {
+            "event_id": f"{self.run_id}:{self.event_sequence}",
+            "sequence": self.event_sequence,
+            "event": event,
+            "conversation_id": self.conversation_id,
+            "run_id": self.run_id,
+            "assistant_message_id": self.assistant_message_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "data": data,
+        }
+
+    @staticmethod
+    def encode_sse_envelope(
+        envelope: dict[str, Any],
+    ) -> str:
+        return encode_sse(
+            str(envelope["event"]),
+            envelope,
+        )
+
     def encode_sse(
         self,
         event: str,
         data: dict[str, Any],
     ) -> str:
-        self.event_sequence += 1
-
-        return encode_sse(
-            event,
-            {
-                "event_id": f"{self.run_id}:{self.event_sequence}",
-                "sequence": self.event_sequence,
-                "event": event,
-                "conversation_id": self.conversation_id,
-                "run_id": self.run_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "data": data,
-            },
+        return self.encode_sse_envelope(
+            self.build_sse_envelope(event, data),
         )

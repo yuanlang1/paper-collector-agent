@@ -113,11 +113,27 @@ def _pending_action(
     return {
         "action_id": str(call["id"]),
         "action_type": str(call["kind"]),
+        "kind": str(call["kind"]),
         "name": str(call["name"]),
-        "input": call["args"],
+        "display_name": _action_display_name(str(call["name"])),
+        "summary": _action_summary(str(call["name"])),
         "requires_confirmation": bool(call["requires_confirmation"]),
-        "message": f"Allow {call['name']}?",
+        "status": "pending",
     }
+
+
+def _action_display_name(name: str) -> str:
+    return {
+        "paper_search_agent": "论文检索子代理",
+        "task_review_agent": "文献综述子代理",
+    }.get(name, name)
+
+
+def _action_summary(name: str) -> str:
+    return {
+        "paper_search_agent": "将从多个来源检索、推荐并保存论文。",
+        "task_review_agent": "将分析已有文献并生成综述建议。",
+    }.get(name, "将执行此操作。")
 
 
 def _last_action_result(

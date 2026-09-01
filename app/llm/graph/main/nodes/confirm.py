@@ -25,11 +25,20 @@ async def confirm_node(
     resume_value = _interrupt_with_config(
         config,
         {
-            "type": "tool_confirmation",
-            "tool_call_id": call["id"],
-            "tool_name": call["name"],
-            "tool_arguments": call["args"],
-            "message": f"Allow {call['name']}?",
+            "action_id": call["id"],
+            "action_type": call["kind"],
+            "kind": call["kind"],
+            "name": call["name"],
+            "display_name": {
+                "paper_search_agent": "论文检索子代理",
+                "task_review_agent": "文献综述子代理",
+            }.get(call["name"], call["name"]),
+            "summary": {
+                "paper_search_agent": "将从多个来源检索、推荐并保存论文。",
+                "task_review_agent": "将分析已有文献并生成综述建议。",
+            }.get(call["name"], "将执行此操作。"),
+            "requires_confirmation": True,
+            "status": "pending",
         },
     )
     if resume_value.get("decision") == "approved":

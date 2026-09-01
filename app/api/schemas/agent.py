@@ -31,12 +31,12 @@ ActionResultStatus = Literal[
 class PendingActionView(BaseModel):
     action_id: str
     action_type: ActionType
+    kind: ActionType | None = None
     name: str
-
-    input: dict[str, Any] = Field(default_factory = dict)
-
+    display_name: str | None = None
+    summary: str | None = None
     requires_confirmation: bool = False
-    message: str | None = None
+    status: str | None = None
 
 
 class ActionResultView(BaseModel):
@@ -61,6 +61,8 @@ class ChatRequest(BaseModel):
 
 class ChatResumeRequest(BaseModel):
     conversation_id: str = Field(..., min_length = 1)
+    run_id: str = Field(..., min_length=1)
+    action_id: str = Field(..., min_length=1)
     decision: Literal[
         "approved",
         "rejected",

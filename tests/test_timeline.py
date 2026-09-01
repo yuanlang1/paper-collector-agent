@@ -12,6 +12,44 @@ from app.llm.streaming.visual_adapter import AgentStreamAdapter
 
 
 class TimelinePayloadTests(unittest.TestCase):
+    def test_update_emits_action_started_once(self):
+        adapter = AgentStreamAdapter()
+        update = {
+            "active_tool_call": {
+                "id": "delegation_1",
+                "name": "paper_search_agent",
+                "args": {"query": "graph retrieval"},
+                "kind": "subagent",
+                "requires_confirmation": False,
+            }
+        }
+
+        events = adapter.handle_update(
+            node_name="dispatch",
+            update=update,
+        )
+
+        self.assertEqual(
+            events,
+            [
+                (
+                    "action_started",
+                    {
+                        "action_id": "delegation_1",
+                        "action_type": "subagent",
+                        "name": "paper_search_agent",
+                        "input": {"query": "graph retrieval"},
+                        "requires_confirmation": False,
+                        "workflow": "paper_search",
+                    },
+                )
+            ],
+        )
+        self.assertEqual(
+            adapter.handle_update(node_name="dispatch", update=update),
+            [],
+        )
+
     def test_paper_search_repeated_step_uses_supplemental_round(self):
         step = _step_for_node(PAPER_SEARCH_TIMELINE, "search_arxiv")
         assert step is not None

@@ -1,5 +1,15 @@
 # paper-collector-agent
 
+## 安装 Python 依赖
+
+本项目以 Python 3.11 为基准。请使用锁定文件安装完整的直接与传递依赖：
+
+```powershell
+python -m pip install -r requirements.venv311.lock.txt
+```
+
+该文件包含 CUDA 12.8 版 PyTorch 的官方 wheel 源；没有 NVIDIA/CUDA 环境时，请按目标环境重新生成锁定文件。
+
 ## 预下载 RAG 模型
 
 在项目根目录执行以下 PowerShell 命令，将 RAG 模型保存到本地 `models/` 目录：

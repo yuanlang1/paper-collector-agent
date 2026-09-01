@@ -1,4 +1,5 @@
 from typing import Any
+from uuid import uuid4
 
 from langchain_core.messages import SystemMessage
 
@@ -176,6 +177,14 @@ class SolveNode:
     async def __call__(self, state: MainAgentState) -> dict:
         chunks = []
         reasoning_deltas: list[str] = []
+        iteration = int(state.get("iteration_count") or 0) + 1
+        reasoning_id = f"{state['run_id']}:solve:{uuid4().hex}"
+        emit_custom_event(
+            {
+                "event": "iteration_started",
+                "iteration": iteration,
+            }
+        )
 
         async for chunk in self.model.astream(
             [
@@ -195,6 +204,8 @@ class SolveNode:
                     {
                         "event": "reasoning_delta",
                         "delta": reasoning_delta,
+                        "reasoning_id": reasoning_id,
+                        "scope": "main",
                     }
                 )
 
@@ -216,6 +227,7 @@ class SolveNode:
             return {
                 "messages": [assistant],
                 "reply": str(assistant.content or ""),
+                "iteration_count": iteration,
                 "reasoning_content": reasoning_content,
                 "pending_tool_calls": [],
                 "active_tool_call": None,
@@ -236,6 +248,7 @@ class SolveNode:
                 for call in assistant.tool_calls
             ],
             "active_tool_call": None,
+            "iteration_count": iteration,
             "reasoning_content": reasoning_content,
             "run_status": "running",
         }
