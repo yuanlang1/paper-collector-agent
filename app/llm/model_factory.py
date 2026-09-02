@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, TypeVar
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -8,9 +10,20 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
 from app.config import settings
+from app.services.llm_profile_service import LlmRuntimeConfig
 from app.llm.structured_output import StructuredOutputT, ValidatedJsonInvoker
 
 StructuredModelT = TypeVar("StructuredModelT", bound = BaseModel)
+_runtime_config: ContextVar[LlmRuntimeConfig | None] = ContextVar("llm_runtime_config", default=None)
+
+
+@contextmanager
+def use_llm_runtime_config(config: LlmRuntimeConfig | None):
+    token = _runtime_config.set(config)
+    try:
+        yield
+    finally:
+        _runtime_config.reset(token)
 
 
 class ReasoningPreservingChatDeepSeek(ChatDeepSeek):
@@ -42,6 +55,9 @@ class ReasoningPreservingChatDeepSeek(ChatDeepSeek):
 
 
 def _get_llm_provider() -> str:
+    runtime_config = _runtime_config.get()
+    if runtime_config is not None:
+        return runtime_config.provider
     provider = getattr(settings, "LLM_PROVIDER", None)
     if isinstance(provider, str) and provider.strip():
         return provider.strip().lower()
@@ -55,14 +71,18 @@ def create_chat_model(
     temperature: float = 0.7,
     streaming: bool = False,
 ) -> BaseChatModel:
-    if not settings.OPENAI_MODEL:
+    runtime_config = _runtime_config.get()
+    model_name = runtime_config.model if runtime_config else settings.OPENAI_MODEL
+    api_key = runtime_config.api_key if runtime_config else settings.OPENAI_API_KEY
+    base_url = runtime_config.base_url if runtime_config else settings.OPENAI_BASE_URL
+    if not model_name:
         raise RuntimeError("缺少 OPENAI_API_KEY，请在 .env 或环境变量中配置")
     
     if _get_llm_provider() == "deepseek":
         kwargs = {
-            "model": settings.OPENAI_MODEL,
-            "api_key": settings.OPENAI_API_KEY,
-            "api_base": settings.OPENAI_BASE_URL,
+            "model": model_name,
+            "api_key": api_key,
+            "api_base": base_url,
             "streaming": streaming,
             "reasoning_effort": settings.REASONING_EFFORT,
             "extra_body": {
@@ -79,10 +99,10 @@ def create_chat_model(
         return ReasoningPreservingChatDeepSeek(**kwargs)
 
     return ChatOpenAI(
-        model = settings.OPENAI_MODEL,
+        model = model_name,
         temperature = temperature,
-        api_key = settings.OPENAI_API_KEY,
-        base_url = settings.OPENAI_BASE_URL or None,
+        api_key = api_key,
+        base_url = base_url or None,
         streaming = streaming,
     )
 

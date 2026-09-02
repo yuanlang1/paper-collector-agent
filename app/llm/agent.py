@@ -8,7 +8,8 @@ from app.llm.graph.main.nodes.solve import SolveNode
 from app.llm.graph.main.workflow import build_main_agent_workflow
 from app.llm.graph.workflows.paper_search.workflow import build_paper_search_workflow
 from app.llm.graph.workflows.review_generate.workflow import build_task_review_workflow
-from app.llm.model_factory import create_chat_model
+from app.llm.model_factory import create_chat_model, use_llm_runtime_config
+from app.services.llm_profile_service import LlmRuntimeConfig
 from app.llm.response import build_chat_response, build_done_payload
 from app.llm.streaming import AgentStreamAdapter
 from app.llm.streaming.card_snapshot import CardMetaAccumulator
@@ -35,18 +36,19 @@ class AgentService:
         self,
         checkpointer,
         subagent_registry: SubAgentRegistry | None = None,
+        llm_config: LlmRuntimeConfig | None = None,
     ):
         self.checkpointer = checkpointer
+        self.llm_config = llm_config
         self.subagent_registry = subagent_registry or SubAgentRegistry(ALL_SUBAGENTS)
-        model = create_chat_model(temperature=0).bind_tools(build_native_tool_schemas())
-        self.graph = build_main_agent_workflow(
-            solve_node=SolveNode(model=model),
-            paper_search_graph=build_paper_search_workflow(
-                skip_confirmation=True,
-            ),
-            task_review_graph=build_task_review_workflow(),
-            checkpointer=self.checkpointer,
-        )
+        with use_llm_runtime_config(llm_config):
+            model = create_chat_model(temperature=0).bind_tools(build_native_tool_schemas())
+            self.graph = build_main_agent_workflow(
+                solve_node=SolveNode(model=model),
+                paper_search_graph=build_paper_search_workflow(skip_confirmation=True),
+                task_review_graph=build_task_review_workflow(),
+                checkpointer=self.checkpointer,
+            )
 
     async def get_state(self, session: Session):
         return await self.graph.aget_state(session.graph_config)
@@ -70,8 +72,8 @@ class AgentService:
     ) -> AsyncIterator[str]:
         adapter = AgentStreamAdapter()
         card_meta = CardMetaAccumulator(
-            model=settings.OPENAI_MODEL,
-            provider=getattr(settings, "LLM_PROVIDER", None),
+            model=(getattr(self, "llm_config", None).model if getattr(self, "llm_config", None) else settings.OPENAI_MODEL),
+            provider=(getattr(self, "llm_config", None).provider if getattr(self, "llm_config", None) else getattr(settings, "LLM_PROVIDER", None)),
         )
         latest_root_state: dict[str, Any] = {}
         paper_search_tool_call_id: str | None = None

@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str
     THINKING_TYPE: str
     REASONING_EFFORT: str
+    LLM_PROFILE_ENCRYPTION_KEY: str | None = None
 
     # Nacos
     NACOS_ENABLED: bool

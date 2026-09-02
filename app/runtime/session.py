@@ -18,6 +18,7 @@ class Session:
     assistant_message_id: int | None = None
     message: str | None = None
     resume_payload: dict[str, Any] | None = None
+    llm_profile: dict[str, Any] | None = None
     event_sequence: int = 0
 
     @classmethod
@@ -29,6 +30,7 @@ class Session:
         db: DbSession,
         run_id: str | None = None,
         assistant_message_id: int | None = None,
+        llm_profile: dict[str, Any] | None = None,
     ) -> "Session":
         return cls(
             conversation_id=conversation_id,
@@ -36,6 +38,7 @@ class Session:
             assistant_message_id=assistant_message_id,
             message=message,
             db=db,
+            llm_profile=llm_profile,
         )
 
     @classmethod
@@ -59,6 +62,7 @@ class Session:
         resume_payload: dict[str, Any],
         db: DbSession,
         assistant_message_id: int | None = None,
+        llm_profile: dict[str, Any] | None = None,
     ) -> "Session":
         return cls(
             conversation_id=conversation_id,
@@ -66,6 +70,7 @@ class Session:
             resume_payload=resume_payload,
             assistant_message_id=assistant_message_id,
             db=db,
+            llm_profile=llm_profile,
         )
 
     @property
@@ -96,6 +101,7 @@ class Session:
         return {
             "conversation_id": self.conversation_id,
             "run_id": self.run_id,
+            "llm_profile": self.llm_profile,
             "paper_search_request": None,
             "paper_search_handoff": None,
             "paper_search_tool_call_id": None,
@@ -127,6 +133,7 @@ class Session:
             "event": event,
             "conversation_id": self.conversation_id,
             "run_id": self.run_id,
+            "llm_profile": self.llm_profile,
             "assistant_message_id": self.assistant_message_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "data": data,

@@ -58,6 +58,7 @@ async def agent_chat(
     result = await runtime.chat(
         message=payload.message,
         conversation_id=payload.conversation_id,
+        llm_profile_id=payload.llm_profile_id,
         db=db,
     )
 
@@ -80,9 +81,10 @@ async def stream_chat(
 
     return build_streaming_response(
         runtime.chat_stream(
-            message=payload.message,
-            conversation_id=payload.conversation_id,
-            db=db,
+        message=payload.message,
+        conversation_id=payload.conversation_id,
+        llm_profile_id=payload.llm_profile_id,
+        db=db,
         )
     )
 

@@ -37,6 +37,8 @@ Thumbs.db
 
 data/
 models/
+!app/models/
+!app/models/*.py
 scripts/
 .codex
 .pytest_cache

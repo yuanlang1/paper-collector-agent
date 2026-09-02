@@ -11,6 +11,8 @@ from app.rag.processing.task_rag_batch_runner import close_task_rag_batch_runner
 from app.runtime.agent_runtime import initialize_agent_runtime
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from app.history.store import initialize_history_store
+from app.database import engine
+from app.models.llm_profile import LlmProfile
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,6 +27,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    LlmProfile.__table__.create(bind=engine, checkfirst=True)
     async with AsyncSqliteSaver.from_conn_string(
         settings.LANGGRAPH_CHECKPOINT_PATH,
     ) as checkpointer:

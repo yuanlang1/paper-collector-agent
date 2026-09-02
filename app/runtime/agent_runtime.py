@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session as DbSession
 from app.llm.agent import AgentService
 from app.runtime.session import Session
 from app.runtime.threaded_stream import DetachedStreamRun
+from app.services.llm_profile_service import LlmRuntimeConfig, resolve_runtime_config
 
 
 logger = logging.getLogger(__name__)
@@ -35,11 +36,14 @@ class AgentRuntime:
         message: str,
         conversation_id: str | None,
         db: DbSession,
+        llm_profile_id: int | None = None,
     ) -> dict[str, Any]:
+        llm_config = resolve_runtime_config(db, llm_profile_id)
         session = Session.create(
             message=message,
             conversation_id=self.resolve_conversation_id(conversation_id),
             db=db,
+            llm_profile=llm_config.snapshot() if llm_config else None,
         )
 
         assistant_message_id = await self.history_store.start_turn(
@@ -50,7 +54,7 @@ class AgentRuntime:
         started_at = time.perf_counter()
 
         try:
-            response = await self.agent_service.invoke(session)
+            response = await self._service_for_config(llm_config).invoke(session)
         except Exception:
             await self.history_store.mark_interrupted(
                 message_id=assistant_message_id,
@@ -61,6 +65,7 @@ class AgentRuntime:
             message_id=assistant_message_id,
             response=response,
             latency_ms=self._elapsed_ms(started_at),
+            extra_meta=self._llm_profile_meta(session),
         )
 
         return response
@@ -71,8 +76,9 @@ class AgentRuntime:
         message: str,
         conversation_id: str | None,
         db: DbSession,
+        llm_profile_id: int | None = None,
     ) -> AsyncIterator[str]:
-        del db
+        llm_config = resolve_runtime_config(db, llm_profile_id)
         resolved_conversation_id = self.resolve_conversation_id(conversation_id)
         run_id = f"run_{uuid4().hex}"
         assistant_message_id = await self.history_store.start_turn(
@@ -92,6 +98,8 @@ class AgentRuntime:
                 resume_payload=None,
                 resume_action_id=None,
                 assistant_message_id=assistant_message_id,
+                service=self._service_for_config(llm_config),
+                llm_profile=llm_config.snapshot() if llm_config else None,
             ),
             run_id=run_id,
         )
@@ -108,7 +116,7 @@ class AgentRuntime:
         requested_action_id: str | None = None,
         db: DbSession,
     ) -> dict[str, Any]:
-        session, action_id = await self._resume_session(
+        session, action_id, service = await self._resume_session(
             conversation_id=conversation_id,
             resume_payload=resume_payload,
             requested_run_id=requested_run_id,
@@ -128,7 +136,7 @@ class AgentRuntime:
         started_at = time.perf_counter()
 
         try:
-            response = await self.agent_service.invoke(session)
+            response = await service.invoke(session)
         except Exception:
             await self.history_store.mark_interrupted(
                 message_id=assistant_message_id,
@@ -139,7 +147,7 @@ class AgentRuntime:
             message_id=assistant_message_id,
             response=response,
             latency_ms=self._elapsed_ms(started_at),
-            extra_meta=self._resume_meta(resume_payload, action_id),
+            extra_meta={**self._resume_meta(resume_payload, action_id), **self._llm_profile_meta(session)},
         )
 
         return response
@@ -153,7 +161,7 @@ class AgentRuntime:
         requested_action_id: str | None = None,
         db: DbSession,
     ) -> AsyncIterator[str]:
-        session, action_id = await self._resume_session(
+        session, action_id, service = await self._resume_session(
             conversation_id=conversation_id,
             resume_payload=resume_payload,
             requested_run_id=requested_run_id,
@@ -183,6 +191,8 @@ class AgentRuntime:
                 resume_payload=resume_payload,
                 resume_action_id=action_id,
                 assistant_message_id=assistant_message_id,
+                service=service,
+                llm_profile=session.llm_profile,
             ),
             run_id=run_id,
         )
@@ -216,6 +226,8 @@ class AgentRuntime:
         resume_payload: dict[str, Any] | None,
         resume_action_id: str | None,
         assistant_message_id: int,
+        service: AgentService,
+        llm_profile: dict[str, Any] | None,
     ) -> None:
         try:
             await self._run_stream_worker(
@@ -226,6 +238,8 @@ class AgentRuntime:
                 resume_payload=resume_payload,
                 resume_action_id=resume_action_id,
                 assistant_message_id=assistant_message_id,
+                service=service,
+                llm_profile=llm_profile,
             )
         except Exception:
             logger.exception(
@@ -247,6 +261,8 @@ class AgentRuntime:
         resume_payload: dict[str, Any] | None,
         resume_action_id: str | None,
         assistant_message_id: int,
+        service: AgentService,
+        llm_profile: dict[str, Any] | None,
     ) -> None:
         started_at = time.perf_counter()
         db: DbSession | None = None
@@ -259,6 +275,7 @@ class AgentRuntime:
                     resume_payload=resume_payload,
                     db=db,
                     assistant_message_id=assistant_message_id,
+                    llm_profile=llm_profile,
                 )
                 if resume_payload is not None
                 else Session.create(
@@ -267,6 +284,7 @@ class AgentRuntime:
                     run_id=run_id,
                     db=db,
                     assistant_message_id=assistant_message_id,
+                    llm_profile=llm_profile,
                 )
             )
             await self._consume_detached_stream(
@@ -277,8 +295,9 @@ class AgentRuntime:
                 extra_meta=(
                     self._resume_meta(resume_payload, resume_action_id)
                     if resume_payload is not None
-                    else None
+                    else self._llm_profile_meta(session)
                 ),
+                service=service,
             )
         except Exception as exc:
             logger.exception(
@@ -318,6 +337,7 @@ class AgentRuntime:
         assistant_message_id: int,
         started_at: float,
         extra_meta: dict[str, Any] | None,
+        service: AgentService,
     ) -> None:
         terminal_persisted = False
 
@@ -339,7 +359,7 @@ class AgentRuntime:
 
         try:
             await self._stream_with_service(
-                service=self.agent_service,
+                service=service,
                 stream_run=stream_run,
                 session=session,
                 persist_terminal=persist_terminal,
@@ -424,7 +444,7 @@ class AgentRuntime:
         requested_run_id: str | None,
         requested_action_id: str | None,
         db: DbSession,
-    ) -> tuple[Session, str]:
+    ) -> tuple[Session, str, AgentService]:
         lookup = Session.for_resume_lookup(
             conversation_id=conversation_id,
             db=db,
@@ -447,14 +467,23 @@ class AgentRuntime:
         if requested_action_id is not None and requested_action_id != action_id:
             raise ValueError("The requested action does not match the pending action")
 
+        profile_snapshot = snapshot.values.get("llm_profile")
+        profile_id = (
+            profile_snapshot.get("profile_id")
+            if isinstance(profile_snapshot, dict)
+            else None
+        )
+        llm_config = resolve_runtime_config(db, profile_id)
         return (
             Session.resume(
                 conversation_id=conversation_id,
                 run_id=run_id,
                 resume_payload=resume_payload,
                 db=db,
+                llm_profile=(llm_config.snapshot() if llm_config else profile_snapshot),
             ),
             action_id,
+            self._service_for_config(llm_config),
         )
 
     @staticmethod
@@ -494,6 +523,21 @@ class AgentRuntime:
                 if value not in (None, "")
             }
         }
+
+    def _service_for_config(
+        self,
+        llm_config: LlmRuntimeConfig | None,
+    ) -> AgentService:
+        if llm_config is None:
+            return self.agent_service
+        return AgentService(
+            checkpointer=self.agent_service.checkpointer,
+            llm_config=llm_config,
+        )
+
+    @staticmethod
+    def _llm_profile_meta(session: Session) -> dict[str, Any]:
+        return {"llm_profile": session.llm_profile} if session.llm_profile else {}
 
 
 _agent_runtime: AgentRuntime | None = None
