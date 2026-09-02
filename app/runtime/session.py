@@ -20,6 +20,7 @@ class Session:
     message: str | None = None
     resume_payload: dict[str, Any] | None = None
     llm_profile: dict[str, Any] | None = None
+    paper_search_source_limits: dict[str, int] | None = None
     event_sequence: int = 0
 
     @classmethod
@@ -33,6 +34,7 @@ class Session:
         run_id: str | None = None,
         assistant_message_id: int | None = None,
         llm_profile: dict[str, Any] | None = None,
+        paper_search_source_limits: dict[str, int] | None = None,
     ) -> "Session":
         return cls(
             conversation_id=conversation_id,
@@ -42,6 +44,7 @@ class Session:
             db=db,
             user_id=user_id,
             llm_profile=llm_profile,
+            paper_search_source_limits=paper_search_source_limits,
         )
 
     @classmethod
@@ -113,6 +116,7 @@ class Session:
             "paper_search_request": None,
             "paper_search_handoff": None,
             "paper_search_tool_call_id": None,
+            "paper_search_source_limits": self.paper_search_source_limits,
             "task_review_request": None,
             "task_review_handoff": None,
             "task_review_tool_call_id": None,

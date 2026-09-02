@@ -15,6 +15,7 @@ from app.llm.agent import AgentService
 from app.runtime.session import Session
 from app.runtime.threaded_stream import DetachedStreamRun
 from app.services.llm_profile_service import LlmRuntimeConfig, resolve_runtime_config
+from app.services.setting_service import get_source_limits
 
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ class AgentRuntime:
     ) -> dict[str, Any]:
         llm_config = resolve_runtime_config(db, llm_profile_id)
         resolved_conversation_id = self.resolve_conversation_id(conversation_id)
+        source_limits = get_source_limits(db)
 
         session = Session.create(
             message=message,
@@ -53,6 +55,7 @@ class AgentRuntime:
             db=db,
             user_id=DEFAULT_USER_ID,
             llm_profile=llm_config.snapshot() if llm_config else None,
+            paper_search_source_limits=source_limits,
         )
 
         assistant_message_id = await self.history_store.start_turn(
@@ -91,6 +94,7 @@ class AgentRuntime:
     ) -> AsyncIterator[str]:
         llm_config = resolve_runtime_config(db, llm_profile_id)
         resolved_conversation_id = self.resolve_conversation_id(conversation_id)
+        source_limits = get_source_limits(db)
         run_id = f"run_{uuid4().hex}"
         assistant_message_id = await self.history_store.start_turn(
             user_id=DEFAULT_USER_ID,
@@ -112,6 +116,7 @@ class AgentRuntime:
                 assistant_message_id=assistant_message_id,
                 service=self._service_for_config(llm_config),
                 llm_profile=llm_config.snapshot() if llm_config else None,
+                paper_search_source_limits=source_limits,
             ),
             run_id=run_id,
         )
@@ -208,6 +213,7 @@ class AgentRuntime:
                 assistant_message_id=assistant_message_id,
                 service=service,
                 llm_profile=session.llm_profile,
+                paper_search_source_limits=None,
             ),
             run_id=run_id,
         )
@@ -316,6 +322,7 @@ class AgentRuntime:
         assistant_message_id: int,
         service: AgentService,
         llm_profile: dict[str, Any] | None,
+        paper_search_source_limits: dict[str, int] | None,
     ) -> None:
         try:
             await self._run_stream_worker(
@@ -328,6 +335,7 @@ class AgentRuntime:
                 assistant_message_id=assistant_message_id,
                 service=service,
                 llm_profile=llm_profile,
+                paper_search_source_limits=paper_search_source_limits,
             )
         except Exception:
             logger.exception(
@@ -351,6 +359,7 @@ class AgentRuntime:
         assistant_message_id: int,
         service: AgentService,
         llm_profile: dict[str, Any] | None,
+        paper_search_source_limits: dict[str, int] | None,
     ) -> None:
         started_at = time.perf_counter()
         db: DbSession | None = None
@@ -374,6 +383,7 @@ class AgentRuntime:
                     user_id=DEFAULT_USER_ID,
                     assistant_message_id=assistant_message_id,
                     llm_profile=llm_profile,
+                    paper_search_source_limits=paper_search_source_limits,
                 )
             )
             await self._consume_detached_stream(

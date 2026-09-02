@@ -32,6 +32,7 @@ class MainAgentState(TypedDict):
     paper_search_request: PaperSearchRequestState | None
     paper_search_handoff: PaperSearchHandoffState | None
     paper_search_tool_call_id: str | None
+    paper_search_source_limits: dict[str, int] | None
     task_review_request: TaskReviewRequestState | None
     task_review_handoff: TaskReviewHandoffState | None
     task_review_tool_call_id: str | None

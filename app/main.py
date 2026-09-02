@@ -14,6 +14,7 @@ from app.history.store import initialize_history_store
 from app.database import engine
 from app.models.llm_profile import LlmProfile
 from app.models.memory import MemoryConsolidationCursor, MemoryEpisode, MemoryFact
+from app.models.system_setting import SystemSetting
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,6 +29,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    SystemSetting.__table__.create(bind=engine, checkfirst=True)
     LlmProfile.__table__.create(bind=engine, checkfirst=True)
     MemoryFact.__table__.create(bind=engine, checkfirst=True)
     MemoryEpisode.__table__.create(bind=engine, checkfirst=True)

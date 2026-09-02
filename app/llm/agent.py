@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 import logging
 from typing import Any
 
@@ -8,6 +8,9 @@ from app.llm.graph.main.native_tools import build_native_tool_schemas
 from app.llm.graph.main.nodes.memory import MemoryNode
 from app.llm.graph.main.nodes.solve import SolveNode
 from app.llm.graph.main.workflow import build_main_agent_workflow
+from app.llm.graph.workflows.paper_search.nodes.generate_queries import (
+    BuildSourceQueryPlanNode,
+)
 from app.llm.graph.workflows.paper_search.workflow import build_paper_search_workflow
 from app.llm.graph.workflows.review_generate.workflow import build_task_review_workflow
 from app.llm.model_factory import create_chat_model, use_llm_runtime_config
@@ -23,6 +26,10 @@ from app.llm.streaming.utils import (
 from app.llm.subagents.registry import ALL_SUBAGENTS, SubAgentRegistry
 from app.runtime.session import Session
 from app.runtime.system_context import SystemContextBuilder
+from app.services.setting_service import (
+    default_source_limits,
+    source_pagination_settings,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -32,6 +39,27 @@ TerminalCallback = Callable[
     [dict[str, Any], dict[str, Any]],
     Awaitable[None],
 ]
+
+
+def _source_query_plan_node(model: Any):
+    async def generate_queries(state: Mapping[str, Any]) -> dict[str, Any]:
+        source_limits = state.get("paper_search_source_limits")
+        try:
+            pagination_settings = source_pagination_settings(
+                source_limits or default_source_limits()
+            )
+        except (TypeError, ValueError) as exc:
+            return {
+                "stage": "blocked",
+                "status": "blocked",
+                "error": f"论文检索来源数量配置无效：{exc}",
+            }
+        return await BuildSourceQueryPlanNode(
+            model=model,
+            pagination_settings=pagination_settings,
+        )(state)
+
+    return generate_queries
 
 
 class AgentService:
@@ -46,6 +74,7 @@ class AgentService:
         self.subagent_registry = subagent_registry or SubAgentRegistry(ALL_SUBAGENTS)
         with use_llm_runtime_config(llm_config):
             model = create_chat_model(temperature=0).bind_tools(build_native_tool_schemas())
+            source_query_plan_node = BuildSourceQueryPlanNode()
             self.graph = build_main_agent_workflow(
                 memory_node=MemoryNode(
                     db_factory=SessionLocal,
@@ -53,7 +82,14 @@ class AgentService:
                     llm_config=llm_config,
                 ),
                 solve_node=SolveNode(model=model),
-                paper_search_graph=build_paper_search_workflow(skip_confirmation=True),
+                paper_search_graph=build_paper_search_workflow(
+                    skip_confirmation=True,
+                    node_overrides={
+                        "generate_queries": _source_query_plan_node(
+                            source_query_plan_node.model,
+                        )
+                    },
+                ),
                 task_review_graph=build_task_review_workflow(),
                 checkpointer=self.checkpointer,
             )

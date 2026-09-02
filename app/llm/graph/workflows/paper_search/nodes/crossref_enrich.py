@@ -219,6 +219,10 @@ class CrossrefMetadataEnrichmentNode:
             paper_info["doi"] = doi
         if not paper_info.get("publish_date") and published_date:
             paper_info["publish_date"] = published_date
+        if not paper_info.get("paper_abstract"):
+            paper_info["paper_abstract"] = _text(
+                crossref_paper.get("abstract")
+            )
         if not paper_info.get("abstract_url"):
             paper_info["abstract_url"] = _text(
                 crossref_paper.get("abstract_url")

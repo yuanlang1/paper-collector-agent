@@ -14,6 +14,12 @@ from app.services.llm_profile_service import (
     encrypt_api_key,
     get_profile_or_raise,
 )
+from app.services.setting_service import (
+    get_source_limits,
+    save_source_limits,
+    source_limit_maxima,
+    source_page_sizes,
+)
 
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -87,6 +93,18 @@ class DeleteLlmProfileResponse(BaseModel):
     deleted: bool
 
 
+class SourceLimitsInput(BaseModel):
+    arxiv: int = Field(..., ge=1)
+    dblp: int = Field(..., ge=1)
+    google_scholar: int = Field(..., ge=1)
+
+
+class SourceLimitsView(BaseModel):
+    limits: SourceLimitsInput
+    page_sizes: dict[str, int]
+    maximum_limits: dict[str, int]
+
+
 def _view(profile: LlmProfile) -> LlmProfileView:
     return LlmProfileView(
         id=profile.id,
@@ -109,6 +127,52 @@ def _set_default(db: Session, profile: LlmProfile) -> None:
         {LlmProfile.is_default: False}, synchronize_session=False
     )
     profile.is_default = True
+
+
+def _source_limits_view(limits: dict[str, int]) -> SourceLimitsView:
+    maxima = source_limit_maxima()
+    for name, limit in limits.items():
+        if limit > maxima[name]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{name} cannot exceed {maxima[name]}",
+            )
+    return SourceLimitsView(
+        limits=SourceLimitsInput.model_validate(limits),
+        page_sizes=source_page_sizes(),
+        maximum_limits=maxima,
+    )
+
+
+@router.get(
+    "/source-limits",
+    response_model=ServiceResponse[SourceLimitsView],
+)
+def get_paper_search_source_limits(
+    db: Session = Depends(get_db),
+) -> ServiceResponse[SourceLimitsView]:
+    return ServiceResponse[SourceLimitsView].build_success_response(
+        data=_source_limits_view(get_source_limits(db)),
+        message="OK",
+    )
+
+
+@router.put(
+    "/source-limits",
+    response_model=ServiceResponse[SourceLimitsView],
+)
+def update_paper_search_source_limits(
+    payload: SourceLimitsInput,
+    db: Session = Depends(get_db),
+) -> ServiceResponse[SourceLimitsView]:
+    try:
+        limits = save_source_limits(db, payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return ServiceResponse[SourceLimitsView].build_success_response(
+        data=_source_limits_view(limits),
+        message="OK",
+    )
 
 
 @router.get("/llm-profiles", response_model=ServiceResponse[LlmProfileListResponse])
