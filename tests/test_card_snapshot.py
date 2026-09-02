@@ -213,6 +213,37 @@ class CardMetaAccumulatorTests(unittest.TestCase):
             ],
         )
 
+    def test_snapshot_records_memory_retrieval_status_and_counts(self):
+        accumulator = CardMetaAccumulator()
+
+        self._observe(
+            accumulator,
+            1,
+            "memory_retrieval_started",
+            {"facts_count": 0, "episodes_count": 0},
+        )
+        self._observe(
+            accumulator,
+            2,
+            "memory_retrieval_completed",
+            {"facts_count": 3, "episodes_count": 1},
+        )
+
+        memory = accumulator.snapshot({"status": "completed"})["card"]["memory"]
+
+        self.assertEqual(
+            memory,
+            {
+                "status": "completed",
+                "facts_count": 3,
+                "episodes_count": 1,
+                "start_seq": 1,
+                "started_at": "2026-08-30T00:00:01+00:00",
+                "end_seq": 2,
+                "finished_at": "2026-08-30T00:00:02+00:00",
+            },
+        )
+
     @staticmethod
     def _observe(
         accumulator: CardMetaAccumulator,

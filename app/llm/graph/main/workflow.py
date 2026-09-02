@@ -37,8 +37,15 @@ from app.llm.graph.main.state import (
 )
 
 
+async def _passthrough_memory_node(
+    _state: MainAgentState,
+) -> dict[str, object]:
+    return {}
+
+
 def build_main_agent_workflow(
     *,
+    memory_node=None,
     solve_node,
     paper_search_graph,
     task_review_graph,
@@ -46,6 +53,7 @@ def build_main_agent_workflow(
 ):
     builder = StateGraph(MainAgentState)
 
+    builder.add_node("memory", memory_node or _passthrough_memory_node)
     builder.add_node("solve", solve_node)
     builder.add_node("dispatch", dispatch_tool_call_node)
     builder.add_node("tool", tool_node)
@@ -87,7 +95,8 @@ def build_main_agent_workflow(
     )
     builder.add_node("confirm", confirm_node)
     builder.add_node("final", final_node)
-    builder.add_edge(START, "solve")
+    builder.add_edge(START, "memory")
+    builder.add_edge("memory", "solve")
 
     builder.add_conditional_edges(
         "solve",

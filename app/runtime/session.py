@@ -18,7 +18,6 @@ class Session:
     run_id: str | None = None
     assistant_message_id: int | None = None
     message: str | None = None
-    system_context: str = ""
     resume_payload: dict[str, Any] | None = None
     llm_profile: dict[str, Any] | None = None
     event_sequence: int = 0
@@ -31,7 +30,6 @@ class Session:
         conversation_id: str,
         db: DbSession,
         user_id: str = "0",
-        system_context: str = "",
         run_id: str | None = None,
         assistant_message_id: int | None = None,
         llm_profile: dict[str, Any] | None = None,
@@ -43,7 +41,6 @@ class Session:
             message=message,
             db=db,
             user_id=user_id,
-            system_context=system_context,
             llm_profile=llm_profile,
         )
 
@@ -110,6 +107,7 @@ class Session:
 
         return {
             "conversation_id": self.conversation_id,
+            "user_id": self.user_id,
             "run_id": self.run_id,
             "llm_profile": self.llm_profile,
             "paper_search_request": None,
@@ -119,7 +117,8 @@ class Session:
             "task_review_handoff": None,
             "task_review_tool_call_id": None,
             "messages": [HumanMessage(content=self.message)],
-            "system_context": self.system_context,
+            "system_context": "",
+            "memory_usage": None,
             "pending_tool_calls": [],
             "active_tool_call": None,
             "iteration_count": 0,

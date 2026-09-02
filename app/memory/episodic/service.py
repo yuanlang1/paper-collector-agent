@@ -50,7 +50,7 @@ class EpisodeService:
             summary=summary,
             source_conversation_id=source_conversation_id,
             source_assistant_message_id=candidate.source_assistant_message_id,
-            status="pending",
+            status="active",
         )
 
     def list_active(self, *, limit: int = 50) -> Sequence[MemoryEpisode]:

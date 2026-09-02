@@ -293,6 +293,9 @@ def _build_payload(
         "reasoning_content": str(
             state.get("reasoning_content") or ""
         ),
+        "memory_usage": to_jsonable(
+            state.get("memory_usage")
+        ),
         "pending_action": (
             _pending_action(state)
         ),

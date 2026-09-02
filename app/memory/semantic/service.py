@@ -92,7 +92,7 @@ class FactService:
             content=content,
             dedupe_key=dedupe_key,
             source="consolidation",
-            status="pending",
+            status="active",
             source_conversation_id=source_conversation_id,
             source_message_ids=json.dumps(source_message_ids),
             confidence=candidate.confidence,

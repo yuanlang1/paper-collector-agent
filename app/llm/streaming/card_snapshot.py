@@ -22,6 +22,7 @@ class CardMetaAccumulator:
         self._reasoning: dict[str, dict[str, Any]] = {}
         self._tools: dict[str, dict[str, Any]] = {}
         self._subagents: dict[str, dict[str, Any]] = {}
+        self._memory: dict[str, Any] | None = None
 
     def observe(self, envelope: dict[str, Any]) -> None:
         event = str(envelope.get("event") or "")
@@ -47,6 +48,8 @@ class CardMetaAccumulator:
             self._observe_subagent_progress(data, sequence, timestamp)
         elif event == "timeline_step":
             self._observe_timeline_step(data, sequence, timestamp)
+        elif event.startswith("memory_retrieval_"):
+            self._observe_memory(event, data, sequence, timestamp)
 
     def snapshot(self, response: dict[str, Any]) -> dict[str, Any]:
         reasoning = [
@@ -82,6 +85,7 @@ class CardMetaAccumulator:
                     self._public_subagent(item)
                     for item in self._ordered(self._subagents.values())
                 ],
+                "memory": self._memory,
                 "artifact_refs": list(
                     response.get("artifact_refs") or []
                 ),
@@ -171,6 +175,36 @@ class CardMetaAccumulator:
                 "error_message": data.get("error_message"),
             }
         )
+
+    def _observe_memory(
+        self,
+        event: str,
+        data: dict[str, Any],
+        sequence: int,
+        timestamp: str,
+    ) -> None:
+        event_status = event.removeprefix("memory_retrieval_")
+        status = "running" if event_status == "started" else event_status
+        current = self._memory or {
+            "status": "running",
+            "facts_count": 0,
+            "episodes_count": 0,
+            "start_seq": sequence,
+            "started_at": timestamp,
+        }
+        current.update(
+            {
+                "status": status,
+                "facts_count": int(data.get("facts_count") or 0),
+                "episodes_count": int(data.get("episodes_count") or 0),
+                "end_seq": sequence,
+                "finished_at": timestamp,
+            }
+        )
+        if event_status == "started":
+            current["end_seq"] = None
+            current["finished_at"] = None
+        self._memory = current
 
     def _observe_subagent_progress(
         self,

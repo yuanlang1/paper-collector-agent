@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 from sqlalchemy.orm import Session
 
 from app.memory.episodic.service import EpisodeService
 from app.memory.retrieval_gate import MemoryRetrievalGate
+from app.memory.schemas import (
+    MemoryContextResult,
+    MemoryRetrievalStatus,
+    MemoryUsage,
+)
 from app.memory.semantic.service import FactService
 from app.services.llm_profile_service import LlmRuntimeConfig
+
+
+MemoryEventCallback = Callable[[dict[str, Any]], None]
 
 
 class MemoryContextService:
@@ -29,13 +40,26 @@ class MemoryContextService:
         user_message: str,
         conversation_id: str,
         llm_config: LlmRuntimeConfig | None,
-    ) -> str:
+        on_event: MemoryEventCallback | None = None,
+    ) -> MemoryContextResult:
         decision = await self.retrieval_gate.decide(
             user_message=user_message,
             llm_config=llm_config,
         )
         if not decision.retrieve:
-            return ""
+            return MemoryContextResult(
+                content="",
+                usage=self._usage("skipped"),
+            )
+
+        self._emit(
+            on_event,
+            {
+                "event": "memory_retrieval_started",
+                "facts_count": 0,
+                "episodes_count": 0,
+            },
+        )
 
         query = decision.query or user_message
         facts = self.fact_service.search_active(query=query, limit=6)
@@ -65,4 +89,39 @@ class MemoryContextService:
                 )
             )
 
-        return "\n\n".join(sections)[: self.max_characters]
+        content = "\n\n".join(sections)[: self.max_characters]
+        usage = self._usage(
+            "completed" if content else "empty",
+            facts_count=len(facts),
+            episodes_count=len(episodes),
+        )
+        self._emit(
+            on_event,
+            {
+                "event": f"memory_retrieval_{usage['status']}",
+                "facts_count": usage["facts_count"],
+                "episodes_count": usage["episodes_count"],
+            },
+        )
+        return MemoryContextResult(content=content, usage=usage)
+
+    @staticmethod
+    def _usage(
+        status: MemoryRetrievalStatus,
+        *,
+        facts_count: int = 0,
+        episodes_count: int = 0,
+    ) -> MemoryUsage:
+        return {
+            "status": status,
+            "facts_count": facts_count,
+            "episodes_count": episodes_count,
+        }
+
+    @staticmethod
+    def _emit(
+        callback: MemoryEventCallback | None,
+        payload: dict[str, Any],
+    ) -> None:
+        if callback is not None:
+            callback(payload)

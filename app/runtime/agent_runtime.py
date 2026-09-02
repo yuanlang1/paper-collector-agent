@@ -6,7 +6,6 @@ from app.database import SessionLocal
 from app.history.store import ChatHistoryStore
 from app.llm.model_factory import use_llm_runtime_config
 from app.memory.consolidation import Consolidator
-from app.memory.context import MemoryContextService
 from app.memory.extraction import LangChainMemoryExtractor
 from collections.abc import AsyncIterator, Awaitable
 from typing import Any, Callable, Optional
@@ -14,7 +13,6 @@ from uuid import uuid4
 from sqlalchemy.orm import Session as DbSession
 from app.llm.agent import AgentService
 from app.runtime.session import Session
-from app.runtime.system_context import SystemContextBuilder
 from app.runtime.threaded_stream import DetachedStreamRun
 from app.services.llm_profile_service import LlmRuntimeConfig, resolve_runtime_config
 
@@ -37,7 +35,6 @@ class AgentRuntime:
         self._active_stream_tasks: set[asyncio.Task[None]] = set()
         self._active_consolidation_scopes: set[tuple[str, str]] = set()
         self._active_consolidation_tasks: set[asyncio.Task[None]] = set()
-        self.system_context_builder = SystemContextBuilder()
 
     async def chat(
         self,
@@ -50,20 +47,11 @@ class AgentRuntime:
         llm_config = resolve_runtime_config(db, llm_profile_id)
         resolved_conversation_id = self.resolve_conversation_id(conversation_id)
 
-        system_context = await self._build_system_context(
-            db=db,
-            user_id=DEFAULT_USER_ID,
-            conversation_id=resolved_conversation_id,
-            message=message,
-            llm_config=llm_config,
-        )
-
         session = Session.create(
             message=message,
             conversation_id=resolved_conversation_id,
             db=db,
             user_id=DEFAULT_USER_ID,
-            system_context=system_context,
             llm_profile=llm_config.snapshot() if llm_config else None,
         )
 
@@ -104,13 +92,6 @@ class AgentRuntime:
         llm_config = resolve_runtime_config(db, llm_profile_id)
         resolved_conversation_id = self.resolve_conversation_id(conversation_id)
         run_id = f"run_{uuid4().hex}"
-        system_context = await self._build_system_context(
-            db=db,
-            user_id=DEFAULT_USER_ID,
-            conversation_id=resolved_conversation_id,
-            message=message,
-            llm_config=llm_config,
-        )
         assistant_message_id = await self.history_store.start_turn(
             user_id=DEFAULT_USER_ID,
             conversation_id=resolved_conversation_id,
@@ -131,7 +112,6 @@ class AgentRuntime:
                 assistant_message_id=assistant_message_id,
                 service=self._service_for_config(llm_config),
                 llm_profile=llm_config.snapshot() if llm_config else None,
-                system_context=system_context,
             ),
             run_id=run_id,
         )
@@ -228,7 +208,6 @@ class AgentRuntime:
                 assistant_message_id=assistant_message_id,
                 service=service,
                 llm_profile=session.llm_profile,
-                system_context="",
             ),
             run_id=run_id,
         )
@@ -337,7 +316,6 @@ class AgentRuntime:
         assistant_message_id: int,
         service: AgentService,
         llm_profile: dict[str, Any] | None,
-        system_context: str,
     ) -> None:
         try:
             await self._run_stream_worker(
@@ -350,7 +328,6 @@ class AgentRuntime:
                 assistant_message_id=assistant_message_id,
                 service=service,
                 llm_profile=llm_profile,
-                system_context=system_context,
             )
         except Exception:
             logger.exception(
@@ -374,7 +351,6 @@ class AgentRuntime:
         assistant_message_id: int,
         service: AgentService,
         llm_profile: dict[str, Any] | None,
-        system_context: str,
     ) -> None:
         started_at = time.perf_counter()
         db: DbSession | None = None
@@ -397,7 +373,6 @@ class AgentRuntime:
                     db=db,
                     user_id=DEFAULT_USER_ID,
                     assistant_message_id=assistant_message_id,
-                    system_context=system_context,
                     llm_profile=llm_profile,
                 )
             )
@@ -544,6 +519,7 @@ class AgentRuntime:
                     "reasoning": [],
                     "tools": [],
                     "subagents": [],
+                    "memory": None,
                     "error": error,
                 },
                 **(extra_meta or {}),
@@ -599,23 +575,6 @@ class AgentRuntime:
             ),
             action_id,
             self._service_for_config(llm_config),
-        )
-
-    async def _build_system_context(
-        self,
-        *,
-        db: DbSession | None,
-        user_id: str,
-        conversation_id: str,
-        message: str,
-        llm_config: LlmRuntimeConfig | None,
-    ) -> str:
-        return await self.system_context_builder.build(
-            db=db,
-            user_id=user_id,
-            conversation_id=conversation_id,
-            user_message=message,
-            llm_config=llm_config,
         )
 
     @staticmethod

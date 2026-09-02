@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Literal
+from typing import Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -14,6 +14,26 @@ MemoryStatus = Literal[
     "superseded",
     "deleted",
 ]
+
+MemoryRetrievalStatus = Literal[
+    "skipped",
+    "running",
+    "completed",
+    "empty",
+    "failed",
+]
+
+
+class MemoryUsage(TypedDict):
+    status: MemoryRetrievalStatus
+    facts_count: int
+    episodes_count: int
+
+
+@dataclass(frozen=True)
+class MemoryContextResult:
+    content: str
+    usage: MemoryUsage
 
 
 @dataclass(frozen=True)

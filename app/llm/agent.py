@@ -3,7 +3,9 @@ import logging
 from typing import Any
 
 from app.config import settings
+from app.database import SessionLocal
 from app.llm.graph.main.native_tools import build_native_tool_schemas
+from app.llm.graph.main.nodes.memory import MemoryNode
 from app.llm.graph.main.nodes.solve import SolveNode
 from app.llm.graph.main.workflow import build_main_agent_workflow
 from app.llm.graph.workflows.paper_search.workflow import build_paper_search_workflow
@@ -20,6 +22,7 @@ from app.llm.streaming.utils import (
 )
 from app.llm.subagents.registry import ALL_SUBAGENTS, SubAgentRegistry
 from app.runtime.session import Session
+from app.runtime.system_context import SystemContextBuilder
 
 
 logger = logging.getLogger(__name__)
@@ -44,6 +47,11 @@ class AgentService:
         with use_llm_runtime_config(llm_config):
             model = create_chat_model(temperature=0).bind_tools(build_native_tool_schemas())
             self.graph = build_main_agent_workflow(
+                memory_node=MemoryNode(
+                    db_factory=SessionLocal,
+                    system_context_builder=SystemContextBuilder(),
+                    llm_config=llm_config,
+                ),
                 solve_node=SolveNode(model=model),
                 paper_search_graph=build_paper_search_workflow(skip_confirmation=True),
                 task_review_graph=build_task_review_workflow(),

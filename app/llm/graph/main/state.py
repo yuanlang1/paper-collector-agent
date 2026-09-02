@@ -4,6 +4,7 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
 from app.llm.graph.main.schemas import RunStatus
+from app.memory.schemas import MemoryUsage
 from app.llm.subagents.paper_search.contracts import (
     PaperSearchHandoffState,
     PaperSearchRequestState,
@@ -24,6 +25,7 @@ class PendingToolCallState(TypedDict):
 
 class MainAgentState(TypedDict):
     conversation_id: str
+    user_id: str
     run_id: str
     llm_profile: dict[str, Any] | None
 
@@ -36,6 +38,7 @@ class MainAgentState(TypedDict):
 
     messages: Annotated[list[BaseMessage], add_messages]
     system_context: str
+    memory_usage: MemoryUsage | None
 
     pending_tool_calls: list[PendingToolCallState]
     active_tool_call: PendingToolCallState | None
