@@ -4,17 +4,23 @@ import time
 
 from app.database import SessionLocal
 from app.history.store import ChatHistoryStore
+from app.llm.model_factory import use_llm_runtime_config
+from app.memory.consolidation import Consolidator
+from app.memory.context import MemoryContextService
+from app.memory.extraction import LangChainMemoryExtractor
 from collections.abc import AsyncIterator, Awaitable
 from typing import Any, Callable, Optional
 from uuid import uuid4
 from sqlalchemy.orm import Session as DbSession
 from app.llm.agent import AgentService
 from app.runtime.session import Session
+from app.runtime.system_context import SystemContextBuilder
 from app.runtime.threaded_stream import DetachedStreamRun
 from app.services.llm_profile_service import LlmRuntimeConfig, resolve_runtime_config
 
 
 logger = logging.getLogger(__name__)
+DEFAULT_USER_ID = "0"
 
 
 class AgentRuntime:
@@ -29,6 +35,9 @@ class AgentRuntime:
         self.db_factory = db_factory
         self._active_stream_runs: set[DetachedStreamRun] = set()
         self._active_stream_tasks: set[asyncio.Task[None]] = set()
+        self._active_consolidation_scopes: set[tuple[str, str]] = set()
+        self._active_consolidation_tasks: set[asyncio.Task[None]] = set()
+        self.system_context_builder = SystemContextBuilder()
 
     async def chat(
         self,
@@ -39,14 +48,27 @@ class AgentRuntime:
         llm_profile_id: int | None = None,
     ) -> dict[str, Any]:
         llm_config = resolve_runtime_config(db, llm_profile_id)
+        resolved_conversation_id = self.resolve_conversation_id(conversation_id)
+
+        system_context = await self._build_system_context(
+            db=db,
+            user_id=DEFAULT_USER_ID,
+            conversation_id=resolved_conversation_id,
+            message=message,
+            llm_config=llm_config,
+        )
+
         session = Session.create(
             message=message,
-            conversation_id=self.resolve_conversation_id(conversation_id),
+            conversation_id=resolved_conversation_id,
             db=db,
+            user_id=DEFAULT_USER_ID,
+            system_context=system_context,
             llm_profile=llm_config.snapshot() if llm_config else None,
         )
 
         assistant_message_id = await self.history_store.start_turn(
+            user_id=session.user_id,
             conversation_id=session.conversation_id,
             run_id=str(session.run_id),
             user_content=message,
@@ -67,6 +89,7 @@ class AgentRuntime:
             latency_ms=self._elapsed_ms(started_at),
             extra_meta=self._llm_profile_meta(session),
         )
+        self._schedule_consolidation(session=session, response=response)
 
         return response
 
@@ -81,7 +104,15 @@ class AgentRuntime:
         llm_config = resolve_runtime_config(db, llm_profile_id)
         resolved_conversation_id = self.resolve_conversation_id(conversation_id)
         run_id = f"run_{uuid4().hex}"
+        system_context = await self._build_system_context(
+            db=db,
+            user_id=DEFAULT_USER_ID,
+            conversation_id=resolved_conversation_id,
+            message=message,
+            llm_config=llm_config,
+        )
         assistant_message_id = await self.history_store.start_turn(
+            user_id=DEFAULT_USER_ID,
             conversation_id=resolved_conversation_id,
             run_id=run_id,
             user_content=message,
@@ -100,6 +131,7 @@ class AgentRuntime:
                 assistant_message_id=assistant_message_id,
                 service=self._service_for_config(llm_config),
                 llm_profile=llm_config.snapshot() if llm_config else None,
+                system_context=system_context,
             ),
             run_id=run_id,
         )
@@ -124,6 +156,7 @@ class AgentRuntime:
             db=db,
         )
         claim = await self.history_store.claim_pending_action(
+            user_id=session.user_id,
             conversation_id=conversation_id,
             run_id=str(session.run_id),
             action_id=action_id,
@@ -149,6 +182,7 @@ class AgentRuntime:
             latency_ms=self._elapsed_ms(started_at),
             extra_meta={**self._resume_meta(resume_payload, action_id), **self._llm_profile_meta(session)},
         )
+        self._schedule_consolidation(session=session, response=response)
 
         return response
 
@@ -170,6 +204,7 @@ class AgentRuntime:
         )
         run_id = str(session.run_id)
         claim = await self.history_store.claim_pending_action(
+            user_id=session.user_id,
             conversation_id=conversation_id,
             run_id=run_id,
             action_id=action_id,
@@ -193,6 +228,7 @@ class AgentRuntime:
                 assistant_message_id=assistant_message_id,
                 service=service,
                 llm_profile=session.llm_profile,
+                system_context="",
             ),
             run_id=run_id,
         )
@@ -216,6 +252,79 @@ class AgentRuntime:
         self._active_stream_tasks.add(task)
         task.add_done_callback(self._active_stream_tasks.discard)
 
+    def _schedule_consolidation(
+        self,
+        *,
+        session: Session,
+        response: dict[str, Any],
+    ) -> None:
+        if response.get("status") != "completed":
+            return
+
+        scope = (session.user_id, session.conversation_id)
+        if scope in self._active_consolidation_scopes:
+            return
+
+        self._active_consolidation_scopes.add(scope)
+        task = asyncio.create_task(
+            self._run_consolidation(
+                user_id=session.user_id,
+                conversation_id=session.conversation_id,
+                llm_profile=session.llm_profile,
+            ),
+            name=(
+                "memory-consolidation:"
+                f"{session.user_id}:{session.conversation_id}"
+            ),
+        )
+        self._active_consolidation_tasks.add(task)
+
+        def cleanup(completed_task: asyncio.Task[None]) -> None:
+            self._active_consolidation_tasks.discard(completed_task)
+            self._active_consolidation_scopes.discard(scope)
+
+        task.add_done_callback(cleanup)
+
+    async def _run_consolidation(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        llm_profile: dict[str, Any] | None,
+    ) -> None:
+        db = self.db_factory()
+        try:
+            profile_id = (
+                llm_profile.get("profile_id")
+                if isinstance(llm_profile, dict)
+                else None
+            )
+            llm_config = resolve_runtime_config(db, profile_id)
+            with use_llm_runtime_config(llm_config):
+                result = await Consolidator(
+                    db,
+                    user_id=user_id,
+                    history_reader=self.history_store,
+                    extraction_model=LangChainMemoryExtractor(),
+                ).consolidate_if_due(conversation_id=conversation_id)
+            if result.due:
+                logger.info(
+                    "Memory consolidated: user_id=%s, conversation_id=%s, "
+                    "facts_created=%s, episode_created=%s",
+                    user_id,
+                    conversation_id,
+                    result.facts_created,
+                    result.episode_created,
+                )
+        except Exception:
+            logger.exception(
+                "Memory consolidation failed: user_id=%s, conversation_id=%s",
+                user_id,
+                conversation_id,
+            )
+        finally:
+            db.close()
+
     async def _run_stream_task(
         self,
         *,
@@ -228,6 +337,7 @@ class AgentRuntime:
         assistant_message_id: int,
         service: AgentService,
         llm_profile: dict[str, Any] | None,
+        system_context: str,
     ) -> None:
         try:
             await self._run_stream_worker(
@@ -240,6 +350,7 @@ class AgentRuntime:
                 assistant_message_id=assistant_message_id,
                 service=service,
                 llm_profile=llm_profile,
+                system_context=system_context,
             )
         except Exception:
             logger.exception(
@@ -263,6 +374,7 @@ class AgentRuntime:
         assistant_message_id: int,
         service: AgentService,
         llm_profile: dict[str, Any] | None,
+        system_context: str,
     ) -> None:
         started_at = time.perf_counter()
         db: DbSession | None = None
@@ -283,7 +395,9 @@ class AgentRuntime:
                     conversation_id=conversation_id,
                     run_id=run_id,
                     db=db,
+                    user_id=DEFAULT_USER_ID,
                     assistant_message_id=assistant_message_id,
+                    system_context=system_context,
                     llm_profile=llm_profile,
                 )
             )
@@ -356,6 +470,7 @@ class AgentRuntime:
                 extra_meta={**card_meta, **(extra_meta or {})},
             )
             terminal_persisted = True
+            self._schedule_consolidation(session=session, response=response)
 
         try:
             await self._stream_with_service(
@@ -484,6 +599,23 @@ class AgentRuntime:
             ),
             action_id,
             self._service_for_config(llm_config),
+        )
+
+    async def _build_system_context(
+        self,
+        *,
+        db: DbSession | None,
+        user_id: str,
+        conversation_id: str,
+        message: str,
+        llm_config: LlmRuntimeConfig | None,
+    ) -> str:
+        return await self.system_context_builder.build(
+            db=db,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_message=message,
+            llm_config=llm_config,
         )
 
     @staticmethod

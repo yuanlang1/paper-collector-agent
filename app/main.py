@@ -13,6 +13,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from app.history.store import initialize_history_store
 from app.database import engine
 from app.models.llm_profile import LlmProfile
+from app.models.memory import MemoryConsolidationCursor, MemoryEpisode, MemoryFact
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,6 +29,9 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     LlmProfile.__table__.create(bind=engine, checkfirst=True)
+    MemoryFact.__table__.create(bind=engine, checkfirst=True)
+    MemoryEpisode.__table__.create(bind=engine, checkfirst=True)
+    MemoryConsolidationCursor.__table__.create(bind=engine, checkfirst=True)
     async with AsyncSqliteSaver.from_conn_string(
         settings.LANGGRAPH_CHECKPOINT_PATH,
     ) as checkpointer:

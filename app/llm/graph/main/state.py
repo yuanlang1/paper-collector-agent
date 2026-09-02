@@ -26,6 +26,7 @@ class MainAgentState(TypedDict):
     conversation_id: str
     run_id: str
     llm_profile: dict[str, Any] | None
+
     paper_search_request: PaperSearchRequestState | None
     paper_search_handoff: PaperSearchHandoffState | None
     paper_search_tool_call_id: str | None
@@ -34,6 +35,7 @@ class MainAgentState(TypedDict):
     task_review_tool_call_id: str | None
 
     messages: Annotated[list[BaseMessage], add_messages]
+    system_context: str
 
     pending_tool_calls: list[PendingToolCallState]
     active_tool_call: PendingToolCallState | None

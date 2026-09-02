@@ -1,8 +1,9 @@
 from typing import Any
 from uuid import uuid4
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
+from app.config import settings
 from app.llm.graph.main.native_tools import get_tool_kind, requires_confirmation
 from app.llm.graph.main.state import MainAgentState
 from app.llm.streaming.tool_event import emit_custom_event
@@ -186,12 +187,21 @@ class SolveNode:
             }
         )
 
-        async for chunk in self.model.astream(
-            [
-                SystemMessage(content=SYSTEM_PROMPT),
-                *state["messages"],
-            ]
-        ):
+        system_message = self._build_system_context_message(
+            str(state.get("system_context") or "")
+        )
+
+        messages = [
+            SystemMessage(content=SYSTEM_PROMPT),
+            *(
+                [system_message]
+                if system_message is not None
+                else []
+            ),
+            *self._recent_conversation_messages(state["messages"]),
+        ]
+
+        async for chunk in self.model.astream(messages):
             chunks.append(chunk)
 
             reasoning_delta = chunk.additional_kwargs.get(
@@ -252,3 +262,34 @@ class SolveNode:
             "reasoning_content": reasoning_content,
             "run_status": "running",
         }
+
+    @staticmethod
+    def _build_system_context_message(
+        system_context: str,
+    ) -> SystemMessage | None:
+        if not system_context.strip():
+            return None
+
+        return SystemMessage(content=system_context)
+
+    @staticmethod
+    def _recent_conversation_messages(
+        messages: list[BaseMessage],
+        *,
+        history_turns: int | None = None,
+    ) -> list[BaseMessage]:
+        human_indexes = [
+            index
+            for index, message in enumerate(messages)
+            if isinstance(message, HumanMessage)
+        ]
+        configured_turns = (
+            settings.AGENT_HISTORY_TURNS
+            if history_turns is None
+            else history_turns
+        )
+        retained_turns = configured_turns + 1
+        if len(human_indexes) <= retained_turns:
+            return messages
+
+        return messages[human_indexes[-retained_turns] :]

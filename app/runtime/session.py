@@ -14,9 +14,11 @@ from app.llm.streaming.utils import encode_sse
 class Session:
     conversation_id: str
     db: DbSession
+    user_id: str = "0"
     run_id: str | None = None
     assistant_message_id: int | None = None
     message: str | None = None
+    system_context: str = ""
     resume_payload: dict[str, Any] | None = None
     llm_profile: dict[str, Any] | None = None
     event_sequence: int = 0
@@ -28,6 +30,8 @@ class Session:
         message: str,
         conversation_id: str,
         db: DbSession,
+        user_id: str = "0",
+        system_context: str = "",
         run_id: str | None = None,
         assistant_message_id: int | None = None,
         llm_profile: dict[str, Any] | None = None,
@@ -38,6 +42,8 @@ class Session:
             assistant_message_id=assistant_message_id,
             message=message,
             db=db,
+            user_id=user_id,
+            system_context=system_context,
             llm_profile=llm_profile,
         )
 
@@ -47,10 +53,12 @@ class Session:
         *,
         conversation_id: str,
         db: DbSession,
+        user_id: str = "0",
     ) -> "Session":
         return cls(
             conversation_id=conversation_id,
             db=db,
+            user_id=user_id,
         )
 
     @classmethod
@@ -61,6 +69,7 @@ class Session:
         run_id: str,
         resume_payload: dict[str, Any],
         db: DbSession,
+        user_id: str = "0",
         assistant_message_id: int | None = None,
         llm_profile: dict[str, Any] | None = None,
     ) -> "Session":
@@ -70,6 +79,7 @@ class Session:
             resume_payload=resume_payload,
             assistant_message_id=assistant_message_id,
             db=db,
+            user_id=user_id,
             llm_profile=llm_profile,
         )
 
@@ -109,6 +119,7 @@ class Session:
             "task_review_handoff": None,
             "task_review_tool_call_id": None,
             "messages": [HumanMessage(content=self.message)],
+            "system_context": self.system_context,
             "pending_tool_calls": [],
             "active_tool_call": None,
             "iteration_count": 0,

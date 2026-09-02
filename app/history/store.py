@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from app.memory.schemas import HistoryTurn
+
 
 TERMINAL_STATUSES = {
     "completed",
@@ -110,6 +112,7 @@ class ChatHistoryStore:
                 """
                 CREATE TABLE IF NOT EXISTS chat_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL DEFAULT '0',
                     conversation_id TEXT NOT NULL,
                     run_id TEXT NOT NULL,
                     role TEXT NOT NULL
@@ -132,18 +135,31 @@ class ChatHistoryStore:
                 );
 
                 CREATE INDEX IF NOT EXISTS
-                    ix_chat_log_conversation_id_id
-                ON chat_log (conversation_id, id);
-
-                CREATE INDEX IF NOT EXISTS
                     ix_chat_log_run_id
                 ON chat_log (run_id);
                 """
             )
+            self._migrate(connection)
+
+    @staticmethod
+    def _migrate(connection: sqlite3.Connection) -> None:
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(chat_log)").fetchall()
+        }
+        if "user_id" not in columns:
+            connection.execute(
+                "ALTER TABLE chat_log ADD COLUMN user_id TEXT NOT NULL DEFAULT '0'"
+            )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS ix_chat_log_user_conversation_id "
+            "ON chat_log (user_id, conversation_id, id)"
+        )
 
     async def start_turn(
         self,
         *,
+        user_id: str = "0",
         conversation_id: str,
         run_id: str,
         user_content: str,
@@ -151,6 +167,7 @@ class ChatHistoryStore:
     ) -> int:
         return await asyncio.to_thread(
             self._start_turn,
+            user_id,
             conversation_id,
             run_id,
             user_content,
@@ -160,6 +177,7 @@ class ChatHistoryStore:
     async def claim_pending_action(
         self,
         *,
+        user_id: str = "0",
         conversation_id: str,
         run_id: str,
         action_id: str,
@@ -168,6 +186,7 @@ class ChatHistoryStore:
     ) -> PendingActionClaim:
         return await asyncio.to_thread(
             self._claim_pending_action,
+            user_id,
             conversation_id,
             run_id,
             action_id,
@@ -204,25 +223,45 @@ class ChatHistoryStore:
     async def list_conversations(
         self,
         *,
+        user_id: str = "0",
         limit: int,
     ) -> list[dict[str, Any]]:
         return await asyncio.to_thread(
             self._list_conversations,
+            user_id,
             limit,
         )
 
     async def list_messages(
         self,
         *,
+        user_id: str = "0",
         conversation_id: str,
         limit: int,
         before_id: int | None,
     ) -> tuple[list[dict[str, Any]], int | None]:
         return await asyncio.to_thread(
             self._list_messages,
+            user_id,
             conversation_id,
             limit,
             before_id,
+        )
+
+    async def list_completed_turns_after(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        after_assistant_message_id: int | None,
+        limit: int,
+    ) -> list[HistoryTurn]:
+        return await asyncio.to_thread(
+            self._list_completed_turns_after,
+            user_id,
+            conversation_id,
+            after_assistant_message_id,
+            limit,
         )
 
     @contextmanager
@@ -246,6 +285,7 @@ class ChatHistoryStore:
 
     def _start_turn(
         self,
+        user_id: str,
         conversation_id: str,
         run_id: str,
         user_content: str,
@@ -257,12 +297,13 @@ class ChatHistoryStore:
             connection.execute(
                 """
                 INSERT INTO chat_log (
-                    conversation_id, run_id, role, content,
+                    user_id, conversation_id, run_id, role, content,
                     status, source, created_at
                 )
-                VALUES (?, ?, 'user', ?, 'completed', ?, ?)
+                VALUES (?, ?, ?, 'user', ?, 'completed', ?, ?)
                 """,
                 (
+                    user_id,
                     conversation_id,
                     run_id,
                     user_content,
@@ -274,12 +315,13 @@ class ChatHistoryStore:
             cursor = connection.execute(
                 """
                 INSERT INTO chat_log (
-                    conversation_id, run_id, role, content,
+                    user_id, conversation_id, run_id, role, content,
                     status, source, created_at
                 )
-                VALUES (?, ?, 'assistant', '', 'running', ?, ?)
+                VALUES (?, ?, ?, 'assistant', '', 'running', ?, ?)
                 """,
                 (
+                    user_id,
                     conversation_id,
                     run_id,
                     source,
@@ -291,6 +333,7 @@ class ChatHistoryStore:
 
     def _claim_pending_action(
         self,
+        user_id: str,
         conversation_id: str,
         run_id: str,
         action_id: str,
@@ -303,6 +346,7 @@ class ChatHistoryStore:
                 SELECT id, status, meta
                 FROM chat_log
                 WHERE conversation_id = ?
+                  AND user_id = ?
                   AND run_id = ?
                   AND role = 'assistant'
                 ORDER BY id DESC
@@ -310,6 +354,7 @@ class ChatHistoryStore:
                 """,
                 (
                     conversation_id,
+                    user_id,
                     run_id,
                 ),
             ).fetchone()
@@ -506,16 +551,19 @@ class ChatHistoryStore:
 
     def _list_conversations(
         self,
+        user_id: str,
         limit: int,
     ) -> list[dict[str, Any]]:
         query = """
             WITH conversations AS (
                 SELECT
+                    user_id,
                     conversation_id,
                     COUNT(*) AS message_count,
                     MAX(id) AS latest_message_id
                 FROM chat_log
-                GROUP BY conversation_id
+                WHERE user_id = ?
+                GROUP BY user_id, conversation_id
             )
             SELECT
                 c.conversation_id,
@@ -528,6 +576,7 @@ class ChatHistoryStore:
                         SELECT content
                         FROM chat_log first_user
                         WHERE first_user.conversation_id = c.conversation_id
+                        AND first_user.user_id = c.user_id
                         AND first_user.role = 'user'
                         ORDER BY first_user.id ASC
                         LIMIT 1
@@ -541,7 +590,7 @@ class ChatHistoryStore:
         """
 
         with self._connect() as connection:
-            rows = connection.execute(query, (limit,)).fetchall()
+            rows = connection.execute(query, (user_id, limit)).fetchall()
 
         return [
             {
@@ -559,6 +608,7 @@ class ChatHistoryStore:
 
     def _list_messages(
         self,
+        user_id: str,
         conversation_id: str,
         limit: int,
         before_id: int | None,
@@ -575,10 +625,10 @@ class ChatHistoryStore:
             meta,
             created_at
         FROM chat_log
-        WHERE conversation_id = ?
+        WHERE user_id = ? AND conversation_id = ?
         """
 
-        params: list[Any] = [conversation_id]
+        params: list[Any] = [user_id, conversation_id]
 
         if before_id is not None:
             sql += " AND id < ?"
@@ -612,6 +662,55 @@ class ChatHistoryStore:
         next_before_id = items[0]["id"] if has_more and items else None
 
         return items, next_before_id
+
+    def _list_completed_turns_after(
+        self,
+        user_id: str,
+        conversation_id: str,
+        after_assistant_message_id: int | None,
+        limit: int,
+    ) -> list[HistoryTurn]:
+        if limit < 1:
+            raise ValueError("limit must be positive")
+
+        sql = """
+            SELECT
+                user_message.id AS user_message_id,
+                assistant_message.id AS assistant_message_id,
+                user_message.content AS user_content,
+                assistant_message.content AS assistant_content,
+                assistant_message.created_at AS completed_at
+            FROM chat_log user_message
+            JOIN chat_log assistant_message
+                ON assistant_message.run_id = user_message.run_id
+                AND assistant_message.user_id = user_message.user_id
+                AND assistant_message.role = 'assistant'
+            WHERE user_message.role = 'user'
+                AND user_message.user_id = ?
+                AND user_message.conversation_id = ?
+                AND assistant_message.conversation_id = ?
+                AND assistant_message.status = 'completed'
+        """
+        params: list[Any] = [user_id, conversation_id, conversation_id]
+        if after_assistant_message_id is not None:
+            sql += " AND assistant_message.id > ?"
+            params.append(after_assistant_message_id)
+        sql += " ORDER BY assistant_message.id ASC LIMIT ?"
+        params.append(limit)
+
+        with self._connect() as connection:
+            rows = connection.execute(sql, params).fetchall()
+
+        return [
+            HistoryTurn(
+                user_message_id=int(row["user_message_id"]),
+                assistant_message_id=int(row["assistant_message_id"]),
+                user_content=row["user_content"],
+                assistant_content=row["assistant_content"],
+                completed_at=datetime.fromisoformat(row["completed_at"]),
+            )
+            for row in rows
+        ]
 
 
 _history_store: ChatHistoryStore | None = None
