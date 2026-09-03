@@ -37,6 +37,7 @@ Thumbs.db
 
 data/
 models/
+test/
 !app/models/
 !app/models/*.py
 scripts/

@@ -38,6 +38,7 @@ class MainAgentState(TypedDict):
     task_review_tool_call_id: str | None
 
     messages: Annotated[list[BaseMessage], add_messages]
+    conversation_window_start_id: str | None
     system_context: str
     memory_usage: MemoryUsage | None
 

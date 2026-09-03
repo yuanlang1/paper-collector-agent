@@ -80,15 +80,19 @@ class MemoryNodeTests(unittest.IsolatedAsyncioTestCase):
                     "conversation_id": "conv-1",
                     "user_id": "7",
                     "messages": [
-                        HumanMessage(content="earlier"),
-                        AIMessage(content="reply"),
-                        HumanMessage(content="current request"),
+                        HumanMessage(id="earlier", content="earlier"),
+                        AIMessage(id="reply", content="reply"),
+                        HumanMessage(
+                            id="current",
+                            content="current request",
+                        ),
                     ],
                 }
             )
 
         self.assertEqual(result["system_context"], "dynamic system context")
         self.assertEqual(result["memory_usage"]["status"], "completed")
+        self.assertEqual(result["conversation_window_start_id"], "earlier")
         self.assertTrue(db.closed)
         self.assertEqual(builder.calls[0]["user_id"], "7")
         self.assertEqual(builder.calls[0]["user_message"], "current request")
@@ -123,6 +127,18 @@ class MemoryNodeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(memory_node.calls, 1)
         self.assertEqual(result["reply"], "from-memory")
+
+    def test_sets_window_anchor_to_oldest_retained_human_message(self):
+        messages = [
+            HumanMessage(id=f"human-{index}", content=f"turn-{index}")
+            for index in range(1, 16)
+        ]
+
+        start_id = MemoryNode._conversation_window_start_id(
+            {"messages": messages}
+        )
+
+        self.assertEqual(start_id, "human-3")
 
 
 if __name__ == "__main__":

@@ -24,10 +24,12 @@ class Settings(BaseSettings):
 
     OPENAI_API_KEY: str
     OPENAI_BASE_URL: str
+    LLM_PROVIDER: str
     OPENAI_MODEL: str
     THINKING_TYPE: str
     REASONING_EFFORT: str
     LLM_PROFILE_ENCRYPTION_KEY: str | None = None
+    LLM_PROFILE_ENCRYPTION_KEY: str
 
     # Nacos
     NACOS_ENABLED: bool

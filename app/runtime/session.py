@@ -121,6 +121,7 @@ class Session:
             "task_review_handoff": None,
             "task_review_tool_call_id": None,
             "messages": [HumanMessage(content=self.message)],
+            "conversation_window_start_id": None,
             "system_context": "",
             "memory_usage": None,
             "pending_tool_calls": [],

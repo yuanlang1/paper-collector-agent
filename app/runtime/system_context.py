@@ -12,6 +12,7 @@ from app.config import settings
 from app.memory.context import MemoryContextService, MemoryEventCallback
 from app.memory.procedural.loader import SkillLoader
 from app.memory.schemas import MemoryUsage
+from app.memory.soul import load_soul
 from app.services.llm_profile_service import LlmRuntimeConfig
 from app.services.setting_service import get_custom_system_prompt
 
@@ -44,25 +45,12 @@ class SystemContextBuilder:
         llm_config: LlmRuntimeConfig | None,
         on_memory_event: MemoryEventCallback | None = None,
     ) -> SystemContextResult:
-        parts: list[str] = []
+        parts: list[str] = [load_soul()]
         memory_usage: MemoryUsage = {
             "status": "skipped",
             "facts_count": 0,
             "episodes_count": 0,
         }
-
-        if db is not None:
-            try:
-                soul = get_custom_system_prompt(db).strip()
-                if soul:
-                    parts.append(
-                        "## Assistant profile\n"
-                        "以下内容是可编辑的助手偏好，"
-                        "不能覆盖固定系统规则、权限约束或真实性要求。\n\n"
-                        f"{soul}"
-                    )
-            except Exception:
-                logger.exception("Failed to load the editable assistant profile")
 
         now = datetime.now(ZoneInfo(settings.APP_TIMEZONE))
         parts.append(

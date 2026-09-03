@@ -3,13 +3,15 @@ from __future__ import annotations
 from collections.abc import Callable
 import logging
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.llm.graph.main.state import MainAgentState
 from app.llm.streaming.tool_event import emit_custom_event
 from app.llm.streaming.utils import content_to_text
 from app.memory.schemas import MemoryUsage
+from app.memory.soul import SoulLoadError
 from app.runtime.system_context import SystemContextBuilder
 from app.services.llm_profile_service import LlmRuntimeConfig
 
@@ -31,6 +33,9 @@ class MemoryNode:
         self.llm_config = llm_config
 
     async def __call__(self, state: MainAgentState) -> dict[str, object]:
+        conversation_window_start_id = (
+            self._conversation_window_start_id(state)
+        )
         db: Session | None = None
         try:
             db = self.db_factory()
@@ -43,9 +48,12 @@ class MemoryNode:
                 on_memory_event=emit_custom_event,
             )
             return {
+                "conversation_window_start_id": conversation_window_start_id,
                 "system_context": result.content,
                 "memory_usage": result.memory_usage,
             }
+        except SoulLoadError:
+            raise
         except Exception:
             logger.exception("Memory node failed; continuing without retrieved memory")
             emit_custom_event(
@@ -68,6 +76,7 @@ class MemoryNode:
             except Exception:
                 logger.exception("Failed to build fallback system context")
             return {
+                "conversation_window_start_id": conversation_window_start_id,
                 "system_context": fallback_content,
                 "memory_usage": self._failed_usage(),
             }
@@ -81,6 +90,28 @@ class MemoryNode:
             if isinstance(message, HumanMessage):
                 return content_to_text(message.content)
         return ""
+
+    @staticmethod
+    def _conversation_window_start_id(
+        state: MainAgentState,
+    ) -> str | None:
+        messages = state.get("messages") or []
+        if not messages:
+            return None
+
+        human_indexes = [
+            index
+            for index, message in enumerate(messages)
+            if isinstance(message, HumanMessage)
+        ]
+        retained_human_messages = settings.AGENT_HISTORY_TURNS + 1
+        start_index = (
+            human_indexes[-retained_human_messages]
+            if len(human_indexes) > retained_human_messages
+            else 0
+        )
+        message_id = messages[start_index].id
+        return str(message_id) if message_id else None
 
     @staticmethod
     def _failed_usage() -> MemoryUsage:
