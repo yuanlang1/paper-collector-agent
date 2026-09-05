@@ -14,7 +14,11 @@ from sqlalchemy.orm import Session as DbSession
 from app.llm.agent import AgentService
 from app.runtime.session import Session
 from app.runtime.threaded_stream import DetachedStreamRun
-from app.services.llm_profile_service import LlmRuntimeConfig, resolve_runtime_config
+from app.services.llm_profile_service import (
+    LlmRuntimeConfig,
+    resolve_runtime_config,
+    resolve_small_model_runtime_config,
+)
 from app.services.setting_service import get_source_limits
 
 
@@ -46,6 +50,7 @@ class AgentRuntime:
         llm_profile_id: int | None = None,
     ) -> dict[str, Any]:
         llm_config = resolve_runtime_config(db, llm_profile_id)
+        memory_llm_config = resolve_small_model_runtime_config(db)
         resolved_conversation_id = self.resolve_conversation_id(conversation_id)
         source_limits = get_source_limits(db)
 
@@ -55,6 +60,10 @@ class AgentRuntime:
             db=db,
             user_id=DEFAULT_USER_ID,
             llm_profile=llm_config.snapshot() if llm_config else None,
+            memory_llm_profile=self._memory_llm_profile_snapshot(
+                llm_config,
+                memory_llm_config,
+            ),
             paper_search_source_limits=source_limits,
         )
 
@@ -67,7 +76,10 @@ class AgentRuntime:
         started_at = time.perf_counter()
 
         try:
-            response = await self._service_for_config(llm_config).invoke(session)
+            response = await self._service_for_config(
+                llm_config,
+                memory_llm_config,
+            ).invoke(session)
         except Exception:
             await self.history_store.mark_interrupted(
                 message_id=assistant_message_id,
@@ -93,6 +105,7 @@ class AgentRuntime:
         llm_profile_id: int | None = None,
     ) -> AsyncIterator[str]:
         llm_config = resolve_runtime_config(db, llm_profile_id)
+        memory_llm_config = resolve_small_model_runtime_config(db)
         resolved_conversation_id = self.resolve_conversation_id(conversation_id)
         source_limits = get_source_limits(db)
         run_id = f"run_{uuid4().hex}"
@@ -114,8 +127,15 @@ class AgentRuntime:
                 resume_payload=None,
                 resume_action_id=None,
                 assistant_message_id=assistant_message_id,
-                service=self._service_for_config(llm_config),
+                service=self._service_for_config(
+                    llm_config,
+                    memory_llm_config,
+                ),
                 llm_profile=llm_config.snapshot() if llm_config else None,
+                memory_llm_profile=self._memory_llm_profile_snapshot(
+                    llm_config,
+                    memory_llm_config,
+                ),
                 paper_search_source_limits=source_limits,
             ),
             run_id=run_id,
@@ -213,6 +233,7 @@ class AgentRuntime:
                 assistant_message_id=assistant_message_id,
                 service=service,
                 llm_profile=session.llm_profile,
+                memory_llm_profile=session.memory_llm_profile,
                 paper_search_source_limits=None,
             ),
             run_id=run_id,
@@ -255,7 +276,7 @@ class AgentRuntime:
             self._run_consolidation(
                 user_id=session.user_id,
                 conversation_id=session.conversation_id,
-                llm_profile=session.llm_profile,
+                memory_llm_profile=session.memory_llm_profile,
             ),
             name=(
                 "memory-consolidation:"
@@ -275,17 +296,17 @@ class AgentRuntime:
         *,
         user_id: str,
         conversation_id: str,
-        llm_profile: dict[str, Any] | None,
+        memory_llm_profile: dict[str, Any] | None,
     ) -> None:
         db = self.db_factory()
         try:
             profile_id = (
-                llm_profile.get("profile_id")
-                if isinstance(llm_profile, dict)
+                memory_llm_profile.get("profile_id")
+                if isinstance(memory_llm_profile, dict)
                 else None
             )
-            llm_config = resolve_runtime_config(db, profile_id)
-            with use_llm_runtime_config(llm_config):
+            memory_llm_config = resolve_runtime_config(db, profile_id)
+            with use_llm_runtime_config(memory_llm_config):
                 result = await Consolidator(
                     db,
                     user_id=user_id,
@@ -322,6 +343,7 @@ class AgentRuntime:
         assistant_message_id: int,
         service: AgentService,
         llm_profile: dict[str, Any] | None,
+        memory_llm_profile: dict[str, Any] | None,
         paper_search_source_limits: dict[str, int] | None,
     ) -> None:
         try:
@@ -335,6 +357,7 @@ class AgentRuntime:
                 assistant_message_id=assistant_message_id,
                 service=service,
                 llm_profile=llm_profile,
+                memory_llm_profile=memory_llm_profile,
                 paper_search_source_limits=paper_search_source_limits,
             )
         except Exception:
@@ -359,6 +382,7 @@ class AgentRuntime:
         assistant_message_id: int,
         service: AgentService,
         llm_profile: dict[str, Any] | None,
+        memory_llm_profile: dict[str, Any] | None,
         paper_search_source_limits: dict[str, int] | None,
     ) -> None:
         started_at = time.perf_counter()
@@ -373,6 +397,7 @@ class AgentRuntime:
                     db=db,
                     assistant_message_id=assistant_message_id,
                     llm_profile=llm_profile,
+                    memory_llm_profile=memory_llm_profile,
                 )
                 if resume_payload is not None
                 else Session.create(
@@ -383,6 +408,7 @@ class AgentRuntime:
                     user_id=DEFAULT_USER_ID,
                     assistant_message_id=assistant_message_id,
                     llm_profile=llm_profile,
+                    memory_llm_profile=memory_llm_profile,
                     paper_search_source_limits=paper_search_source_limits,
                 )
             )
@@ -575,6 +601,16 @@ class AgentRuntime:
             else None
         )
         llm_config = resolve_runtime_config(db, profile_id)
+        memory_profile_snapshot = snapshot.values.get("memory_llm_profile")
+        if isinstance(memory_profile_snapshot, dict):
+            memory_profile_id = memory_profile_snapshot.get("profile_id")
+            memory_llm_config = resolve_runtime_config(db, memory_profile_id)
+        else:
+            memory_llm_config = resolve_small_model_runtime_config(db)
+            memory_profile_snapshot = self._memory_llm_profile_snapshot(
+                llm_config,
+                memory_llm_config,
+            )
         return (
             Session.resume(
                 conversation_id=conversation_id,
@@ -582,9 +618,14 @@ class AgentRuntime:
                 resume_payload=resume_payload,
                 db=db,
                 llm_profile=(llm_config.snapshot() if llm_config else profile_snapshot),
+                memory_llm_profile=(
+                    memory_llm_config.snapshot()
+                    if memory_llm_config
+                    else memory_profile_snapshot
+                ),
             ),
             action_id,
-            self._service_for_config(llm_config),
+            self._service_for_config(llm_config, memory_llm_config),
         )
 
     @staticmethod
@@ -628,17 +669,32 @@ class AgentRuntime:
     def _service_for_config(
         self,
         llm_config: LlmRuntimeConfig | None,
+        memory_llm_config: LlmRuntimeConfig | None,
     ) -> AgentService:
-        if llm_config is None:
+        if llm_config is None and memory_llm_config is None:
             return self.agent_service
         return AgentService(
             checkpointer=self.agent_service.checkpointer,
             llm_config=llm_config,
+            memory_llm_config=memory_llm_config,
         )
 
     @staticmethod
     def _llm_profile_meta(session: Session) -> dict[str, Any]:
-        return {"llm_profile": session.llm_profile} if session.llm_profile else {}
+        metadata: dict[str, Any] = {}
+        if session.llm_profile:
+            metadata["llm_profile"] = session.llm_profile
+        if session.memory_llm_profile:
+            metadata["memory_llm_profile"] = session.memory_llm_profile
+        return metadata
+
+    @staticmethod
+    def _memory_llm_profile_snapshot(
+        llm_config: LlmRuntimeConfig | None,
+        memory_llm_config: LlmRuntimeConfig | None,
+    ) -> dict[str, Any] | None:
+        effective_config = memory_llm_config or llm_config
+        return effective_config.snapshot() if effective_config else None
 
 
 _agent_runtime: AgentRuntime | None = None

@@ -62,6 +62,8 @@ class MemoryRetrievalGate:
                 invoker = self.invoker or create_validated_structured_chat_model(
                     RetrievalDecision,
                     temperature=0,
+                    max_attempts=2,
+                    purpose="memory",
                 )
                 result = await invoker.ainvoke(
                     [

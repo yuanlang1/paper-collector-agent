@@ -20,6 +20,7 @@ class Session:
     message: str | None = None
     resume_payload: dict[str, Any] | None = None
     llm_profile: dict[str, Any] | None = None
+    memory_llm_profile: dict[str, Any] | None = None
     paper_search_source_limits: dict[str, int] | None = None
     event_sequence: int = 0
 
@@ -34,6 +35,7 @@ class Session:
         run_id: str | None = None,
         assistant_message_id: int | None = None,
         llm_profile: dict[str, Any] | None = None,
+        memory_llm_profile: dict[str, Any] | None = None,
         paper_search_source_limits: dict[str, int] | None = None,
     ) -> "Session":
         return cls(
@@ -44,6 +46,7 @@ class Session:
             db=db,
             user_id=user_id,
             llm_profile=llm_profile,
+            memory_llm_profile=memory_llm_profile,
             paper_search_source_limits=paper_search_source_limits,
         )
 
@@ -72,6 +75,7 @@ class Session:
         user_id: str = "0",
         assistant_message_id: int | None = None,
         llm_profile: dict[str, Any] | None = None,
+        memory_llm_profile: dict[str, Any] | None = None,
     ) -> "Session":
         return cls(
             conversation_id=conversation_id,
@@ -81,6 +85,7 @@ class Session:
             db=db,
             user_id=user_id,
             llm_profile=llm_profile,
+            memory_llm_profile=memory_llm_profile,
         )
 
     @property
@@ -113,6 +118,7 @@ class Session:
             "user_id": self.user_id,
             "run_id": self.run_id,
             "llm_profile": self.llm_profile,
+            "memory_llm_profile": self.memory_llm_profile,
             "paper_search_request": None,
             "paper_search_handoff": None,
             "paper_search_tool_call_id": None,

@@ -88,3 +88,26 @@ def resolve_runtime_config(
         model=profile.model,
         api_key=decrypt_api_key(profile.api_key_ciphertext),
     )
+
+
+def resolve_small_model_runtime_config(
+    db: Session | None,
+) -> LlmRuntimeConfig | None:
+    if db is None:
+        return None
+
+    profile = db.query(LlmProfile).filter(
+        LlmProfile.is_small_model.is_(True),
+        LlmProfile.enabled.is_(True),
+    ).one_or_none()
+    if profile is None:
+        return None
+
+    return LlmRuntimeConfig(
+        profile_id=profile.id,
+        version=profile.version,
+        provider=profile.provider,
+        base_url=profile.base_url,
+        model=profile.model,
+        api_key=decrypt_api_key(profile.api_key_ciphertext),
+    )

@@ -43,6 +43,7 @@ class SystemContextBuilder:
         conversation_id: str,
         db: Session | None,
         llm_config: LlmRuntimeConfig | None,
+        memory_llm_config: LlmRuntimeConfig | None = None,
         on_memory_event: MemoryEventCallback | None = None,
     ) -> SystemContextResult:
         parts: list[str] = [load_soul()]
@@ -84,7 +85,7 @@ class SystemContextBuilder:
                 ).build_context(
                     user_message=user_message,
                     conversation_id=conversation_id,
-                    llm_config=llm_config,
+                    llm_config=memory_llm_config or llm_config,
                     on_event=on_memory_event,
                 )
                 memory_usage = memory_result.usage

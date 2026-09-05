@@ -44,3 +44,5 @@ scripts/
 .codex
 .pytest_cache
 .agents
+.mermaid-npm-cache
+.mermaid-renderer

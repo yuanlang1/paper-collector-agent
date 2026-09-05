@@ -39,6 +39,8 @@ class LangChainMemoryExtractor:
         self.invoker = invoker or create_validated_structured_chat_model(
             MemoryExtractionPayload,
             temperature=0,
+            max_attempts=2,
+            purpose="memory",
         )
         self.max_characters = max_characters
 

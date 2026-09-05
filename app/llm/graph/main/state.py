@@ -28,6 +28,7 @@ class MainAgentState(TypedDict):
     user_id: str
     run_id: str
     llm_profile: dict[str, Any] | None
+    memory_llm_profile: dict[str, Any] | None
 
     paper_search_request: PaperSearchRequestState | None
     paper_search_handoff: PaperSearchHandoffState | None

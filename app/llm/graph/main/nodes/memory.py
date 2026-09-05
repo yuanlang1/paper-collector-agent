@@ -27,10 +27,12 @@ class MemoryNode:
         db_factory: Callable[[], Session],
         system_context_builder: SystemContextBuilder,
         llm_config: LlmRuntimeConfig | None,
+        memory_llm_config: LlmRuntimeConfig | None = None,
     ) -> None:
         self.db_factory = db_factory
         self.system_context_builder = system_context_builder
         self.llm_config = llm_config
+        self.memory_llm_config = memory_llm_config
 
     async def __call__(self, state: MainAgentState) -> dict[str, object]:
         conversation_window_start_id = (
@@ -45,6 +47,7 @@ class MemoryNode:
                 conversation_id=str(state.get("conversation_id") or ""),
                 db=db,
                 llm_config=self.llm_config,
+                memory_llm_config=self.memory_llm_config,
                 on_memory_event=emit_custom_event,
             )
             return {
@@ -71,6 +74,7 @@ class MemoryNode:
                     conversation_id=str(state.get("conversation_id") or ""),
                     db=None,
                     llm_config=self.llm_config,
+                    memory_llm_config=self.memory_llm_config,
                 )
                 fallback_content = fallback.content
             except Exception:

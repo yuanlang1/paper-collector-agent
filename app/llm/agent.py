@@ -68,9 +68,11 @@ class AgentService:
         checkpointer,
         subagent_registry: SubAgentRegistry | None = None,
         llm_config: LlmRuntimeConfig | None = None,
+        memory_llm_config: LlmRuntimeConfig | None = None,
     ):
         self.checkpointer = checkpointer
         self.llm_config = llm_config
+        self.memory_llm_config = memory_llm_config
         self.subagent_registry = subagent_registry or SubAgentRegistry(ALL_SUBAGENTS)
         with use_llm_runtime_config(llm_config):
             model = create_chat_model(temperature=0).bind_tools(build_native_tool_schemas())
@@ -80,6 +82,7 @@ class AgentService:
                     db_factory=SessionLocal,
                     system_context_builder=SystemContextBuilder(),
                     llm_config=llm_config,
+                    memory_llm_config=memory_llm_config,
                 ),
                 solve_node=SolveNode(model=model),
                 paper_search_graph=build_paper_search_workflow(

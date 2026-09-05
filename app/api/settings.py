@@ -33,6 +33,7 @@ class LlmProfileInput(BaseModel):
     api_key: str = Field(min_length=1)
     enabled: bool = True
     is_default: bool = False
+    is_small_model: bool = False
 
     @field_validator("provider")
     @classmethod
@@ -51,6 +52,7 @@ class LlmProfileUpdate(BaseModel):
     api_key: str | None = Field(default=None, min_length=1)
     enabled: bool | None = None
     is_default: bool | None = None
+    is_small_model: bool | None = None
 
     @field_validator("provider")
     @classmethod
@@ -73,6 +75,7 @@ class LlmProfileView(BaseModel):
     key_last4: str
     enabled: bool
     is_default: bool
+    is_small_model: bool
     version: int
     created_at: datetime
     updated_at: datetime
@@ -116,6 +119,7 @@ def _view(profile: LlmProfile) -> LlmProfileView:
         key_last4="",
         enabled=profile.enabled,
         is_default=profile.is_default,
+        is_small_model=profile.is_small_model,
         version=profile.version,
         created_at=profile.created_at,
         updated_at=profile.updated_at,
@@ -127,6 +131,13 @@ def _set_default(db: Session, profile: LlmProfile) -> None:
         {LlmProfile.is_default: False}, synchronize_session=False
     )
     profile.is_default = True
+
+
+def _set_small_model(db: Session, profile: LlmProfile) -> None:
+    db.query(LlmProfile).filter(LlmProfile.id != profile.id).update(
+        {LlmProfile.is_small_model: False}, synchronize_session=False
+    )
+    profile.is_small_model = True
 
 
 def _source_limits_view(limits: dict[str, int]) -> SourceLimitsView:
@@ -189,6 +200,8 @@ def list_llm_profiles(db: Session = Depends(get_db)) -> ServiceResponse[LlmProfi
 def create_llm_profile(payload: LlmProfileInput, db: Session = Depends(get_db)) -> ServiceResponse[LlmProfileView]:
     if payload.is_default and not payload.enabled:
         raise HTTPException(status_code=400, detail="Disabled profile cannot be the default")
+    if payload.is_small_model and not payload.enabled:
+        raise HTTPException(status_code=400, detail="Disabled profile cannot be the memory small model")
     if db.query(LlmProfile).filter(LlmProfile.name == payload.name).first():
         raise HTTPException(status_code=409, detail="LLM profile name already exists")
     profile = LlmProfile(
@@ -199,11 +212,14 @@ def create_llm_profile(payload: LlmProfileInput, db: Session = Depends(get_db)) 
         api_key_ciphertext=encrypt_api_key(payload.api_key),
         enabled=payload.enabled,
         is_default=payload.is_default,
+        is_small_model=payload.is_small_model,
     )
     db.add(profile)
     db.flush()
     if profile.is_default or db.query(LlmProfile).filter(LlmProfile.is_default.is_(True)).count() == 0:
         _set_default(db, profile)
+    if profile.is_small_model:
+        _set_small_model(db, profile)
     db.commit()
     db.refresh(profile)
     return ServiceResponse[LlmProfileView].build_success_response(data=_view(profile), message="OK")
@@ -216,11 +232,15 @@ def update_llm_profile(profile_id: int, payload: LlmProfileUpdate, db: Session =
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     updates = payload.model_dump(exclude_unset=True)
+    target_enabled = updates.get("enabled", profile.enabled)
+    target_is_small_model = updates.get("is_small_model", profile.is_small_model)
+    if target_is_small_model and not target_enabled:
+        raise HTTPException(status_code=400, detail="Disabled profile cannot be the memory small model")
     if "name" in updates and db.query(LlmProfile).filter(LlmProfile.name == updates["name"], LlmProfile.id != profile_id).first():
         raise HTTPException(status_code=409, detail="LLM profile name already exists")
     previous_provider = profile.provider
     provider = updates.get("provider", previous_provider)
-    for field in ("name", "provider", "model", "enabled"):
+    for field in ("name", "provider", "model", "enabled", "is_small_model"):
         if field in updates:
             setattr(profile, field, updates[field])
     if "base_url" in updates:
@@ -231,6 +251,8 @@ def update_llm_profile(profile_id: int, payload: LlmProfileUpdate, db: Session =
         profile.api_key_ciphertext = encrypt_api_key(updates["api_key"])
     if updates.get("is_default"):
         _set_default(db, profile)
+    if updates.get("is_small_model"):
+        _set_small_model(db, profile)
     if updates.get("enabled") is False and profile.is_default:
         raise HTTPException(status_code=400, detail="Set another default profile before disabling this profile")
     profile.version += 1
@@ -262,6 +284,8 @@ def delete_llm_profile(profile_id: int, db: Session = Depends(get_db)) -> Servic
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if profile.is_default:
         raise HTTPException(status_code=400, detail="Set another default profile before deleting this profile")
+    if profile.is_small_model:
+        raise HTTPException(status_code=400, detail="Set another memory small model before deleting this profile")
     db.delete(profile)
     db.commit()
     return ServiceResponse[DeleteLlmProfileResponse].build_success_response(
