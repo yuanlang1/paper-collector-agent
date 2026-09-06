@@ -9,7 +9,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.llm.tools.base import AppToolSpec
+from app.llm.tools.registry import Tool
 from app.llm.tools.search_tools.common import RETRYABLE_STATUS_CODES, clean_text, elapsed_ms, ensure_list, parse_year
 from app.llm.tools.search_tools.dblp.search_args import (
     DblpSearchArgs,
@@ -411,7 +411,7 @@ async def dblp_search_handler(
         )
 
 
-DBLP_SEARCH_TOOL = AppToolSpec(
+DBLP_SEARCH_TOOL = Tool(
     name="dblp_search",
     description=(
         "从 DBLP 少量检索计算机领域出版物并直接返回论文元数据。"
@@ -420,7 +420,7 @@ DBLP_SEARCH_TOOL = AppToolSpec(
         "DBLP 通常不提供摘要和 PDF，因此这些字段可能为空。"
         "不用于批量检索、分页、文件导出或跨来源去重。"
     ),
-    args_schema=DblpSearchArgs,
-    handler=dblp_search_handler,
+    input_schema=DblpSearchArgs.model_json_schema(),
+    fn=dblp_search_handler,
     requires_confirmation=False,
 )

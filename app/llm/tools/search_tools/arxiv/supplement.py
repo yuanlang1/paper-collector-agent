@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 from sqlalchemy.orm import Session
 
-from app.llm.tools.base import AppToolSpec
+from app.llm.tools.registry import Tool
 from app.llm.tools.search_tools.arxiv.supplement_args import ArxivSupplementArgs
 from app.llm.tools.search_tools.arxiv.search_arxiv import arxiv_search_handler
 
@@ -376,13 +376,13 @@ async def arxiv_supplement_handler(
     }
 
 
-ARXIV_SUPPLEMENT_TOOL = AppToolSpec(
+ARXIV_SUPPLEMENT_TOOL = Tool(
     name="arxiv_supplement",
     description=(
         "当 DBLP 或 Google Scholar 检索结果中的论文缺少 summary、pdf_url、"
         "abstract_url 或 arxiv_id 时，使用 DOI 或标题到 arXiv 检索并补全字段。"
         "该工具不负责初始论文检索，只负责对已有 papers 做字段增强。"
     ),
-    args_schema=ArxivSupplementArgs,
-    handler=arxiv_supplement_handler,
+    input_schema=ArxivSupplementArgs.model_json_schema(),
+    fn=arxiv_supplement_handler,
 )

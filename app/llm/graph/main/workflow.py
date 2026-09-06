@@ -1,3 +1,5 @@
+from functools import partial
+
 from langgraph.graph import (
     END,
     START,
@@ -35,6 +37,7 @@ from app.llm.graph.main.nodes.tool import (
 from app.llm.graph.main.state import (
     MainAgentState,
 )
+from app.llm.tools.registry import ToolRegistry, build_tool_registry
 
 
 async def _passthrough_memory_node(
@@ -49,14 +52,16 @@ def build_main_agent_workflow(
     solve_node,
     paper_search_graph,
     task_review_graph,
+    tool_registry: ToolRegistry | None = None,
     checkpointer=None,
 ):
+    registry = tool_registry or build_tool_registry()
     builder = StateGraph(MainAgentState)
 
     builder.add_node("memory", memory_node or _passthrough_memory_node)
     builder.add_node("solve", solve_node)
     builder.add_node("dispatch", dispatch_tool_call_node)
-    builder.add_node("tool", tool_node)
+    builder.add_node("tool", partial(tool_node, tool_registry=registry))
     builder.add_node(
         "prepare_paper_search",
         prepare_paper_search_node,

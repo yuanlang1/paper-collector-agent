@@ -9,7 +9,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.llm.tools.base import AppToolSpec
+from app.llm.tools.registry import Tool
 from app.llm.tools.search_tools.common import RETRYABLE_STATUS_CODES, clean_text, elapsed_ms
 from app.llm.tools.search_tools.google_scholar.search_args import (
     GoogleScholarSearchArgs,
@@ -503,7 +503,7 @@ async def google_scholar_search_handler(
         )
 
 
-GOOGLE_SCHOLAR_SEARCH_TOOL = AppToolSpec(
+GOOGLE_SCHOLAR_SEARCH_TOOL = Tool(
     name="google_scholar_search",
     description=(
         "通过 SerpApi 的 Google Scholar 接口少量检索学术论文。"
@@ -512,7 +512,7 @@ GOOGLE_SCHOLAR_SEARCH_TOOL = AppToolSpec(
         "Google Scholar 返回的是摘要片段 snippet，而非完整论文摘要。"
         "不用于批量检索、分页、文件导出或跨来源补全。"
     ),
-    args_schema=GoogleScholarSearchArgs,
-    handler=google_scholar_search_handler,
+    input_schema=GoogleScholarSearchArgs.model_json_schema(),
+    fn=google_scholar_search_handler,
     requires_confirmation=False,
 )

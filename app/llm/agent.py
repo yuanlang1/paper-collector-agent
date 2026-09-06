@@ -14,6 +14,8 @@ from app.llm.graph.workflows.paper_search.nodes.generate_queries import (
 from app.llm.graph.workflows.paper_search.workflow import build_paper_search_workflow
 from app.llm.graph.workflows.review_generate.workflow import build_task_review_workflow
 from app.llm.model_factory import create_chat_model, use_llm_runtime_config
+from app.llm.tool_adapter import to_openai_tool_schemas
+from app.llm.tools.registry import build_tool_registry
 from app.services.llm_profile_service import LlmRuntimeConfig
 from app.llm.response import build_chat_response, build_done_payload
 from app.llm.streaming import AgentStreamAdapter
@@ -74,8 +76,13 @@ class AgentService:
         self.llm_config = llm_config
         self.memory_llm_config = memory_llm_config
         self.subagent_registry = subagent_registry or SubAgentRegistry(ALL_SUBAGENTS)
+        self.tool_registry = build_tool_registry()
         with use_llm_runtime_config(llm_config):
-            model = create_chat_model(temperature=0).bind_tools(build_native_tool_schemas())
+            model = create_chat_model(temperature=0).bind_tools(
+                to_openai_tool_schemas(
+                    build_native_tool_schemas(self.tool_registry)
+                )
+            )
             source_query_plan_node = BuildSourceQueryPlanNode()
             self.graph = build_main_agent_workflow(
                 memory_node=MemoryNode(
@@ -84,7 +91,7 @@ class AgentService:
                     llm_config=llm_config,
                     memory_llm_config=memory_llm_config,
                 ),
-                solve_node=SolveNode(model=model),
+                solve_node=SolveNode(model=model, tool_registry=self.tool_registry),
                 paper_search_graph=build_paper_search_workflow(
                     skip_confirmation=True,
                     node_overrides={
@@ -94,6 +101,7 @@ class AgentService:
                     },
                 ),
                 task_review_graph=build_task_review_workflow(),
+                tool_registry=self.tool_registry,
                 checkpointer=self.checkpointer,
             )
 

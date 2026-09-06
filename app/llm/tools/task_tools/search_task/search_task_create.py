@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.infrastructure.grpc.task_service_grpc_client import (
     task_service_grpc_client,
 )
-from app.llm.tools.base import AppToolSpec
+from app.llm.tools.registry import Tool
 from app.llm.tools.task_tools.search_task.args import AddQueryTaskArgs
 
 
@@ -23,7 +23,7 @@ async def add_query_task_handler(
     return await task_service_grpc_client.add_query_task(payload)
 
 
-ADD_QUERY_TASK_TOOL = AppToolSpec(
+ADD_QUERY_TASK_TOOL = Tool(
     name="add_query_task",
     description=(
         "创建并保存论文查询任务。"
@@ -34,7 +34,7 @@ ADD_QUERY_TASK_TOOL = AppToolSpec(
         "如果用户只是咨询检索方案、要求推荐关键词或预览查询条件，"
         "不得调用该工具。"
     ),
-    args_schema=AddQueryTaskArgs,
-    handler=add_query_task_handler,
+    input_schema=AddQueryTaskArgs.model_json_schema(),
+    fn=add_query_task_handler,
     requires_confirmation=True,
 )

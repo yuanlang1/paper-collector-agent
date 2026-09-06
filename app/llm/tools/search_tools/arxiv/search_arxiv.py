@@ -10,7 +10,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.llm.tools.base import AppToolSpec
+from app.llm.tools.registry import Tool
 from app.llm.tools.search_tools.arxiv.search_args import ArxivSearchArgs
 from app.llm.tools.search_tools.common import RETRYABLE_STATUS_CODES, clean_text, elapsed_ms
 
@@ -595,7 +595,7 @@ async def arxiv_search_handler(
         )
 
 
-ARXIV_SEARCH_TOOL = AppToolSpec(
+ARXIV_SEARCH_TOOL = Tool(
     name="arxiv_search",
     description=(
         "从 arXiv 少量检索论文并直接返回论文信息。"
@@ -603,7 +603,7 @@ ARXIV_SEARCH_TOOL = AppToolSpec(
         "单次默认返回 5 篇，最多 20 篇。"
         "不用于批量检索、分页、文件导出或跨来源去重。"
     ),
-    args_schema=ArxivSearchArgs,
-    handler=arxiv_search_handler,
+    input_schema=ArxivSearchArgs.model_json_schema(),
+    fn=arxiv_search_handler,
     requires_confirmation=False,
 )

@@ -40,7 +40,7 @@ class AgentRuntime:
         self._active_stream_tasks: set[asyncio.Task[None]] = set()
         self._active_consolidation_scopes: set[tuple[str, str]] = set()
         self._active_consolidation_tasks: set[asyncio.Task[None]] = set()
-
+        
     async def chat(
         self,
         *,

@@ -9,7 +9,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.llm.tools.base import AppToolSpec
+from app.llm.tools.registry import Tool
 from app.llm.tools.search_tools.common import (
     RETRYABLE_STATUS_CODES,
     elapsed_ms,
@@ -300,14 +300,14 @@ async def easy_scholar_venue_handler(
         }
 
 
-EASY_SCHOLAR_VENUE_TOOL = AppToolSpec(
+EASY_SCHOLAR_VENUE_TOOL = Tool(
     name="get_venue_info",
     description=(
         "查询单个学术期刊的等级信息。可返回 JCR 分区、CCF、"
         "影响因子、中科院分区、北大核心、CSSCI、EI、CSCD 等；"
         "仅用于期刊等级查询，不用于检索论文。"
     ),
-    args_schema=EasyScholarVenueArgs,
-    handler=easy_scholar_venue_handler,
+    input_schema=EasyScholarVenueArgs.model_json_schema(),
+    fn=easy_scholar_venue_handler,
     requires_confirmation=False,
 )

@@ -13,7 +13,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.tools.base import AppToolSpec
+from app.llm.tools.registry import Tool
 from app.llm.tools.file_tools.download_file_args import (
     DownloadFileArgs,
 )
@@ -390,14 +390,14 @@ async def download_file_handler(
         )
 
 
-DOWNLOAD_FILE_TOOL = AppToolSpec(
+DOWNLOAD_FILE_TOOL = Tool(
     name="download_file",
     description=(
         "根据 HTTP 或 HTTPS 下载链接下载文件。"
         "必须提供保存目录 save_dir 和文件名 file_name。"
         "默认仅下载并校验 PDF，单个文件最大 50 MB。"
     ),
-    args_schema=DownloadFileArgs,
-    handler=download_file_handler,
+    input_schema=DownloadFileArgs.model_json_schema(),
+    fn=download_file_handler,
     requires_confirmation=True,
 )

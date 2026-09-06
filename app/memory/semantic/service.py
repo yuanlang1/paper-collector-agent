@@ -75,7 +75,6 @@ class FactService:
         source_conversation_id: str,
         source_message_ids: list[int],
     ) -> MemoryFact | None:
-        """仅 flush；由 Consolidator 统一提交事务。"""
         subject, content = self._validate(candidate.subject, candidate.content)
         dedupe_key = self._dedupe_key(subject, content)
 

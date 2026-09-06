@@ -6,7 +6,7 @@ from app.infrastructure.grpc.paper_service_grpc_client import (
     paper_service_grpc_client,
 )
 from app.infrastructure.grpc.task_service_grpc_client import TaskState
-from app.llm.tools.base import AppToolSpec
+from app.llm.tools.registry import Tool
 from app.llm.tools.task_tools.search_task.args import StartTaskRagArgs
 from app.rag.processing.task_rag_batch_runner import (
     get_task_rag_batch_runner,
@@ -53,14 +53,14 @@ async def start_task_rag_handler(
     }
 
 
-START_TASK_RAG_TOOL = AppToolSpec(
+START_TASK_RAG_TOOL = Tool(
     name="start_task_rag",
     description=(
         "启动指定论文检索任务的后台 RAG 流程。"
         "调用前任务状态必须为 SEARCH_COMPLETED；"
         "该操作会下载、解析论文并写入索引，启动后使用 get_task_rag_status 查询进度。"
     ),
-    args_schema=StartTaskRagArgs,
-    handler=start_task_rag_handler,
+    input_schema=StartTaskRagArgs.model_json_schema(),
+    fn=start_task_rag_handler,
     requires_confirmation=True,
 )

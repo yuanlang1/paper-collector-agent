@@ -8,8 +8,6 @@ _STREAM_FINISHED = object()
 
 
 class DetachedStreamRun:
-    """A single SSE subscriber attached to work that outlives the request."""
-
     def __init__(self, run_id: str) -> None:
         self.run_id = run_id
         self._events: asyncio.Queue[object] = asyncio.Queue()

@@ -73,7 +73,7 @@ class PdfDownloadNode:
         paper_info: dict[str, Any],
         run_id: str,
     ) -> dict[str, Any]:
-        result = await DOWNLOAD_FILE_TOOL.handler(
+        result = await DOWNLOAD_FILE_TOOL.fn(
             {
                 "url": str(paper_info["pdf_url"]),
                 "save_dir": (

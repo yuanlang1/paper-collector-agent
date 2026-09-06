@@ -32,7 +32,6 @@ class EpisodeService:
         candidate: EpisodeCandidate,
         source_conversation_id: str,
     ) -> MemoryEpisode | None:
-        """仅 flush；由 Consolidator 统一提交事务。"""
         summary = candidate.summary.strip()
         if not summary:
             raise MemoryValidationError("episode summary is required")

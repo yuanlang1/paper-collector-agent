@@ -12,7 +12,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.llm.tools.base import AppToolSpec
+from app.llm.tools.registry import Tool
 from app.llm.tools.search_tools.common import (
     RETRYABLE_STATUS_CODES,
     clean_text,
@@ -388,14 +388,14 @@ async def crossref_search_handler(
         )
 
 
-CROSSREF_SEARCH_TOOL = AppToolSpec(
+CROSSREF_SEARCH_TOOL = Tool(
     name="crossref_search",
     description=(
         "通过 Crossref 查询论文元数据。支持 DOI 精确查询，或按标题、"
         "关键词、作者、ISSN、发表日期和作品类型检索。"
         "返回 DOI、作者、期刊或会议、发表日期、引用数及可用 PDF 链接。"
     ),
-    args_schema=CrossrefSearchArgs,
-    handler=crossref_search_handler,
+    input_schema=CrossrefSearchArgs.model_json_schema(),
+    fn=crossref_search_handler,
     requires_confirmation=False,
 )

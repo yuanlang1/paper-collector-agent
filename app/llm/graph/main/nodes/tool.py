@@ -4,41 +4,18 @@ from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableConfig
 
 from app.llm.graph.main.state import MainAgentState
-from app.llm.tool_factory import ToolFactory
-from app.llm.tools.registry import TOOL_BY_NAME
+from app.llm.tools.registry import ToolRegistry
 
 
 async def tool_node(
     state: MainAgentState,
     config: RunnableConfig,
+    *,
+    tool_registry: ToolRegistry,
 ) -> dict:
+    del config
     call = state["active_tool_call"]
-
-    if call["name"] not in TOOL_BY_NAME:
-        result = {"ok": False, "error": "UNKNOWN_TOOL"}
-    else:
-        tools = ToolFactory().build(
-            allowed_tools=[call["name"]],
-        )
-        tool = next(
-            item
-            for item in tools
-            if item.name == call["name"]
-        )
-
-        try:
-            raw = await tool.ainvoke(call["args"])
-            result = (
-                raw
-                if isinstance(raw, dict)
-                else {"result": raw}
-            )
-        except Exception as exc:
-            result = {
-                "ok": False,
-                "error": type(exc).__name__,
-                "message": str(exc),
-            }
+    result = await tool_registry.execute(call["name"], call["args"])
 
     return {
         "messages": [

@@ -321,7 +321,7 @@ class VenueResolutionNode:
             ModelVenueInfoDraft,
             temperature=0,
         )
-        self.easy_scholar_handler = easy_scholar_handler or EASY_SCHOLAR_VENUE_TOOL.handler
+        self.easy_scholar_handler = easy_scholar_handler or EASY_SCHOLAR_VENUE_TOOL.fn
     
     async def _query_easy_scholar(
         self,
