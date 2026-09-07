@@ -31,22 +31,6 @@ def _active_target(state: MainAgentState) -> str:
     if call["requires_confirmation"]:
         return "confirm"
     if call["kind"] == "subagent":
-        return call["name"]
+        return "subagent"
     return "tool"
-
-
-def after_prepare_paper_search(
-    state: MainAgentState,
-) -> str:
-    if state.get("paper_search_handoff") is not None:
-        return "complete"
-    return "run"
-
-
-def after_prepare_task_review(
-    state: MainAgentState,
-) -> str:
-    if state.get("task_review_handoff") is not None:
-        return "complete"
-    return "run"
 

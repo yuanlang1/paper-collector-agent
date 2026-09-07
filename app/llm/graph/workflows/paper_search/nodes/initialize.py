@@ -5,35 +5,27 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from app.llm.subagents.paper_search.contracts import (
-    PaperSearchDelegation,
-)
+from app.llm.subagents.paper_search.contracts import PaperSearchDelegation
 
 
 async def initialize_paper_search_node(
     state: Mapping[str, Any],
 ) -> dict[str, Any]:
-    request_payload = state.get("paper_search_request")
-
-    if request_payload is None:
-        prompt = state.get("original_prompt")
-        if not isinstance(prompt, str) or not prompt.strip():
-            return {
-                "stage": "blocked",
-                "status": "blocked",
-                "error": "论文检索子图缺少有效请求。",
-            }
-        request_payload = {
-            "prompt": prompt,
-            "constraints": state.get("paper_search_constraints") or {},
+    call = state.get("active_tool_call")
+    request_payload = call.get("args") if isinstance(call, Mapping) else None
+    if not isinstance(request_payload, Mapping):
+        return {
+            "stage": "failed",
+            "status": "failed",
+            "error": "论文检索子图缺少有效委派请求。",
         }
 
     try:
         request = PaperSearchDelegation.model_validate(request_payload)
     except ValidationError as exc:
         return {
-            "stage": "blocked",
-            "status": "blocked",
+            "stage": "failed",
+            "status": "failed",
             "error": f"论文检索请求无效：{exc}",
         }
 

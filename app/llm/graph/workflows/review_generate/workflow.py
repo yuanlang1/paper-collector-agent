@@ -87,6 +87,7 @@ def build_task_review_workflow(
             node_name=name,
             node=target,
             timeline=TASK_REVIEW_TIMELINE,
+            round_key="reflection_round",
         )
 
     builder = StateGraph(TaskReviewWorkflowState)
@@ -131,8 +132,8 @@ def build_task_review_workflow(
         node("persist_review", PersistReviewNode),
     )
     builder.add_node(
-        "finalize_task_review",
-        node("finalize_task_review", lambda: finalize_task_review_node),
+        "finalize_result",
+        node("finalize_result", lambda: finalize_task_review_node),
     )
 
     builder.add_edge(START, "initialize")
@@ -141,7 +142,7 @@ def build_task_review_workflow(
         _route("loading_corpus", "load_task_corpus"),
         {
             "load_task_corpus": "load_task_corpus",
-            "finalize": "finalize_task_review",
+            "finalize": "finalize_result",
         },
     )
     builder.add_conditional_edges(
@@ -149,7 +150,7 @@ def build_task_review_workflow(
         _route("generating_framework", "generate_framework"),
         {
             "generate_framework": "generate_framework",
-            "finalize": "finalize_task_review",
+            "finalize": "finalize_result",
         },
     )
     builder.add_conditional_edges(
@@ -157,7 +158,7 @@ def build_task_review_workflow(
         _route("generating_claims", "generate_claims"),
         {
             "generate_claims": "generate_claims",
-            "finalize": "finalize_task_review",
+            "finalize": "finalize_result",
         },
     )
     builder.add_conditional_edges(
@@ -165,7 +166,7 @@ def build_task_review_workflow(
         _route("retrieving_evidence", "retrieve_evidence"),
         {
             "retrieve_evidence": "retrieve_evidence",
-            "finalize": "finalize_task_review",
+            "finalize": "finalize_result",
         },
     )
     builder.add_conditional_edges(
@@ -173,7 +174,7 @@ def build_task_review_workflow(
         _route("rendering_sections", "render_sections"),
         {
             "render_sections": "render_sections",
-            "finalize": "finalize_task_review",
+            "finalize": "finalize_result",
         },
     )
     builder.add_conditional_edges(
@@ -181,7 +182,7 @@ def build_task_review_workflow(
         _route("assembling_review", "assemble_review"),
         {
             "assemble_review": "assemble_review",
-            "finalize": "finalize_task_review",
+            "finalize": "finalize_result",
         },
     )
     builder.add_conditional_edges(
@@ -189,7 +190,7 @@ def build_task_review_workflow(
         _route("reflecting_review", "reflect_review"),
         {
             "reflect_review": "reflect_review",
-            "finalize": "finalize_task_review",
+            "finalize": "finalize_result",
         },
     )
     builder.add_conditional_edges(
@@ -200,11 +201,11 @@ def build_task_review_workflow(
             "generate_claims": "generate_claims",
             "retrieve_evidence": "retrieve_evidence",
             "render_sections": "render_sections",
-            "finalize": "finalize_task_review",
+            "finalize": "finalize_result",
         },
     )
     builder.add_edge("finalizing_handoff", "persist_review")
-    builder.add_edge("persist_review", "finalize_task_review")
-    builder.add_edge("finalize_task_review", END)
+    builder.add_edge("persist_review", "finalize_result")
+    builder.add_edge("finalize_result", END)
 
     return builder.compile(checkpointer=checkpointer)

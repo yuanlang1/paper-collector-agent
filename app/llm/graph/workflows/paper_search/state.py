@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from typing import Annotated, Any, Literal, TypedDict
 
-from app.llm.subagents.paper_search.contracts import (
-    PaperSearchHandoffState,
-    PaperSearchRequestState,
-)
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
 
 
 SourceName = Literal["arXiv", "DBLP", "Crossref", "Google Scholar"]
@@ -62,8 +60,11 @@ class SourceRunSummary(TypedDict):
 class PaperSearchWorkflowState(TypedDict, total=False):
     conversation_id: str
     run_id: str
-    paper_search_request: PaperSearchRequestState | None
-    paper_search_handoff: PaperSearchHandoffState | None
+    active_tool_call: dict[str, Any] | None
+    messages: Annotated[list[BaseMessage], add_messages]
+    last_action_result: dict[str, Any] | None
+    artifact_refs: list[str]
+    paper_search_source_limits: dict[str, int] | None
     original_prompt: str
     paper_search_constraints: dict[str, Any] | None
 
@@ -119,7 +120,6 @@ class PaperSearchWorkflowState(TypedDict, total=False):
     total_batches: int
 
     progress: dict[str, int]
-   
     stage: PaperSearchStage
     status: PaperSearchStatus
     warnings: list[str]

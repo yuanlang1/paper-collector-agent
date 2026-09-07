@@ -23,14 +23,6 @@ class TimelineStep:
     repeats: bool = False
 
 
-def _paper_round(state: Mapping[str, Any]) -> int:
-    return int(state.get("supplemental_search_round", 0)) + 1
-
-
-def _review_round(state: Mapping[str, Any]) -> int:
-    return int(state.get("reflection_round", 0)) + 1
-
-
 PAPER_SEARCH_TIMELINE = (
     TimelineStep(
         key="prepare",
@@ -104,13 +96,13 @@ PAPER_SEARCH_TIMELINE = (
         key="persist_and_sync",
         label="保存结果与同步任务状态",
         starts_at=frozenset({"create_task"}),
-        completes_at=frozenset({"finalize_handoff"}),
+        completes_at=frozenset({"finalize_result"}),
         nodes=frozenset({
             "create_task",
             "persist",
             "cleanup_downloaded_pdfs",
             "update_task_status",
-            "finalize_handoff",
+            "finalize_result",
         }),
     ),
 )
@@ -175,11 +167,11 @@ TASK_REVIEW_TIMELINE = (
         key="persist_review",
         label="保存综述",
         starts_at=frozenset({"finalizing_handoff"}),
-        completes_at=frozenset({"finalize_task_review"}),
+        completes_at=frozenset({"finalize_result"}),
         nodes=frozenset({
             "finalizing_handoff",
             "persist_review",
-            "finalize_task_review",
+            "finalize_result",
         }),
     ),
 )
@@ -201,12 +193,13 @@ def _event_payload(
     step: TimelineStep,
     state: Mapping[str, Any],
     event_state: str,
+    round_key: str | None,
     error: str | None = None,
 ) -> dict[str, Any]:
     round_number = (
-        _paper_round(state)
-        if workflow == "paper_search"
-        else _review_round(state)
+        int(state.get(round_key, 0)) + 1
+        if round_key
+        else None
     )
     iteration = round_number if step.repeats else None
     label = (
@@ -214,7 +207,7 @@ def _event_payload(
         if iteration is not None
         else step.label
     )
-    suffix = f":{round_number}" if iteration is not None else ""
+    suffix = f":{iteration}" if iteration is not None else ""
 
     return {
         "event": "timeline_step",
@@ -234,6 +227,7 @@ def instrument_timeline_node(
     node_name: str,
     node: Node,
     timeline: tuple[TimelineStep, ...],
+    round_key: str | None = None,
 ) -> Node:
     step = _step_for_node(timeline, node_name)
     if step is None:
@@ -251,6 +245,7 @@ def instrument_timeline_node(
                 step=step,
                 state=state,
                 event_state="started",
+                round_key=round_key,
             ))
 
         try:
@@ -263,6 +258,7 @@ def instrument_timeline_node(
                 step=step,
                 state=state,
                 event_state="failed",
+                round_key=round_key,
                 error=str(exc),
             ))
             raise
@@ -274,6 +270,7 @@ def instrument_timeline_node(
                 step=step,
                 state=state,
                 event_state="failed",
+                round_key=round_key,
                 error=str(error),
             ))
         elif node_name in step.completes_at:
@@ -282,6 +279,7 @@ def instrument_timeline_node(
                 step=step,
                 state=state,
                 event_state="completed",
+                round_key=round_key,
             ))
 
         return result

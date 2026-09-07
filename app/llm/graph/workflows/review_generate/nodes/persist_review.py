@@ -84,11 +84,6 @@ class PersistReviewNode:
         return {
             "review_id": review_id,
             "review_version_number": state.get("review_version_number", 1),
-            "handoff": {
-                "action": "review_saved",
-                "review_id": review_id,
-                "task_id": state["task_id"],
-            },
             "stage": "completed",
             "status": "completed",
             "error": None,

@@ -1,41 +1,41 @@
 from typing import Any, Literal
 
-from app.llm.subagents.registry import ALL_SUBAGENTS, SUBAGENT_BY_NAME
-from app.llm.tools.registry import ToolRegistry, build_tool_registry
+from app.llm.subagents.registry import SubAgentRegistry
+from app.llm.tools.registry import ToolRegistry
 
 
 ToolKind = Literal["tool", "subagent"]
 
 
 def build_native_tool_schemas(
-    tool_registry: ToolRegistry | None = None,
+    tool_registry: ToolRegistry,
+    subagent_registry: SubAgentRegistry,
 ) -> list[dict[str, Any]]:
-    registry = tool_registry or build_tool_registry()
     return [
-        *registry.schemas(),
-        *(subagent.to_api() for subagent in ALL_SUBAGENTS),
+        *tool_registry.schemas(),
+        *(subagent.to_api() for subagent in subagent_registry.all_specs()),
     ]
 
 
 def get_tool_kind(
     name: str,
-    tool_registry: ToolRegistry | None = None,
+    tool_registry: ToolRegistry,
+    subagent_registry: SubAgentRegistry,
 ) -> ToolKind | None:
-    registry = tool_registry or build_tool_registry()
-    if registry.get(name) is not None:
+    if tool_registry.get(name) is not None:
         return "tool"
-    if name in SUBAGENT_BY_NAME:
+    if subagent_registry.get_spec(name) is not None:
         return "subagent"
     return None
 
 
 def requires_confirmation(
     name: str,
-    tool_registry: ToolRegistry | None = None,
+    tool_registry: ToolRegistry,
+    subagent_registry: SubAgentRegistry,
 ) -> bool:
-    registry = tool_registry or build_tool_registry()
-    tool = registry.get(name)
+    tool = tool_registry.get(name)
     if tool is not None:
         return tool.requires_confirmation
-    subagent = SUBAGENT_BY_NAME.get(name)
+    subagent = subagent_registry.get_spec(name)
     return subagent.requires_confirmation if subagent else False

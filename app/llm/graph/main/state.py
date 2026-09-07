@@ -5,16 +5,6 @@ from langgraph.graph.message import add_messages
 
 from app.llm.graph.main.schemas import RunStatus
 from app.memory.schemas import MemoryUsage
-from app.llm.subagents.paper_search.contracts import (
-    PaperSearchHandoffState,
-    PaperSearchRequestState,
-)
-from app.llm.subagents.task_review.contracts import (
-    TaskReviewHandoffState,
-    TaskReviewRequestState,
-)
-
-
 class PendingToolCallState(TypedDict):
     id: str
     name: str
@@ -30,13 +20,7 @@ class MainAgentState(TypedDict):
     llm_profile: dict[str, Any] | None
     memory_llm_profile: dict[str, Any] | None
 
-    paper_search_request: PaperSearchRequestState | None
-    paper_search_handoff: PaperSearchHandoffState | None
-    paper_search_tool_call_id: str | None
     paper_search_source_limits: dict[str, int] | None
-    task_review_request: TaskReviewRequestState | None
-    task_review_handoff: TaskReviewHandoffState | None
-    task_review_tool_call_id: str | None
 
     messages: Annotated[list[BaseMessage], add_messages]
     conversation_window_start_id: str | None

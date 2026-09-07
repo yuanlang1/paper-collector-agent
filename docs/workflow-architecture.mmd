@@ -5,13 +5,15 @@ flowchart TD
     S -->|"tool"| TOOL["tool: 执行原子工具"]
     TOOL --> S
 
-    S -->|"paper_search_agent"| C["confirm: interrupt 后恢复"]
-    C -->|"拒绝"| S
-    C -->|"批准"| PREP["prepare_paper_search: 构造共享请求"]
-    PREP --> PSG["paper_search: 编译后的原生子图节点"]
+    S --> D["dispatch: 取出通用 active_tool_call"]
+    D -->|"需要确认"| C["confirm: interrupt 后恢复"]
+    C -->|"批准"| SUB
+    C -->|"拒绝"| RESULT["统一 ToolMessage + ActionResult"]
+    D -->|"kind = subagent"| SUB["subagent: 从注册表解析并执行"]
+    SUB --> PSG["已注册的论文检索子图"]
 
     subgraph PAPER_SEARCH["论文检索子图: PaperSearchWorkflowState"]
-        PSG --> INIT["initialize: 读取 paper_search_request"]
+        PSG --> INIT["initialize: 读取 active_tool_call.args"]
         INIT --> I["理解意图与构建检索标签"]
         I --> Q["生成多源查询计划"]
         Q --> A["arXiv -> DBLP -> Google Scholar"]
@@ -29,8 +31,8 @@ flowchart TD
         T --> PE["持久化论文与任务关系"]
         PE --> CLEAN["删除本次任务下载的 PDF"]
         CLEAN --> TS["更新任务状态"]
-        TS --> H["finalize_handoff: 写入共享结果"]
+        TS --> H["finalize_result: 写入统一工具结果"]
     end
 
-    H --> COMPLETE["complete_paper_search: 转为 ActionResult"]
-    COMPLETE --> S
+    H --> RESULT
+    RESULT --> D

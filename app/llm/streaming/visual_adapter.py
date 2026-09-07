@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.llm.subagents.registry import SubAgentRegistry, SubAgentRuntime
 from app.llm.streaming.utils import (
     to_jsonable,
 )
@@ -12,68 +13,12 @@ StreamEvent = tuple[
     dict[str, Any],
 ]
 
-PAPER_SEARCH_PHASES = (
-    ("prepare", "准备检索"),
-    ("plan", "生成检索计划"),
-    ("search", "多来源检索"),
-    ("filter", "清洗与质量审核"),
-    ("enrich", "论文信息补充"),
-    ("recommend", "论文推荐"),
-    ("persist", "保存与清理"),
-    ("finalize", "同步任务状态"),
-)
-
-PAPER_SEARCH_NODE_PHASE = {
-    "initialize": "prepare",
-    "intent_understanding": "prepare",
-    "build_search_tag": "prepare",
-    "confirm": "prepare",
-    "create_task": "persist",
-    "generate_queries": "plan",
-    "search_arxiv": "search",
-    "search_dblp": "search",
-    "search_google": "search",
-    "finalize_source_search": "search",
-    "filter": "filter",
-    "search_review": "filter",
-    "supplemental_search": "filter",
-    "enrich": "enrich",
-    "crossref_enrich": "enrich",
-    "venue": "enrich",
-    "download_pdf": "enrich",
-    "abstract_enrich": "enrich",
-    "recommend": "recommend",
-    "persist": "persist",
-    "cleanup_downloaded_pdfs": "persist",
-    "update_task_status": "finalize",
-    "finalize_handoff": "finalize",
-}
-
-TASK_REVIEW_PHASES = (
-    ("prepare", "初始化与语料校验"),
-    ("framework", "生成综述框架"),
-    ("claims", "生成论点"),
-    ("evidence", "检索证据"),
-    ("render", "撰写章节"),
-    ("review", "反思与修订"),
-    ("finalize", "生成最终综述"),
-)
-
-TASK_REVIEW_NODE_PHASE = {
-    "initialize": "prepare",
-    "load_task_corpus": "prepare",
-    "generate_framework": "framework",
-    "generate_claims": "claims",
-    "retrieve_evidence": "evidence",
-    "render_sections": "render",
-    "assemble_review": "render",
-    "reflect_review": "review",
-    "finalizing_handoff": "finalize",
-    "finalize_task_review": "finalize",
-}
-
 class AgentStreamAdapter:
-    def __init__(self):
+    def __init__(
+        self,
+        subagent_registry: SubAgentRegistry | None = None,
+    ):
+        self.subagent_registry = subagent_registry
         self._seen_action_starts: set[str] = set()
         self._seen_action_results: set[str] = set()
 
@@ -113,15 +58,7 @@ class AgentStreamAdapter:
                                     "requires_confirmation"
                                 )
                             ),
-                            "workflow": (
-                                "paper_search"
-                                if action_name == "paper_search_agent"
-                                else (
-                                    "task_review"
-                                    if action_name == "task_review_agent"
-                                    else None
-                                )
-                            ),
+                            "workflow": self._workflow_for(action_name),
                         },
                     )
                 )
@@ -200,26 +137,19 @@ class AgentStreamAdapter:
             },
         )
 
-    @staticmethod
     def subagent_progress(
+        self,
         *,
-        subagent: str,
+        runtime: SubAgentRuntime,
         action_id: str | None,
         child_thread_id: str,
         checkpoint_namespace: str,
         node_name: str,
         update: dict[str, Any],
-        workflow: str = "paper_search",
     ) -> StreamEvent:
-        phases, node_phases = (
-            (TASK_REVIEW_PHASES, TASK_REVIEW_NODE_PHASE)
-            if workflow == "task_review"
-            else (PAPER_SEARCH_PHASES, PAPER_SEARCH_NODE_PHASE)
-        )
-        phase_key = node_phases.get(
-            node_name,
-            "prepare",
-        )
+        stream = runtime.stream
+        phases = stream.phases
+        phase_key = stream.node_phases.get(node_name, phases[0][0])
         phase_index = next(
             (
                 index
@@ -233,7 +163,21 @@ class AgentStreamAdapter:
         )
         phase_label = dict(phases)[phase_key]
         stage = update.get("stage")
-        terminal = node_name in {"finalize_handoff", "finalize_task_review"}
+        terminal = node_name in stream.terminal_nodes
+        iteration = None
+        if stream.iteration_key:
+            try:
+                iteration = int(update.get(stream.iteration_key, 0)) + 1
+            except (TypeError, ValueError):
+                iteration = 1
+        task_id = next(
+            (
+                update.get(key)
+                for key in stream.task_id_keys
+                if update.get(key) is not None
+            ),
+            None,
+        )
         progress_percent = (
             100
             if terminal
@@ -245,8 +189,8 @@ class AgentStreamAdapter:
         return (
             "subagent_progress",
             {
-                "subagent": subagent,
-                "workflow": workflow,
+                "subagent": runtime.spec.name,
+                "workflow": stream.workflow,
                 "delegation_id": action_id,
                 "child_thread_id": child_thread_id,
                 "checkpoint_namespace": checkpoint_namespace,
@@ -257,7 +201,7 @@ class AgentStreamAdapter:
                 "phase_count": len(phases),
                 "progress_percent": progress_percent,
                 "terminal": terminal,
-                "task_id": update.get("paper_service_task_id") or update.get("task_id"),
+                "task_id": task_id,
                 "stage": stage,
                 "status": update.get("status"),
                 "progress": to_jsonable(update.get("progress") or {}),
@@ -277,16 +221,18 @@ class AgentStreamAdapter:
                     "supplemental_search_round",
                     0,
                 ),
-                "iteration": (
-                    int(update.get("reflection_round", 0)) + 1
-                    if workflow == "task_review"
-                    else int(update.get("supplemental_search_round", 0)) + 1
-                ),
+                "iteration": iteration,
                 "source_stats": to_jsonable(
                     update.get("source_search_stats") or {}
                 ),
             },
         )
+
+    def _workflow_for(self, action_name: Any) -> str | None:
+        if self.subagent_registry is None:
+            return None
+        runtime = self.subagent_registry.get_runtime(str(action_name or ""))
+        return runtime.stream.workflow if runtime else None
 
     @staticmethod
     def _result_payload(

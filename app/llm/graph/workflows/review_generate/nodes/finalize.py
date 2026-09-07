@@ -3,29 +3,31 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from app.llm.subagents.task_review.contracts import TaskReviewHandoff
+from app.llm.graph.action_result import build_action_result_update
 
 
 async def finalize_task_review_node(
     state: Mapping[str, Any],
 ) -> dict[str, Any]:
+    call = state.get("active_tool_call")
+    if not isinstance(call, Mapping):
+        raise RuntimeError("task review finalized without an active tool call")
+
     stage = state["stage"]
     final_review_artifact_ref = state.get("final_review_artifact_ref")
-    reflection_report_artifact_ref = state.get(
-        "reflection_report_artifact_ref"
-    )
+    reflection_report_artifact_ref = state.get("reflection_report_artifact_ref")
 
     if stage == "completed":
-        handoff = TaskReviewHandoff(
-            status="success",
-            summary="学术综述已生成并通过反思审核。",
-            data={
+        result = {
+            "status": "success",
+            "summary": "学术综述已生成并通过反思审核。",
+            "data": {
                 "task_id": state["task_id"],
                 "final_review_artifact_ref": final_review_artifact_ref,
                 "review_id": state.get("review_id"),
                 "version_number": state.get("review_version_number"),
             },
-            artifact_refs=[
+            "artifact_refs": [
                 artifact_ref
                 for artifact_ref in [
                     final_review_artifact_ref,
@@ -33,32 +35,33 @@ async def finalize_task_review_node(
                 ]
                 if artifact_ref
             ],
-            retryable=False,
-        )
+            "retryable": False,
+            "error_code": None,
+            "error_message": None,
+        }
     elif stage == "blocked":
-        handoff = TaskReviewHandoff(
-            status="error",
-            summary="RAG 尚未完成，暂时无法生成综述。",
-            data={"task_id": state.get("task_id")},
-            artifact_refs=[],
-            retryable=True,
-            error_code="RAG_NOT_READY",
-        )
+        result = {
+            "status": "error",
+            "summary": "RAG 尚未完成，暂时无法生成综述。",
+            "data": {"task_id": state.get("task_id")},
+            "artifact_refs": [],
+            "retryable": True,
+            "error_code": "RAG_NOT_READY",
+            "error_message": None,
+        }
     else:
-        handoff = TaskReviewHandoff(
-            status="error",
-            summary="学术综述未能完成。",
-            data={"task_id": state.get("task_id")},
-            artifact_refs=[
+        result = {
+            "status": "error",
+            "summary": "学术综述未能完成。",
+            "data": {"task_id": state.get("task_id")},
+            "artifact_refs": [
                 artifact_ref
                 for artifact_ref in [reflection_report_artifact_ref]
                 if artifact_ref
             ],
-            retryable=False,
-            error_code=stage,
-            error_message=state.get("error"),
-        )
+            "retryable": False,
+            "error_code": stage,
+            "error_message": state.get("error"),
+        }
 
-    return {
-        "task_review_handoff": handoff.model_dump(mode="json"),
-    }
+    return build_action_result_update(call=call, **result)

@@ -43,7 +43,7 @@ def _route_paths(target: str) -> dict[str, str]:
     return {
         target: target,
         "cleanup_downloaded_pdfs": "cleanup_downloaded_pdfs",
-        "finalize_handoff": "finalize_handoff",
+        "finalize_result": "finalize_result",
     }
 
 
@@ -72,7 +72,7 @@ def _terminal_target(state: PaperSearchWorkflowState) -> str:
         )
     ):
         return "cleanup_downloaded_pdfs"
-    return "finalize_handoff"
+    return "finalize_result"
 
 
 def _route_after_search_review(state: PaperSearchWorkflowState) -> str:
@@ -109,6 +109,7 @@ def build_paper_search_workflow(
             node_name=name,
             node=node_overrides.get(name, default),
             timeline=PAPER_SEARCH_TIMELINE,
+            round_key="supplemental_search_round",
         )
 
     builder = StateGraph(PaperSearchWorkflowState)
@@ -167,8 +168,8 @@ def build_paper_search_workflow(
         ),
     )
     builder.add_node(
-        "finalize_handoff",
-        node("finalize_handoff", finalize_paper_search_node),
+        "finalize_result",
+        node("finalize_result", finalize_paper_search_node),
     )
     builder.add_edge(START, "initialize")
     builder.add_conditional_edges(
@@ -223,7 +224,7 @@ def build_paper_search_workflow(
             "supplemental_search": "supplemental_search",
             "enrich": "enrich",
             "cleanup_downloaded_pdfs": "cleanup_downloaded_pdfs",
-            "finalize_handoff": "finalize_handoff",
+            "finalize_result": "finalize_result",
         },
     )
     builder.add_conditional_edges(
@@ -233,7 +234,7 @@ def build_paper_search_workflow(
             "search_arxiv": "search_arxiv",
             "enrich": "enrich",
             "cleanup_downloaded_pdfs": "cleanup_downloaded_pdfs",
-            "finalize_handoff": "finalize_handoff",
+            "finalize_result": "finalize_result",
         },
     )
     builder.add_conditional_edges(
@@ -273,6 +274,6 @@ def build_paper_search_workflow(
     )
     builder.add_edge("persist", "cleanup_downloaded_pdfs")
     builder.add_edge("cleanup_downloaded_pdfs", "update_task_status")
-    builder.add_edge("update_task_status", "finalize_handoff")
-    builder.add_edge("finalize_handoff", END)
+    builder.add_edge("update_task_status", "finalize_result")
+    builder.add_edge("finalize_result", END)
     return builder.compile(checkpointer=checkpointer)

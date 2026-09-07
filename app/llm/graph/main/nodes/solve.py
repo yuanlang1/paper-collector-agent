@@ -8,7 +8,8 @@ from app.llm.graph.main.native_tools import get_tool_kind, requires_confirmation
 from app.llm.graph.main.state import MainAgentState
 from app.llm.streaming.tool_event import emit_custom_event
 from app.llm.streaming.utils import content_to_text
-from app.llm.tools.registry import ToolRegistry, build_tool_registry
+from app.llm.subagents.registry import SubAgentRegistry
+from app.llm.tools.registry import ToolRegistry
 
 
 class SolveNode:
@@ -16,10 +17,12 @@ class SolveNode:
         self,
         *,
         model: Any,
-        tool_registry: ToolRegistry | None = None,
+        tool_registry: ToolRegistry,
+        subagent_registry: SubAgentRegistry,
     ) -> None:
         self.model = model
-        self.tool_registry = tool_registry or build_tool_registry()
+        self.tool_registry = tool_registry
+        self.subagent_registry = subagent_registry
 
     async def __call__(self, state: MainAgentState) -> dict:
         chunks = []
@@ -106,10 +109,12 @@ class SolveNode:
                     "kind": get_tool_kind(
                         call["name"],
                         self.tool_registry,
+                        self.subagent_registry,
                     ),
                     "requires_confirmation": requires_confirmation(
                         call["name"],
                         self.tool_registry,
+                        self.subagent_registry,
                     ),
                 }
                 for call in assistant.tool_calls

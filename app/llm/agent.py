@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from dataclasses import dataclass
 import logging
 from typing import Any
 
@@ -11,8 +12,6 @@ from app.llm.graph.main.workflow import build_main_agent_workflow
 from app.llm.graph.workflows.paper_search.nodes.generate_queries import (
     BuildSourceQueryPlanNode,
 )
-from app.llm.graph.workflows.paper_search.workflow import build_paper_search_workflow
-from app.llm.graph.workflows.review_generate.workflow import build_task_review_workflow
 from app.llm.model_factory import create_chat_model, use_llm_runtime_config
 from app.llm.tool_adapter import to_openai_tool_schemas
 from app.llm.tools.registry import build_tool_registry
@@ -25,13 +24,13 @@ from app.llm.streaming.utils import (
     extract_interrupt_payload,
     to_jsonable,
 )
-from app.llm.subagents.registry import ALL_SUBAGENTS, SubAgentRegistry
+from app.llm.subagents.registry import (
+    SubAgentRegistry,
+    SubAgentRuntime,
+    build_default_subagent_registry,
+)
 from app.runtime.session import Session
 from app.runtime.system_context import SystemContextBuilder
-from app.services.setting_service import (
-    default_source_limits,
-    source_pagination_settings,
-)
 
 
 logger = logging.getLogger(__name__)
@@ -43,25 +42,10 @@ TerminalCallback = Callable[
 ]
 
 
-def _source_query_plan_node(model: Any):
-    async def generate_queries(state: Mapping[str, Any]) -> dict[str, Any]:
-        source_limits = state.get("paper_search_source_limits")
-        try:
-            pagination_settings = source_pagination_settings(
-                source_limits or default_source_limits()
-            )
-        except (TypeError, ValueError) as exc:
-            return {
-                "stage": "blocked",
-                "status": "blocked",
-                "error": f"论文检索来源数量配置无效：{exc}",
-            }
-        return await BuildSourceQueryPlanNode(
-            model=model,
-            pagination_settings=pagination_settings,
-        )(state)
-
-    return generate_queries
+@dataclass(frozen=True)
+class _SubagentStreamContext:
+    action_id: str
+    runtime: SubAgentRuntime
 
 
 class AgentService:
@@ -75,15 +59,23 @@ class AgentService:
         self.checkpointer = checkpointer
         self.llm_config = llm_config
         self.memory_llm_config = memory_llm_config
-        self.subagent_registry = subagent_registry or SubAgentRegistry(ALL_SUBAGENTS)
         self.tool_registry = build_tool_registry()
         with use_llm_runtime_config(llm_config):
+            if subagent_registry is None:
+                source_query_plan_node = BuildSourceQueryPlanNode()
+                self.subagent_registry = build_default_subagent_registry(
+                    source_query_plan_model=source_query_plan_node.model,
+                )
+            else:
+                self.subagent_registry = subagent_registry
             model = create_chat_model(temperature=0).bind_tools(
                 to_openai_tool_schemas(
-                    build_native_tool_schemas(self.tool_registry)
+                    build_native_tool_schemas(
+                        self.tool_registry,
+                        self.subagent_registry,
+                    )
                 )
             )
-            source_query_plan_node = BuildSourceQueryPlanNode()
             self.graph = build_main_agent_workflow(
                 memory_node=MemoryNode(
                     db_factory=SessionLocal,
@@ -91,16 +83,12 @@ class AgentService:
                     llm_config=llm_config,
                     memory_llm_config=memory_llm_config,
                 ),
-                solve_node=SolveNode(model=model, tool_registry=self.tool_registry),
-                paper_search_graph=build_paper_search_workflow(
-                    skip_confirmation=True,
-                    node_overrides={
-                        "generate_queries": _source_query_plan_node(
-                            source_query_plan_node.model,
-                        )
-                    },
+                solve_node=SolveNode(
+                    model=model,
+                    tool_registry=self.tool_registry,
+                    subagent_registry=self.subagent_registry,
                 ),
-                task_review_graph=build_task_review_workflow(),
+                subagent_registry=self.subagent_registry,
                 tool_registry=self.tool_registry,
                 checkpointer=self.checkpointer,
             )
@@ -125,21 +113,62 @@ class AgentService:
         *,
         on_terminal: TerminalCallback | None = None,
     ) -> AsyncIterator[str]:
-        adapter = AgentStreamAdapter()
+        adapter = AgentStreamAdapter(self.subagent_registry)
         card_meta = CardMetaAccumulator(
             model=(getattr(self, "llm_config", None).model if getattr(self, "llm_config", None) else settings.OPENAI_MODEL),
             provider=(getattr(self, "llm_config", None).provider if getattr(self, "llm_config", None) else getattr(settings, "LLM_PROVIDER", None)),
         )
         latest_root_state: dict[str, Any] = {}
-        paper_search_tool_call_id: str | None = None
-        paper_search_states: dict[str, dict[str, Any]] = {}
-        task_review_tool_call_id: str | None = None
-        task_review_states: dict[str, dict[str, Any]] = {}
+        active_subagent_context: _SubagentStreamContext | None = None
+        subagent_context_by_namespace: dict[
+            str,
+            _SubagentStreamContext,
+        ] = {}
+        subagent_states: dict[str, dict[str, Any]] = {}
 
         def emit(event: str, data: dict[str, Any]) -> str:
             envelope = session.build_sse_envelope(event, data)
             card_meta.observe(envelope)
             return session.encode_sse_envelope(envelope)
+
+        def checkpoint_namespace(
+            namespace: tuple[Any, ...],
+        ) -> str | None:
+            return next(
+                (
+                    str(item)
+                    for item in namespace
+                    if str(item).split(":", 1)[0] == "subagent"
+                ),
+                None,
+            )
+
+        def subagent_context(
+            namespace: tuple[Any, ...],
+            *,
+            workflow: str | None = None,
+        ) -> tuple[str, _SubagentStreamContext] | None:
+            key = checkpoint_namespace(namespace)
+            if key is None:
+                return None
+
+            existing = subagent_context_by_namespace.get(key)
+            if existing is not None:
+                return key, existing
+
+            runtime = self.subagent_registry.get_by_stream_workflow(workflow)
+            if runtime is None and active_subagent_context is not None:
+                runtime = active_subagent_context.runtime
+            if (
+                runtime is None
+                or active_subagent_context is None
+                or runtime.spec.name
+                != active_subagent_context.runtime.spec.name
+            ):
+                return None
+
+            subagent_context_by_namespace[key] = active_subagent_context
+            return key, active_subagent_context
 
         try:
             yield emit("run_started", {"status": "running"})
@@ -168,42 +197,20 @@ class AgentService:
                     for event_name, payload in adapter.handle_custom(chunk):
                         timeline_context: dict[str, Any] = {}
                         if event_name == "timeline_step":
-                            workflow = payload.get("workflow")
-                            if workflow == "paper_search":
+                            context = subagent_context(
+                                namespace,
+                                workflow=str(payload.get("workflow") or ""),
+                            )
+                            if context is not None:
+                                child_namespace, child_context = context
                                 timeline_context = {
-                                    "delegation_id": paper_search_tool_call_id,
+                                    "delegation_id": child_context.action_id,
                                     "child_thread_id": (
-                                        f"{session.conversation_id}:paper_search_agent:"
-                                        f"{paper_search_tool_call_id}"
-                                        if paper_search_tool_call_id is not None
-                                        else next(
-                                            (
-                                                str(item)
-                                                for item in namespace
-                                                if str(item).split(":", 1)[0]
-                                                == "paper_search"
-                                            ),
-                                            None,
-                                        )
+                                        f"{session.conversation_id}:"
+                                        f"{child_context.runtime.spec.name}:"
+                                        f"{child_context.action_id}"
                                     ),
-                                }
-                            elif workflow == "task_review":
-                                timeline_context = {
-                                    "delegation_id": task_review_tool_call_id,
-                                    "child_thread_id": (
-                                        f"{session.conversation_id}:task_review_agent:"
-                                        f"{task_review_tool_call_id}"
-                                        if task_review_tool_call_id is not None
-                                        else next(
-                                            (
-                                                str(item)
-                                                for item in namespace
-                                                if str(item).split(":", 1)[0]
-                                                == "task_review"
-                                            ),
-                                            None,
-                                        )
-                                    ),
+                                    "checkpoint_namespace": child_namespace,
                                 }
                         yield emit(
                             event_name,
@@ -253,75 +260,49 @@ class AgentService:
 
                     if not namespace:
                         latest_root_state.update(update)
-                        if node_name == "prepare_paper_search":
-                            action_id = update.get("paper_search_tool_call_id")
-                            if action_id is not None:
-                                paper_search_tool_call_id = str(action_id)
-                        if node_name == "prepare_task_review":
-                            action_id = update.get("task_review_tool_call_id")
-                            if action_id is not None:
-                                task_review_tool_call_id = str(action_id)
+                        if node_name == "dispatch":
+                            active_call = update.get("active_tool_call")
+                            if (
+                                isinstance(active_call, Mapping)
+                                and active_call.get("kind") == "subagent"
+                            ):
+                                action_id = active_call.get("id")
+                                runtime = self.subagent_registry.get_runtime(
+                                    str(active_call.get("name") or ""),
+                                )
+                                if action_id is not None and runtime is not None:
+                                    active_subagent_context = (
+                                        _SubagentStreamContext(
+                                            action_id=str(action_id),
+                                            runtime=runtime,
+                                        )
+                                    )
+                        elif node_name == "subagent":
+                            result = update.get("last_action_result")
+                            if (
+                                isinstance(result, Mapping)
+                                and active_subagent_context is not None
+                                and str(result.get("action_id") or "")
+                                == active_subagent_context.action_id
+                            ):
+                                active_subagent_context = None
 
-                    paper_search_namespace = next(
-                        (
-                            str(item)
-                            for item in namespace
-                            if str(item).split(":", 1)[0] == "paper_search"
-                        ),
-                        None,
-                    )
-                    if paper_search_namespace is not None:
-                        state = paper_search_states.setdefault(
-                            paper_search_namespace,
-                            {},
-                        )
+                    context = subagent_context(namespace)
+                    if context is not None:
+                        child_namespace, child_context = context
+                        state = subagent_states.setdefault(child_namespace, {})
                         state.update(update)
                         event_name, payload = adapter.subagent_progress(
-                            subagent="paper_search_agent",
-                            action_id=paper_search_tool_call_id,
+                            runtime=child_context.runtime,
+                            action_id=child_context.action_id,
                             child_thread_id=(
-                                f"{session.conversation_id}:paper_search_agent:"
-                                f"{paper_search_tool_call_id}"
-                                if paper_search_tool_call_id is not None
-                                else paper_search_namespace
+                                f"{session.conversation_id}:"
+                                f"{child_context.runtime.spec.name}:"
+                                f"{child_context.action_id}"
                             ),
-                            checkpoint_namespace=paper_search_namespace,
+                            checkpoint_namespace=child_namespace,
                             node_name=node_name,
                             update=state,
-                            workflow="paper_search",
-                        )
-                        yield emit(
-                            event_name,
-                            {**payload, "namespace": list(namespace)},
-                        )
-
-                    task_review_namespace = next(
-                        (
-                            str(item)
-                            for item in namespace
-                            if str(item).split(":", 1)[0] == "task_review"
-                        ),
-                        None,
-                    )
-                    if task_review_namespace is not None:
-                        state = task_review_states.setdefault(
-                            task_review_namespace,
-                            {},
-                        )
-                        state.update(update)
-                        event_name, payload = adapter.subagent_progress(
-                            subagent="task_review_agent",
-                            action_id=task_review_tool_call_id,
-                            child_thread_id=(
-                                f"{session.conversation_id}:task_review_agent:"
-                                f"{task_review_tool_call_id}"
-                                if task_review_tool_call_id is not None
-                                else task_review_namespace
-                            ),
-                            checkpoint_namespace=task_review_namespace,
-                            node_name=node_name,
-                            update=state,
-                            workflow="task_review",
                         )
                         yield emit(
                             event_name,

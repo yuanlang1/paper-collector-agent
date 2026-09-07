@@ -119,8 +119,13 @@ type PaperSearchView = {
 }
 ```
 
-以 `delegation_id` 作为检索卡片主键；若其暂时为空，可在收到
-`prepare_paper_search` 之后使用服务端返回的 `child_thread_id`。
+以 `delegation_id` 作为检索卡片主键；它来自根图 `dispatch` 输出的
+`active_tool_call.id`。主图通过通用 `subagent` 节点执行已注册子图，后端会把
+该调用 ID 绑定到实际 checkpoint namespace；因此 `timeline_step`、
+`subagent_progress` 与 `action_result` 可关联到同一个调用。
+
+论文检索的 `workflow`、阶段和节点映射由论文检索子图的运行时注册项提供。新增
+其他子图时，应在其自身注册项定义对应阶段，不应在主图或 SSE 分发代码新增名称分支。
 
 ## 页面呈现建议
 
@@ -137,7 +142,7 @@ type PaperSearchView = {
 
 收到 `task_id` 后展示远程任务编号。收到 `task_status_update_error` 时，应显示
 “检索结果已生成，但远程任务状态同步失败”，不能把它展示为完全成功。
-`terminal` 仅在 `finalize_handoff` 节点为 `true`；`persist` 返回终态结果时仍需
+`terminal` 仅在 `finalize_result` 节点为 `true`；`persist` 返回终态结果时仍需
 等待 PDF 清理和远程任务状态同步。
 
 `run_completed` 表示主图已完成，不代表远程 task-service 一定同步成功；最终仍应
