@@ -4,8 +4,8 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.runnables.config import set_config_context
 from langgraph.types import interrupt
 
-from app.llm.graph.action_result import build_action_result_update
 from app.llm.graph.main.state import MainAgentState
+from app.llm.graph.main.nodes.tool import build_action_result_update
 from app.llm.subagents.registry import SubAgentRegistry
 
 

@@ -48,6 +48,21 @@ class _SubagentStreamContext:
     runtime: SubAgentRuntime
 
 
+def _subagent_checkpoint_namespace(
+    namespace: tuple[Any, ...],
+    subagent_registry: SubAgentRegistry,
+) -> str | None:
+    for item in namespace:
+        value = str(item)
+        workflow = value.split(":", 1)[0]
+        if (
+            workflow == "subagent"
+            or subagent_registry.get_by_stream_workflow(workflow) is not None
+        ):
+            return value
+    return None
+
+
 class AgentService:
     def __init__(
         self,
@@ -131,24 +146,15 @@ class AgentService:
             card_meta.observe(envelope)
             return session.encode_sse_envelope(envelope)
 
-        def checkpoint_namespace(
-            namespace: tuple[Any, ...],
-        ) -> str | None:
-            return next(
-                (
-                    str(item)
-                    for item in namespace
-                    if str(item).split(":", 1)[0] == "subagent"
-                ),
-                None,
-            )
-
         def subagent_context(
             namespace: tuple[Any, ...],
             *,
             workflow: str | None = None,
         ) -> tuple[str, _SubagentStreamContext] | None:
-            key = checkpoint_namespace(namespace)
+            key = _subagent_checkpoint_namespace(
+                namespace,
+                self.subagent_registry,
+            )
             if key is None:
                 return None
 

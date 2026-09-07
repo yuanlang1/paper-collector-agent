@@ -28,6 +28,7 @@ async def get_task_rag_status_handler(
         result["task_status"].lower() == "rag_completed"
         and not counts["pending"]
         and not counts["indexing"]
+        and not counts["failed"]
     )
 
     return {

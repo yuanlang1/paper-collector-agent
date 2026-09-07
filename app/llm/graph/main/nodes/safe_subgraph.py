@@ -7,7 +7,7 @@ from typing import Any
 from langchain_core.runnables import RunnableConfig
 from langgraph.errors import GraphInterrupt
 
-from app.llm.graph.action_result import build_action_result_update
+from app.llm.graph.main.nodes.tool import build_action_result_update
 from app.llm.subagents.registry import SubAgentRegistry
 
 logger = logging.getLogger(__name__)

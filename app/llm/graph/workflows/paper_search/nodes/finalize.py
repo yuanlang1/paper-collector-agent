@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from app.llm.graph.action_result import build_action_result_update
+from app.llm.graph.main.nodes.tool import build_action_result_update
 
 
 async def finalize_paper_search_node(

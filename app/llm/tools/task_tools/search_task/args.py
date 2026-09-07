@@ -253,7 +253,21 @@ class StartTaskRagArgs(BaseModel):
     taskId: int = Field(
         ...,
         gt=0,
-        description="要启动 RAG 流程的检索任务 ID；任务状态必须为 SEARCH_COMPLETED。",
+        description="要启动或等待 RAG 流程的检索任务 ID。",
+    )
+
+    poll_interval_seconds: int = Field(
+        default=5,
+        ge=1,
+        le=60,
+        description="RAG 索引状态轮询间隔，单位为秒。",
+    )
+
+    timeout_seconds: int = Field(
+        default=900,
+        ge=1,
+        le=3_600,
+        description="等待 RAG 索引完成的最长时间，单位为秒。",
     )
 
 
@@ -263,5 +277,19 @@ class StartTaskRagArgs(BaseModel):
     taskId: int = Field(
         ...,
         gt=0,
-        description="要启动 RAG 流程的检索任务 ID；任务状态必须为 SEARCH_COMPLETED。",
+        description="要启动或等待 RAG 流程的检索任务 ID。",
+    )
+
+    poll_interval_seconds: int = Field(
+        default=5,
+        ge=1,
+        le=60,
+        description="RAG 索引状态轮询间隔，单位为秒。",
+    )
+
+    timeout_seconds: int = Field(
+        default=900,
+        ge=1,
+        le=3_600,
+        description="等待 RAG 索引完成的最长时间，单位为秒。",
     )
