@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from app.llm.subagents.paper_search.contracts import PaperSearchDelegation
+from app.llm.subagents.paper_search import PaperSearchDelegation
 
 
 async def initialize_paper_search_node(

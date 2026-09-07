@@ -1,5 +1,35 @@
 # paper-collector-agent
 
+## 在 Docker 中运行 Nacos
+
+项目仅通过 Nacos 做服务注册与发现，当前 `.env` 的
+`NACOS_SERVER_ADDR="127.0.0.1:8848"` 可保持不变。根目录的
+`compose.nacos.yml` 使用与本机安装一致的 Nacos `3.2.0` 单机 Derby
+模式；数据和日志存放在 Docker 命名卷中，重建容器不会丢失。
+
+在 PowerShell 中启动：
+
+```powershell
+docker compose -f compose.nacos.yml up -d
+```
+
+随后可访问 [Nacos 控制台](http://127.0.0.1:8080/)，或使用以下命令检查容器：
+
+```powershell
+docker compose -f compose.nacos.yml ps
+docker compose -f compose.nacos.yml logs -f nacos
+```
+
+该配置保持本机 Nacos 的 `NACOS_AUTH_ENABLE=false`。它只适用于本机开发；若将端口暴露到非受信任网络，应先启用认证，并替换 Compose 中的三个 `NACOS_AUTH_*` 值及限制端口访问范围。
+
+停止服务时保留数据：
+
+```powershell
+docker compose -f compose.nacos.yml down
+```
+
+若要连同 Nacos 的 Docker 数据一并移除，执行 `docker compose -f compose.nacos.yml down -v`。
+
 ## 安装 Python 依赖
 
 本项目以 Python 3.11 为基准。请使用锁定文件安装完整的直接与传递依赖：

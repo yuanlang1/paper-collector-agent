@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from app.llm.subagents.task_review.contracts import TaskReviewDelegation
+from app.llm.subagents.task_review import TaskReviewDelegation
 
 
 def _initialization_failed(error: str) -> dict[str, Any]:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import BaseModel
@@ -35,6 +35,7 @@ class SubAgentStreamSpec:
         "task_id",
     )
     terminal_nodes: frozenset[str] = frozenset({"finalize_result"})
+    detail_state_keys: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -106,10 +107,8 @@ def build_default_subagent_registry(
     *,
     source_query_plan_model: Any,
 ) -> SubAgentRegistry:
-    from app.llm.subagents.paper_search.runtime import (
-        build_paper_search_runtime,
-    )
-    from app.llm.subagents.task_review.runtime import build_task_review_runtime
+    from app.llm.subagents.paper_search import build_paper_search_runtime
+    from app.llm.subagents.task_review import build_task_review_runtime
 
     return SubAgentRegistry(
         (

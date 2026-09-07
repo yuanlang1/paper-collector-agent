@@ -13,18 +13,14 @@ Content-Type: application/json
 Accept: text/event-stream
 
 {
-  "message": "检索 RAG evaluation 相关论文",
-  "conversation_id": "conv-123",
-  "subagent": {
-    "name": "paper_search_agent",
-    "constraints": {
-      "year_from": 2023,
-      "year_to": 2026,
-      "sources": ["arXiv", "DBLP"]
-    }
-  }
+  "message": "检索 2023 至 2026 年 arXiv 和 DBLP 中的 RAG evaluation 相关论文",
+  "conversation_id": "conv-123"
 }
 ```
+
+该接口当前只接受 `message`、`conversation_id` 与 `llm_profile_id`。模型根据
+自然语言选择已注册子代理；请求体不支持 `subagent` 或 `constraints`，传入它们会
+被 Pydantic 忽略，不能用于强制指定子代理或约束条件。
 
 由于接口使用 POST，浏览器原生 `EventSource` 不能直接使用。前端可以使用
 支持 POST 的 SSE 客户端，或者基于 `fetch()` 的 `ReadableStream` 解析 SSE。
@@ -78,16 +74,21 @@ run_completed | run_failed
     "task_created": 1,
     "discovered": 25
   },
-  "source_stats": {},
-  "supplemental_search_round": 0,
+  "iteration": 1,
+  "details": {
+    "source_stats": {},
+    "task_status_update_error": null,
+    "pdf_cleanup_error": null,
+    "degraded": false,
+    "remote_task_state": "SEARCH_RUNNING"
+  },
   "warnings": [],
-  "error": null,
-  "task_status_update_error": null,
-  "pdf_cleanup_error": null,
-  "degraded": false,
-  "remote_task_state": "SEARCH_RUNNING"
+  "error": null
 }
 ```
+
+`details` 只包含该子代理注册并且当前状态已提供的专属字段；其他子代理不会收到
+论文检索专属的空值或默认值。
 
 同一个 `checkpoint_namespace` 的事件已经是后端累积后的子图快照。前端可以直接
 使用最新事件替换对应检索卡片，不需要自行拼接各节点的增量字段。
@@ -107,14 +108,10 @@ type PaperSearchView = {
   stage: string | null
   status: string | null
   progress: Record<string, number>
-  sourceStats: Record<string, unknown>
-  supplementalSearchRound: number
+  iteration: number | null
+  details: Record<string, unknown>
   warnings: string[]
   error: string | null
-  taskStatusUpdateError: string | null
-  pdfCleanupError: string | null
-  degraded: boolean
-  remoteTaskState: string | null
   terminal: boolean
 }
 ```
@@ -140,13 +137,14 @@ type PaperSearchView = {
 7. 保存与清理
 8. 同步任务状态
 
-收到 `task_id` 后展示远程任务编号。收到 `task_status_update_error` 时，应显示
+收到 `task_id` 后展示远程任务编号。收到
+`details.task_status_update_error` 时，应显示
 “检索结果已生成，但远程任务状态同步失败”，不能把它展示为完全成功。
 `terminal` 仅在 `finalize_result` 节点为 `true`；`persist` 返回终态结果时仍需
 等待 PDF 清理和远程任务状态同步。
 
 `run_completed` 表示主图已完成，不代表远程 task-service 一定同步成功；最终仍应
-检查最近一次 `subagent_progress.task_status_update_error` 和
+检查最近一次 `subagent_progress.details.task_status_update_error` 和
 `action_result.status`。
 
 ## TypeScript 消费示例
@@ -165,12 +163,8 @@ await fetchEventSource("/api/agent/chat/stream", {
     Accept: "text/event-stream",
   },
   body: JSON.stringify({
-    message: "检索 RAG evaluation 相关论文",
+    message: "检索 2023 至 2026 年 arXiv 和 DBLP 中的 RAG evaluation 相关论文",
     conversation_id: "conv-123",
-    subagent: {
-      name: "paper_search_agent",
-      constraints: {},
-    },
   }),
   onmessage(message) {
     const envelope = JSON.parse(message.data)
@@ -192,16 +186,10 @@ await fetchEventSource("/api/agent/chat/stream", {
         stage: progress.stage,
         status: progress.status,
         progress: progress.progress,
-        sourceStats: progress.source_stats,
-        supplementalSearchRound:
-          progress.supplemental_search_round,
+        iteration: progress.iteration,
+        details: progress.details,
         warnings: progress.warnings,
         error: progress.error,
-        taskStatusUpdateError:
-          progress.task_status_update_error,
-        pdfCleanupError: progress.pdf_cleanup_error,
-        degraded: progress.degraded,
-        remoteTaskState: progress.remote_task_state,
         terminal: progress.terminal,
       })
     }

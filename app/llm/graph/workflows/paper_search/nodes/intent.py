@@ -6,7 +6,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.llm.model_factory import create_validated_structured_chat_model
-from app.llm.subagents.paper_search.contracts import PaperSearchConstraints
+from app.llm.subagents.paper_search import PaperSearchConstraints
 from app.llm.tools.task_tools.search_task.args import PromptUnderstandingArgs
 
 

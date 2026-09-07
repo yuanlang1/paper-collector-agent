@@ -165,7 +165,7 @@ class AgentStreamAdapter:
         stage = update.get("stage")
         terminal = node_name in stream.terminal_nodes
         iteration = None
-        if stream.iteration_key:
+        if stream.iteration_key and stream.iteration_key in update:
             try:
                 iteration = int(update.get(stream.iteration_key, 0)) + 1
             except (TypeError, ValueError):
@@ -185,6 +185,11 @@ class AgentStreamAdapter:
                 phase_index / len(phases) * 100
             )
         )
+        details = {
+            public_key: to_jsonable(update[state_key])
+            for public_key, state_key in stream.detail_state_keys.items()
+            if state_key in update
+        }
 
         return (
             "subagent_progress",
@@ -207,24 +212,8 @@ class AgentStreamAdapter:
                 "progress": to_jsonable(update.get("progress") or {}),
                 "warnings": to_jsonable(update.get("warnings") or []),
                 "error": update.get("error"),
-                "task_status_update_error": update.get(
-                    "task_status_update_error"
-                ),
-                "pdf_cleanup_error": update.get(
-                    "pdf_cleanup_error"
-                ),
-                "degraded": bool(update.get("degraded")),
-                "remote_task_state": update.get(
-                    "remote_task_state"
-                ),
-                "supplemental_search_round": update.get(
-                    "supplemental_search_round",
-                    0,
-                ),
                 "iteration": iteration,
-                "source_stats": to_jsonable(
-                    update.get("source_search_stats") or {}
-                ),
+                "details": details,
             },
         )
 

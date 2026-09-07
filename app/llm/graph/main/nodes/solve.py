@@ -8,8 +8,8 @@ from app.llm.graph.main.native_tools import get_tool_kind, requires_confirmation
 from app.llm.graph.main.state import MainAgentState
 from app.llm.streaming.tool_event import emit_custom_event
 from app.llm.streaming.utils import content_to_text
+from app.llm.tools.registry import ToolRegistry, build_tool_registry
 from app.llm.subagents.registry import SubAgentRegistry
-from app.llm.tools.registry import ToolRegistry
 
 
 class SolveNode:
@@ -17,11 +17,11 @@ class SolveNode:
         self,
         *,
         model: Any,
-        tool_registry: ToolRegistry,
+        tool_registry: ToolRegistry | None = None,
         subagent_registry: SubAgentRegistry,
     ) -> None:
         self.model = model
-        self.tool_registry = tool_registry
+        self.tool_registry = tool_registry or build_tool_registry()
         self.subagent_registry = subagent_registry
 
     async def __call__(self, state: MainAgentState) -> dict:
@@ -36,9 +36,7 @@ class SolveNode:
             }
         )
 
-        system = SystemMessage(
-           content=str(state.get("system_context") or "")
-        )
+        system = SystemMessage(content=str(state.get("system_context") or ""))
 
         messages = self._messages_from_window_start(
             state["messages"],

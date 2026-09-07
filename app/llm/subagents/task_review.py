@@ -1,15 +1,41 @@
-from app.llm.graph.workflows.review_generate.workflow import (
-    build_task_review_workflow,
-)
-from app.llm.subagents.registry import (
-    SubAgentRuntime,
-    SubAgentSpec,
-    SubAgentStreamSpec,
-)
-from app.llm.subagents.task_review.contracts import TaskReviewDelegation
+from __future__ import annotations
 
+from typing import TYPE_CHECKING, Literal
+
+from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from app.llm.subagents.registry import SubAgentRuntime
+
+
+class TaskReviewDelegation(BaseModel):
+    task_id: int = Field(gt=0)
+    topic: str = Field(min_length=2, max_length=2_000)
+    language: Literal["zh-CN", "en"] = "zh-CN"
+    citation_style: Literal[
+        "harvard",
+        "apa",
+        "ieee",
+        "chicago",
+        "vancouver",
+    ] = "harvard"
+    review_type: Literal[
+        "narrative",
+        "systematic",
+        "scoping",
+        "critical",
+    ] = "narrative"
+    max_reflection_rounds: int = Field(default=5, ge=1, le=5)
 
 def build_task_review_runtime() -> SubAgentRuntime:
+    from app.llm.graph.workflows.review_generate.workflow import (
+        build_task_review_workflow,
+    )
+    from app.llm.subagents.registry import (
+        SubAgentRuntime,
+        SubAgentSpec,
+        SubAgentStreamSpec,
+    )
     return SubAgentRuntime(
         spec=SubAgentSpec(
             name="task_review_agent",
@@ -45,6 +71,7 @@ def build_task_review_runtime() -> SubAgentRuntime:
                 "assemble_review": "render",
                 "reflect_review": "review",
                 "finalizing_handoff": "finalize",
+                "persist_review": "finalize",
                 "finalize_result": "finalize",
             },
             iteration_key="reflection_round",

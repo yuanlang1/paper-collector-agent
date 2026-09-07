@@ -1,28 +1,54 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 
-from app.llm.graph.workflows.paper_search.nodes.generate_queries import (
-    BuildSourceQueryPlanNode,
-)
-from app.llm.graph.workflows.paper_search.workflow import (
-    build_paper_search_workflow,
-)
-from app.llm.subagents.paper_search.contracts import PaperSearchDelegation
-from app.llm.subagents.registry import (
-    SubAgentRuntime,
-    SubAgentSpec,
-    SubAgentStreamSpec,
-)
-from app.services.setting_service import (
-    default_source_limits,
-    source_pagination_settings,
-)
+from pydantic import BaseModel, Field, model_validator
 
+if TYPE_CHECKING:
+    from app.llm.subagents.registry import SubAgentRuntime
+
+
+PaperSearchSource = Literal["arXiv", "DBLP", "Google Scholar"]
+
+
+class PaperSearchConstraints(BaseModel):
+    year_from: int | None = Field(default=None, ge=1900, le=2100)
+    year_to: int | None = Field(default=None, ge=1900, le=2100)
+    sources: list[PaperSearchSource] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_year_range(self) -> "PaperSearchConstraints":
+        if (self.year_from is None) != (self.year_to is None):
+            raise ValueError("year_from and year_to must be provided together")
+        if (
+            self.year_from is not None
+            and self.year_to is not None
+            and self.year_from > self.year_to
+        ):
+            raise ValueError("year_from must not be after year_to")
+        return self
+
+
+class PaperSearchDelegation(BaseModel):
+    prompt: str = Field(min_length=1, max_length=2_000)
+    objective: str = "检索、筛选、推荐并保存相关论文"
+    constraints: PaperSearchConstraints = Field(
+        default_factory=PaperSearchConstraints
+    )
 
 def build_paper_search_runtime(
     *,
     source_query_plan_model: Any,
 ) -> SubAgentRuntime:
+    from app.llm.graph.workflows.paper_search.workflow import (
+        build_paper_search_workflow,
+    )
+    from app.llm.subagents.registry import (
+        SubAgentRuntime,
+        SubAgentSpec,
+        SubAgentStreamSpec,
+    )
     return SubAgentRuntime(
         spec=SubAgentSpec(
             name="paper_search_agent",
@@ -80,11 +106,25 @@ def build_paper_search_runtime(
                 "finalize_result": "finalize",
             },
             iteration_key="supplemental_search_round",
+            detail_state_keys={
+                "source_stats": "source_search_stats",
+                "task_status_update_error": "task_status_update_error",
+                "pdf_cleanup_error": "pdf_cleanup_error",
+                "degraded": "degraded",
+                "remote_task_state": "remote_task_state",
+            },
         ),
     )
 
 
 def _source_query_plan_node(model: Any):
+    from app.llm.graph.workflows.paper_search.nodes.generate_queries import (
+        BuildSourceQueryPlanNode,
+    )
+    from app.services.setting_service import (
+        default_source_limits,
+        source_pagination_settings,
+    )
     async def generate_queries(state: Mapping[str, Any]) -> dict[str, Any]:
         source_limits = state.get("paper_search_source_limits")
         try:
