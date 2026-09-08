@@ -8,10 +8,6 @@ from app.infrastructure.grpc.task_service_grpc_client import (
     TaskState,
     task_service_grpc_client,
 )
-from app.rag.processing.task_rag_batch_runner import (
-    TaskRagBatchRunner,
-    get_task_rag_batch_runner,
-)
 
 
 def _is_valid_task_id(value: Any) -> bool:
@@ -23,10 +19,8 @@ class UpdatePaperSearchTaskStatusNode:
     def __init__(
         self,
         client: TaskServiceGrpcClient | None = None,
-        rag_runner: TaskRagBatchRunner | None = None
     ) -> None:
         self.client = client or task_service_grpc_client
-        self.rag_runner = rag_runner
 
     async def __call__(
         self,
@@ -63,14 +57,6 @@ class UpdatePaperSearchTaskStatusNode:
             }
 
         if result.get("ok") is True:
-            rag_task_started = False
-            if task_state in {
-                TaskState.SEARCH_COMPLETED,
-                TaskState.SEARCH_PARTIAL_COMPLETED,
-            }:
-                runner = self.rag_runner or get_task_rag_batch_runner()
-                rag_task_started = await runner.notify(task_id)
-
             return {
                 "progress": {
                     **state.get("progress", {}),
@@ -79,7 +65,6 @@ class UpdatePaperSearchTaskStatusNode:
                 },
                 "task_status_update_error": None,
                 "remote_task_state": task_state.name,
-                "rag_task_started": rag_task_started,
             }
 
         error = str(result.get("error") or "unknown error")

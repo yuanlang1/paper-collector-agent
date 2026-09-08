@@ -73,7 +73,6 @@ def build_tool_registry(db: Session | None = None) -> ToolRegistry:
     )
     from app.llm.tools.task_tools.search_task.rag_status import GET_TASK_RAG_STATUS_TOOL
     from app.llm.tools.task_tools.search_task.search_task_create import ADD_QUERY_TASK_TOOL
-    from app.llm.tools.task_tools.search_task.start_task_rag import START_TASK_RAG_TOOL
     from app.llm.tools.venue_tools.easy_scholar import EASY_SCHOLAR_VENUE_TOOL
 
     registry = ToolRegistry(db=db)
@@ -84,7 +83,6 @@ def build_tool_registry(db: Session | None = None) -> ToolRegistry:
         GOOGLE_SCHOLAR_SEARCH_TOOL,
         ADD_QUERY_TASK_TOOL,
         GET_TASK_RAG_STATUS_TOOL,
-        START_TASK_RAG_TOOL,
         EASY_SCHOLAR_VENUE_TOOL,
         DOWNLOAD_FILE_TOOL,
     ):

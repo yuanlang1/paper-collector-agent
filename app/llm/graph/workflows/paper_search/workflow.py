@@ -24,7 +24,6 @@ from app.llm.graph.workflows.paper_search.nodes.supplemental_search import Suppl
 from app.llm.graph.workflows.paper_search.nodes.update_task_status import UpdatePaperSearchTaskStatusNode
 from app.llm.graph.workflows.paper_search.nodes.venue import VenueResolutionNode
 from app.llm.graph.workflows.paper_search.state import PaperSearchWorkflowState
-from app.rag.processing.task_rag_batch_runner import TaskRagBatchRunner
 from app.llm.streaming.timeline import (
     PAPER_SEARCH_TIMELINE,
     instrument_timeline_node,
@@ -96,7 +95,6 @@ def _route_after_supplemental_search(
 def build_paper_search_workflow(
     *,
     task_client=None,
-    rag_runner: TaskRagBatchRunner | None = None,
     checkpointer=None,
     skip_confirmation: bool = False,
     node_overrides: dict[str, object] | None = None,
@@ -163,7 +161,6 @@ def build_paper_search_workflow(
             "update_task_status",
             UpdatePaperSearchTaskStatusNode(
                 client=task_client,
-                rag_runner=rag_runner,
             ),
         ),
     )

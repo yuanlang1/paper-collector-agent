@@ -1,0 +1,28 @@
+sequenceDiagram
+    participant L as "LLM"
+    participant M as "MainAgentState"
+    participant D as "dispatch"
+    participant S as "SafeSubgraphNode"
+    participant I as "task_indexing workflow"
+    participant R as "RAG / task service"
+
+    L->>M: assistant tool_call(task_indexing_agent, id)
+    M->>D: pending_tool_calls
+    D->>S: active_tool_call(id, args)
+    S->>I: invoke child graph with parent state
+    I->>R: query / start / wait for RAG
+
+    alt Index completed
+        R-->>I: RAG completed
+        I-->>S: ToolMessage(id) + success ActionResult
+    else Precondition or RAG failure
+        R-->>I: partial search / RAG failure
+        I-->>S: ToolMessage(id) + error ActionResult
+    end
+
+    S-->>M: messages(add_messages), last_action_result, active_tool_call=None
+    M->>D: dispatch remaining calls or solve
+    D->>L: resolved ToolMessage for the same id
+
+    Note over I,M: Child state must declare messages with add_messages reducer.
+    Note over I,M: Otherwise the ToolMessage is discarded and the next LLM call returns 400.

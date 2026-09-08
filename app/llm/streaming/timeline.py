@@ -177,6 +177,38 @@ TASK_REVIEW_TIMELINE = (
 )
 
 
+TASK_INDEXING_TIMELINE = (
+    TimelineStep(
+        key="prepare",
+        label="校验任务状态",
+        starts_at=frozenset({"initialize"}),
+        completes_at=frozenset({"check_rag_status"}),
+        nodes=frozenset({"initialize", "check_rag_status"}),
+    ),
+    TimelineStep(
+        key="index",
+        label="索引论文到知识库",
+        starts_at=frozenset({"run_or_wait"}),
+        completes_at=frozenset({"run_or_wait"}),
+        nodes=frozenset({"run_or_wait"}),
+    ),
+    TimelineStep(
+        key="verify",
+        label="确认索引结果",
+        starts_at=frozenset({"verify_completion"}),
+        completes_at=frozenset({"verify_completion"}),
+        nodes=frozenset({"verify_completion"}),
+    ),
+    TimelineStep(
+        key="finalize",
+        label="汇总索引结果",
+        starts_at=frozenset({"finalize_result"}),
+        completes_at=frozenset({"finalize_result"}),
+        nodes=frozenset({"finalize_result"}),
+    ),
+)
+
+
 def _step_for_node(
     timeline: tuple[TimelineStep, ...],
     node_name: str,

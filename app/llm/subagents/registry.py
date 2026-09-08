@@ -108,6 +108,7 @@ def build_default_subagent_registry(
     source_query_plan_model: Any,
 ) -> SubAgentRegistry:
     from app.llm.subagents.paper_search import build_paper_search_runtime
+    from app.llm.subagents.task_indexing import build_task_indexing_runtime
     from app.llm.subagents.task_review import build_task_review_runtime
 
     return SubAgentRegistry(
@@ -115,6 +116,7 @@ def build_default_subagent_registry(
             build_paper_search_runtime(
                 source_query_plan_model=source_query_plan_model,
             ),
+            build_task_indexing_runtime(),
             build_task_review_runtime(),
         )
     )

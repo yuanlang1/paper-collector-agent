@@ -1,5 +1,7 @@
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+import inspect
 import logging
 from typing import Literal
 
@@ -30,6 +32,9 @@ class PaperRagResult:
     chunk_count: int = 0
     error: str | None = None
 
+
+PaperResultListener = Callable[[PaperRagResult], Awaitable[None] | None]
+
 class PaperRagProcessor:
     def __init__(
         self,
@@ -49,6 +54,8 @@ class PaperRagProcessor:
     async def process_many(
         self,
         papers: list[PaperRagInput],
+        *,
+        on_paper_result: PaperResultListener | None = None,
     ) -> list[PaperRagResult]:
         paper_ids = [paper.paper_id for paper in papers]
 
@@ -63,11 +70,13 @@ class PaperRagProcessor:
             paper_id = paper.paper_id
 
             if not paper.pdf_url.strip():
-                results_by_paper_id[paper_id] = PaperRagResult(
+                result = PaperRagResult(
                     paper_id = paper_id,
                     status = "skipped",
                     error = "missing PDF URL",
                 )
+                results_by_paper_id[paper_id] = result
+                await self._notify_paper_result(on_paper_result, result)
                 continue
             
             file_id = f"paper-{paper_id}"
@@ -79,11 +88,13 @@ class PaperRagProcessor:
                     file_name = f"{file_id}.pdf",
                 )
             except ValidationError as error:
-                results_by_paper_id[paper.paper_id] = PaperRagResult(
+                result = PaperRagResult(
                     paper_id = paper.paper_id,
                     status = "failed",
                     error = str(error),
                 )
+                results_by_paper_id[paper.paper_id] = result
+                await self._notify_paper_result(on_paper_result, result)
                 continue
             
             requests.append(request)
@@ -93,39 +104,62 @@ class PaperRagProcessor:
 
         for file_id, error in parse_result.errors.items():
             paper = papers_by_file_id[file_id]
-            results_by_paper_id[paper.paper_id] = PaperRagResult(
+            result = PaperRagResult(
                 paper_id = paper.paper_id,
                 status = "failed",
                 error = error,
             )
+            results_by_paper_id[paper.paper_id] = result
+            await self._notify_paper_result(on_paper_result, result)
 
-        index_results = await asyncio.gather(
-            *(
+        index_tasks = [
+            asyncio.create_task(
                 self._index_parsed_document(
                     papers_by_file_id[str(document.metadata["file_id"])],
                     document,
                 )
-                for document in parse_result.documents
             )
-        )
+            for document in parse_result.documents
+        ]
 
-        for result in index_results:
+        for task in asyncio.as_completed(index_tasks):
+            result = await task
             results_by_paper_id[result.paper_id] = result
+            await self._notify_paper_result(on_paper_result, result)
 
         for paper in papers:
-            results_by_paper_id.setdefault(
-                paper.paper_id,
-                PaperRagResult(
+            if paper.paper_id not in results_by_paper_id:
+                result = PaperRagResult(
                     paper_id = paper.paper_id,
                     status = "failed",
                     error = "parser returned no document or error",
-                ),
-            )
+                )
+                results_by_paper_id[paper.paper_id] = result
+                await self._notify_paper_result(on_paper_result, result)
         
         return [
             results_by_paper_id[paper.paper_id]
             for paper in papers
         ]
+
+    @staticmethod
+    async def _notify_paper_result(
+        listener: PaperResultListener | None,
+        result: PaperRagResult,
+    ) -> None:
+        if listener is None:
+            return
+
+        try:
+            value = listener(result)
+            if inspect.isawaitable(value):
+                await value
+        except Exception:
+            logger.warning(
+                "Paper RAG progress listener failed: paper_id=%s",
+                result.paper_id,
+                exc_info=True,
+            )
     
     async def _index_parsed_document(
         self,
