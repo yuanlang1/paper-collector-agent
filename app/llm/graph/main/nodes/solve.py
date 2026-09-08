@@ -111,6 +111,7 @@ class SolveNode:
                     ),
                     "requires_confirmation": requires_confirmation(
                         call["name"],
+                        call["args"],
                         self.tool_registry,
                         self.subagent_registry,
                     ),

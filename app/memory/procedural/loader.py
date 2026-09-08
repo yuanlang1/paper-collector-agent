@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 
 
@@ -13,19 +14,46 @@ class Skill:
     body: str
 
 
+def user_skill_directory(root: Path, user_id: str) -> Path:
+    normalized_user_id = user_id.strip()
+    if not normalized_user_id:
+        raise ValueError("user_id is required")
+    return root / sha256(normalized_user_id.encode("utf-8")).hexdigest()
+
+
+def render_skill_document(skill: Skill) -> str:
+    triggers = ", ".join(skill.triggers)
+    return (
+        "---\n"
+        f"name: {skill.name}\n"
+        f"description: {skill.description}\n"
+        f"triggers: {triggers}\n"
+        "---\n"
+        f"{skill.body.strip()}\n"
+    )
+
+
 class SkillLoader:
-    def __init__(self, directories: list[Path]) -> None:
+    def __init__(
+        self,
+        directories: list[Path],
+        *,
+        user_skills_root: Path | None = None,
+    ) -> None:
         self.directories = directories
+        self.user_skills_root = user_skills_root
 
     def matching_instructions(
         self,
         user_message: str,
         *,
+        user_id: str | None = None,
         max_skills: int = 2,
     ) -> str:
         matched = self._match(
             message=user_message,
             max_skills=max_skills,
+            user_id=user_id,
         )
         return "\n\n".join(
             f"### {skill.name}\n{skill.body}"
@@ -37,6 +65,7 @@ class SkillLoader:
         *,
         message: str,
         max_skills: int,
+        user_id: str | None,
     ) -> list[Skill]:
         normalized_message = message.casefold()
         message_words = set(
@@ -44,7 +73,7 @@ class SkillLoader:
         )
 
         scored: list[tuple[int, Skill]] = []
-        for skill in self._load_skills():
+        for skill in self._load_skills(user_id=user_id):
             trigger_hits = sum(
                 trigger.casefold() in normalized_message
                 for trigger in skill.triggers
@@ -67,9 +96,14 @@ class SkillLoader:
         scored.sort(key=lambda item: item[0], reverse=True)
         return [skill for _, skill in scored[:max_skills]]
 
-    def _load_skills(self) -> list[Skill]:
+    def _load_skills(self, *, user_id: str | None) -> list[Skill]:
         skills: list[Skill] = []
-        for directory in self.directories:
+        directories = list(self.directories)
+        if self.user_skills_root is not None and user_id:
+            directories.append(
+                user_skill_directory(self.user_skills_root, user_id)
+            )
+        for directory in directories:
             if not directory.is_dir():
                 continue
             for path in directory.rglob("SKILL.md"):

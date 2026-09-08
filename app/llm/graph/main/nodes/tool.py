@@ -6,7 +6,8 @@ from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableConfig
 
 from app.llm.graph.main.state import MainAgentState
-from app.llm.tools.registry import ToolRegistry
+from app.database import SessionLocal
+from app.llm.tools.registry import ToolExecutionContext, ToolRegistry
 
 
 ActionStatus = Literal["success", "partial", "error", "rejected"]
@@ -63,7 +64,20 @@ async def tool_node(
 ) -> dict:
     del config
     call = state["active_tool_call"]
-    result = await tool_registry.execute(call["name"], call["args"])
+    db = SessionLocal()
+    try:
+        result = await tool_registry.execute(
+            call["name"],
+            call["args"],
+            context=ToolExecutionContext(
+                db=db,
+                user_id=str(state.get("user_id") or "0"),
+                conversation_id=str(state.get("conversation_id") or ""),
+                run_id=str(state.get("run_id") or ""),
+            ),
+        )
+    finally:
+        db.close()
 
     artifact_refs = result.get("artifact_refs")
     return build_action_result_update(

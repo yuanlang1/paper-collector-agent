@@ -86,6 +86,26 @@ class FactRepository:
         )
         return list(self.db.scalars(statement))
 
+    def list_by_subject(
+        self,
+        *,
+        user_id: str,
+        subject: str,
+        statuses: tuple[str, ...],
+        limit: int,
+    ) -> Sequence[MemoryFact]:
+        statement = (
+            select(MemoryFact)
+            .where(
+                MemoryFact.user_id == user_id,
+                MemoryFact.subject == subject,
+                MemoryFact.status.in_(statuses),
+            )
+            .order_by(MemoryFact.updated_at.desc(), MemoryFact.id.desc())
+            .limit(limit)
+        )
+        return list(self.db.scalars(statement))
+
     def search_active(
         self,
         *,

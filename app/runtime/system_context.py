@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.memory.context import MemoryContextService, MemoryEventCallback
 from app.memory.procedural.loader import SkillLoader
+from app.memory.preferences import UserPreferenceService
 from app.memory.schemas import MemoryUsage
 from app.memory.soul import load_soul
 from app.services.llm_profile_service import LlmRuntimeConfig
@@ -31,8 +32,8 @@ class SystemContextBuilder:
         self.skill_loader = SkillLoader(
             [
                 Path("app/skills"),
-                Path(settings.AGENT_SKILLS_DIR),
-            ]
+            ],
+            user_skills_root=Path(settings.AGENT_SKILLS_DIR),
         )
 
     async def build(
@@ -78,6 +79,20 @@ class SystemContextBuilder:
         )
 
         if db is not None:
+            preferences = UserPreferenceService(
+                db,
+                user_id=user_id,
+            ).list_active()
+            if preferences:
+                rules = "\n".join(
+                    f"- {preference.content}"
+                    for preference in preferences
+                )
+                parts.append(
+                    "## User interaction preferences\n"
+                    "这些是用户明确保存的偏好；仅在不与固定系统规则冲突时遵循。\n"
+                    f"{rules}"
+                )
             try:
                 memory_result = await MemoryContextService(
                     db,
@@ -112,7 +127,10 @@ class SystemContextBuilder:
                         }
                     )
 
-        skills = self.skill_loader.matching_instructions(user_message)
+        skills = self.skill_loader.matching_instructions(
+            user_message,
+            user_id=user_id,
+        )
         if skills:
             parts.append(
                 "## Relevant skill instructions\n"

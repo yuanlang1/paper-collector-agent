@@ -14,15 +14,11 @@ from app.llm.model_factory import (
 from app.llm.tools.search_tools.arxiv.search_args import (
     ArxivSearchArgs,
 )
+from app.llm.tools.search_tools.crossref.search_crossref import CrossrefSearchArgs
 from app.llm.tools.search_tools.dblp.search_args import (
     DblpSearchArgs,
 )
-from app.llm.tools.search_tools.crossref.search_args import (
-    CrossrefSearchArgs,
-)
-from app.llm.tools.search_tools.google_scholar.search_args import (
-    GoogleScholarSearchArgs,
-)
+from app.llm.tools.search_tools.google_scholar.search_google_scholar import GoogleScholarSearchArgs
 from app.llm.tools.task_tools.search_task.args import (
     PromptUnderstandingArgs,
     SearchTagArgs,

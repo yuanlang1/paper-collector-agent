@@ -1,18 +1,31 @@
 from typing import Any
 
-from sqlalchemy.orm import Session
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.infrastructure.grpc.task_service_grpc_client import (
     task_service_grpc_client,
 )
-from app.llm.tools.registry import Tool
-from app.llm.tools.task_tools.search_task.args import AddQueryTaskArgs
+from app.llm.graph.workflows.paper_search_schemas import (
+    NonBlankString,
+    PromptUnderstandingArgs,
+    SearchTagArgs,
+)
+from app.llm.tools.registry import Tool, ToolExecutionContext
+
+
+class AddQueryTaskArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: NonBlankString = Field(..., description="用户原始的论文检索要求。")
+    searchTag: SearchTagArgs
+    queryUnderstanding: PromptUnderstandingArgs
 
 
 async def add_query_task_handler(
     params: dict[str, Any],
-    _db: Session,
+    context: ToolExecutionContext,
 ) -> dict[str, Any]:
+    del context
     request = AddQueryTaskArgs.model_validate(params)
 
     payload = request.model_dump(

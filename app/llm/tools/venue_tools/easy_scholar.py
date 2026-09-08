@@ -6,17 +6,25 @@ from collections.abc import Mapping
 from typing import Any, Dict
 
 import httpx
-from sqlalchemy.orm import Session
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import settings
-from app.llm.tools.registry import Tool
+from app.llm.tools.registry import Tool, ToolExecutionContext
 from app.llm.tools.search_tools.common import (
     RETRYABLE_STATUS_CODES,
     elapsed_ms,
 )
-from app.llm.tools.venue_tools.easy_scholar_args import (
-    EasyScholarVenueArgs,
-)
+
+
+class EasyScholarVenueArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    publication_name: str = Field(
+        ...,
+        min_length=1,
+        max_length=300,
+        description="要查询的期刊名称，例如 Nature。",
+    )
 
 EASY_SCHOLAR_API_URL = settings.EASY_SCHOLAR_URL
 
@@ -160,9 +168,9 @@ def _to_result(
 
 async def easy_scholar_venue_handler(
     params: Dict[str, Any],
-    _db: Session,
+    context: ToolExecutionContext,
 ) -> Dict[str, Any]:
-    del _db
+    del context
 
     args = EasyScholarVenueArgs.model_validate(params)
     started_at = time.perf_counter()

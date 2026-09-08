@@ -2,13 +2,37 @@ from __future__ import annotations
 
 import difflib
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Literal
 
-from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
 
-from app.llm.tools.registry import Tool
-from app.llm.tools.search_tools.arxiv.supplement_args import ArxivSupplementArgs
+from app.llm.tools.registry import Tool, ToolExecutionContext
 from app.llm.tools.search_tools.arxiv.search_arxiv import arxiv_search_handler
+
+
+class ArxivSupplementArgs(BaseModel):
+    papers: list[dict[str, Any]] = Field(...)
+    fill_fields: list[Literal[
+        "summary",
+        "pdf_url",
+        "abstract_url",
+        "arxiv_id",
+        "published",
+        "updated",
+        "authors",
+        "categories",
+        "doi",
+    ]] = Field(
+        default_factory=lambda: [
+            "summary",
+            "pdf_url",
+            "abstract_url",
+            "arxiv_id",
+        ]
+    )
+    match_threshold: float = 0.88
+    max_candidates: int = 3
+    only_when_missing: bool = True
 
 
 def _clean_text(value: str | None) -> str:
@@ -136,7 +160,7 @@ async def _search_arxiv_by_doi(
     *,
     doi: str,
     max_candidates: int,
-    db: Session,
+    context: ToolExecutionContext,
 ) -> list[dict[str, Any]]:
     """
     用 DOI 搜 arXiv。
@@ -160,7 +184,7 @@ async def _search_arxiv_by_doi(
             "sort": "relevance",
             "include_abstract": True,
         },
-        db,
+        context,
     )
 
     if result.get("ok") and result.get("papers"):
@@ -176,7 +200,7 @@ async def _search_arxiv_by_doi(
             "sort": "relevance",
             "include_abstract": True,
         },
-        db,
+        context,
     )
 
     if fallback.get("ok") and fallback.get("papers"):
@@ -189,7 +213,7 @@ async def _search_arxiv_by_title(
     *,
     title: str,
     max_candidates: int,
-    db: Session,
+    context: ToolExecutionContext,
 ) -> list[dict[str, Any]]:
     title = _clean_text(title)
 
@@ -206,7 +230,7 @@ async def _search_arxiv_by_title(
             "sort": "relevance",
             "include_abstract": True,
         },
-        db,
+        context,
     )
 
     if result.get("ok") and result.get("papers"):
@@ -222,7 +246,7 @@ async def _search_arxiv_by_title(
             "sort": "relevance",
             "include_abstract": True,
         },
-        db,
+        context,
     )
 
     if fallback.get("ok") and fallback.get("papers"):
@@ -276,7 +300,7 @@ def _pick_best_candidate(
 
 async def arxiv_supplement_handler(
     params: Dict[str, Any],
-    db: Session,
+    context: ToolExecutionContext,
 ) -> Dict[str, Any]:
     args = ArxivSupplementArgs(**params)
 
@@ -304,7 +328,7 @@ async def arxiv_supplement_handler(
             candidates = await _search_arxiv_by_doi(
                 doi=doi,
                 max_candidates=args.max_candidates,
-                db=db,
+                context=context,
             )
 
         # 2. DOI 未命中，再用 title
@@ -313,7 +337,7 @@ async def arxiv_supplement_handler(
             candidates = await _search_arxiv_by_title(
                 title=title,
                 max_candidates=args.max_candidates,
-                db=db,
+                context=context,
             )
 
         best_candidate, score, match_by = _pick_best_candidate(

@@ -4,14 +4,13 @@ import asyncio
 import re
 import time
 import xml.etree.ElementTree as ET
-from typing import Any, Dict
+from typing import Any, Dict, Literal
 
 import httpx
-from sqlalchemy.orm import Session
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import settings
-from app.llm.tools.registry import Tool
-from app.llm.tools.search_tools.arxiv.search_args import ArxivSearchArgs
+from app.llm.tools.registry import Tool, ToolExecutionContext
 from app.llm.tools.search_tools.common import RETRYABLE_STATUS_CODES, clean_text, elapsed_ms
 
 ARXIV_API_URL = settings.ARXIV_API_URL
@@ -25,6 +24,39 @@ ATOM_NS = {
 ARXIV_CATEGORY_PATTERN = re.compile(
     r"^[a-zA-Z-]+(?:\.[a-zA-Z-]+)?$"
 )
+
+
+class ArxivSearchArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str | None = Field(None, min_length=1, max_length=500)
+    arxiv_ids: list[str] = Field(default_factory=list, max_length=20)
+    search_type: Literal[
+        "topic", "title", "author", "abstract", "category"
+    ] = "topic"
+    category: str | None = Field(None, max_length=200)
+    year_from: int | None = Field(None, ge=1991, le=2100)
+    year_to: int | None = Field(None, ge=1991, le=2100)
+    start: int = Field(0, ge=0)
+    max_results: int = Field(5, ge=1, le=2000)
+    total_limit: int = Field(5, ge=1, le=30_000)
+    max_pages: int = Field(1, ge=1, le=20)
+    sort: Literal["relevance", "newest", "updated"] = "relevance"
+    include_abstract: bool = True
+
+    @model_validator(mode="after")
+    def validate_request(self) -> "ArxivSearchArgs":
+        if not self.query and not self.arxiv_ids:
+            raise ValueError("query or arxiv_ids must be provided")
+        if self.query and self.arxiv_ids:
+            raise ValueError("query and arxiv_ids cannot be provided together")
+        if (
+            self.year_from is not None
+            and self.year_to is not None
+            and self.year_from > self.year_to
+        ):
+            raise ValueError("year_from must be less than or equal to year_to")
+        return self
 
 
 def _quote_if_needed(value: str) -> str:
@@ -397,9 +429,9 @@ async def _fetch_arxiv_page(
 
 async def arxiv_search_handler(
     params: Dict[str, Any],
-    _db: Session,
+    context: ToolExecutionContext,
 ) -> Dict[str, Any]:
-    del _db
+    del context
 
     args = ArxivSearchArgs.model_validate(params)
     started_at = time.perf_counter()

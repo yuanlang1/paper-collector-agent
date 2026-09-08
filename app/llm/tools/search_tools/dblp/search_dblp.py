@@ -3,19 +3,54 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Literal
 
 import httpx
-from sqlalchemy.orm import Session
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import settings
-from app.llm.tools.registry import Tool
+from app.llm.tools.registry import Tool, ToolExecutionContext
 from app.llm.tools.search_tools.common import RETRYABLE_STATUS_CODES, clean_text, elapsed_ms, ensure_list, parse_year
-from app.llm.tools.search_tools.dblp.search_args import (
-    DblpSearchArgs,
-)
 
 DBLP_API_URL = settings.DBLP_API_URL
+
+
+DblpPaperType = Literal[
+    "all",
+    "Journal Articles",
+    "Conference and Workshop Papers",
+    "Books and Theses",
+    "Parts in Books or Collections",
+    "Editorship",
+    "Reference Works",
+    "Data and Artifacts",
+    "Informal and Other Publications",
+]
+
+
+class DblpSearchArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(..., min_length=1, max_length=500)
+    f: int = Field(0, ge=0)
+    h: int = Field(5, ge=1, le=1000)
+    total_limit: int = Field(5, ge=1)
+    max_pages: int = Field(1, ge=1, le=20)
+    year_from: int | None = Field(None, ge=1936, le=2100)
+    year_to: int | None = Field(None, ge=1936, le=2100)
+    venue: str | None = Field(None, min_length=1, max_length=200)
+    paper_type: DblpPaperType = "all"
+
+    @model_validator(mode="after")
+    def validate_year_range(self) -> "DblpSearchArgs":
+        if (
+            self.year_from is not None
+            and self.year_to is not None
+            and self.year_from > self.year_to
+        ):
+            raise ValueError("year_from must be less than or equal to year_to")
+        return self
+
 
 class DblpResponseParseError(Exception):
     """DBLP 返回了无法解析的 JSON 响应。"""
@@ -207,9 +242,9 @@ def _parse_dblp_result(
 
 async def dblp_search_handler(
     params: Dict[str, Any],
-    _db: Session,
+    context: ToolExecutionContext,
 ) -> Dict[str, Any]:
-    del _db
+    del context
 
     args = DblpSearchArgs.model_validate(params)
     started_at = time.perf_counter()

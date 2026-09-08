@@ -111,6 +111,19 @@ class FactService:
             limit=self._limit(limit),
         )
 
+    def list_active_by_subject(
+        self,
+        *,
+        subject: str,
+        limit: int = 50,
+    ) -> Sequence[MemoryFact]:
+        return self.repository.list_by_subject(
+            user_id=self.user_id,
+            subject=subject.strip(),
+            statuses=("active",),
+            limit=self._limit(limit),
+        )
+
     def search_active(self, *, query: str, limit: int = 6) -> Sequence[MemoryFact]:
         if not query.strip():
             return []

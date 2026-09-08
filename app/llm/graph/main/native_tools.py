@@ -31,11 +31,13 @@ def get_tool_kind(
 
 def requires_confirmation(
     name: str,
+    args: dict[str, Any],
     tool_registry: ToolRegistry,
     subagent_registry: SubAgentRegistry,
 ) -> bool:
     tool = tool_registry.get(name)
     if tool is not None:
-        return tool.requires_confirmation
+        policy = tool.requires_confirmation
+        return policy(args) if callable(policy) else policy
     subagent = subagent_registry.get_spec(name)
     return subagent.requires_confirmation if subagent else False

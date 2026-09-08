@@ -1,16 +1,22 @@
 from typing import Any
 
-from sqlalchemy.orm import Session
+from pydantic import BaseModel, ConfigDict, Field
 
-from app.llm.tools.registry import Tool
-from app.llm.tools.task_tools.search_task.args import GetTaskRagStatusArgs
+from app.llm.tools.registry import Tool, ToolExecutionContext
 from app.rag.processing.task_rag_status import get_task_rag_status
+
+
+class GetTaskRagStatusArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: int = Field(..., gt=0, description="要查询 RAG 状态的检索任务 ID。")
 
 
 async def get_task_rag_status_handler(
     params: dict[str, Any],
-    _db: Session,
+    context: ToolExecutionContext,
 ) -> dict[str, Any]:
+    del context
     request = GetTaskRagStatusArgs.model_validate(params)
     return await get_task_rag_status(request.task_id)
 

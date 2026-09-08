@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     CROSSREF_MAILTO: str = ""
     CROSSREF_TIMEOUT_SECONDS: float = 15.0
 
+
+    FIRECRAWL_API_KEY: str = ""
+    FIRECRAWL_SEARCH_URL: str = "https://api.firecrawl.dev/v2/search"
+    FIRECRAWL_TIMEOUT_SECONDS: float = 30.0
+
     EASY_SCHOLAR_URL: str
     EASY_SCHOLAR_SECRET_KEY: str 
     EASY_SCHOLAR_TIMEOUT_SECONDS: float

@@ -6,16 +6,36 @@ import time
 from typing import Any
 
 import httpx
-from sqlalchemy.orm import Session
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import settings
-from app.llm.tools.registry import Tool
+from app.llm.tools.registry import Tool, ToolExecutionContext
 from app.llm.tools.search_tools.common import RETRYABLE_STATUS_CODES, clean_text, elapsed_ms
-from app.llm.tools.search_tools.google_scholar.search_args import (
-    GoogleScholarSearchArgs,
-)
 
 SERPAPI_SEARCH_URL = settings.SERPAPI_SEARCH_URL
+
+
+class GoogleScholarSearchArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(..., min_length=1, max_length=500)
+    start: int = Field(0, ge=0)
+    num: int = Field(5, ge=1, le=20)
+    total_limit: int = Field(5, ge=1)
+    max_pages: int = Field(1, ge=1, le=20)
+    year_from: int | None = Field(None, ge=1900, le=2100)
+    year_to: int | None = Field(None, ge=1900, le=2100)
+    review_only: bool = False
+
+    @model_validator(mode="after")
+    def validate_year_range(self) -> "GoogleScholarSearchArgs":
+        if (
+            self.year_from is not None
+            and self.year_to is not None
+            and self.year_from > self.year_to
+        ):
+            raise ValueError("year_from must be less than or equal to year_to")
+        return self
 
 
 class SerpApiResponseParseError(Exception):
@@ -274,9 +294,9 @@ def _validate_serpapi_result(
 
 async def google_scholar_search_handler(
     params: dict[str, Any],
-    _db: Session,
+    context: ToolExecutionContext,
 ) -> dict[str, Any]:
-    del _db
+    del context
 
     args = GoogleScholarSearchArgs.model_validate(params)
     query = clean_text(args.query)
