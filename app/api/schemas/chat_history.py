@@ -31,3 +31,8 @@ class ChatMessageListResponse(BaseModel):
     conversation_id: str
     items: list[ChatMessageView] = Field(default_factory=list)
     next_before_id: int | None = None
+
+
+class DeleteConversationResponse(BaseModel):
+    conversation_id: str
+    deleted: bool = True

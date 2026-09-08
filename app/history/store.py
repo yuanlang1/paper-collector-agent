@@ -248,6 +248,18 @@ class ChatHistoryStore:
             before_id,
         )
 
+    async def delete_conversation(
+        self,
+        *,
+        user_id: str = "0",
+        conversation_id: str,
+    ) -> int:
+        return await asyncio.to_thread(
+            self._delete_conversation,
+            user_id,
+            conversation_id,
+        )
+
     async def list_completed_turns_after(
         self,
         *,
@@ -662,6 +674,21 @@ class ChatHistoryStore:
         next_before_id = items[0]["id"] if has_more and items else None
 
         return items, next_before_id
+
+    def _delete_conversation(
+        self,
+        user_id: str,
+        conversation_id: str,
+    ) -> int:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                DELETE FROM chat_log
+                WHERE user_id = ? AND conversation_id = ?
+                """,
+                (user_id, conversation_id),
+            )
+            return cursor.rowcount
 
     def _list_completed_turns_after(
         self,

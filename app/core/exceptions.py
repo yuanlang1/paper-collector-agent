@@ -69,6 +69,17 @@ class NotFoundException(AppException):
             status_code = status.HTTP_404_NOT_FOUND,
         )
 
+class ConflictException(AppException):
+    def __init__(
+        self,
+        message: str = "资源状态冲突",
+    ) -> None:
+        super().__init__(
+            message = message,
+            code = 1,
+            status_code = status.HTTP_409_CONFLICT,
+        )
+
 class ServiceUnavailableException(AppException):
     def __init__(
         self, 

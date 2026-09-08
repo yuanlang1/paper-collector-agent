@@ -9,6 +9,7 @@ from app.api.schemas.chat_history import (
     ChatMessageView,
     ConversationListResponse,
     ConversationView,
+    DeleteConversationResponse,
 )
 from app.history.store import get_history_store
 
@@ -78,15 +79,14 @@ async def stream_chat(
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     runtime = get_agent_runtime()
-
-    return build_streaming_response(
-        runtime.chat_stream(
+    stream = await runtime.chat_stream(
         message=payload.message,
         conversation_id=payload.conversation_id,
         llm_profile_id=payload.llm_profile_id,
         db=db,
-        )
     )
+
+    return build_streaming_response(stream)
 
 
 @router.post(
@@ -126,19 +126,18 @@ async def chat_resume_stream(
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     runtime = get_agent_runtime()
-
-    return build_streaming_response(
-        runtime.resume_chat_stream(
-            conversation_id=payload.conversation_id,
-            resume_payload=payload.model_dump(
-                exclude={"conversation_id", "run_id", "action_id"},
-                exclude_none=True,
-            ),
-            requested_run_id=payload.run_id,
-            requested_action_id=payload.action_id,
-            db=db,
-        )
+    stream = await runtime.resume_chat_stream(
+        conversation_id=payload.conversation_id,
+        resume_payload=payload.model_dump(
+            exclude={"conversation_id", "run_id", "action_id"},
+            exclude_none=True,
+        ),
+        requested_run_id=payload.run_id,
+        requested_action_id=payload.action_id,
+        db=db,
     )
+
+    return build_streaming_response(stream)
 
 @router.get(
     "/conversations",
@@ -187,5 +186,25 @@ async def list_conversation_messages(
             ],
             next_before_id=next_before_id,
         ),
+        message="OK",
+    )
+
+
+@router.delete(
+    "/conversations/{conversation_id}",
+    response_model=ServiceResponse[DeleteConversationResponse],
+)
+async def delete_conversation(
+    conversation_id: str,
+    db: Session = Depends(get_db),
+) -> ServiceResponse[DeleteConversationResponse]:
+    runtime = get_agent_runtime()
+    result = await runtime.delete_conversation(
+        conversation_id=conversation_id,
+        db=db,
+    )
+
+    return ServiceResponse[DeleteConversationResponse].build_success_response(
+        data=DeleteConversationResponse.model_validate(result),
         message="OK",
     )

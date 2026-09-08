@@ -2,11 +2,18 @@ import asyncio
 import logging
 import time
 
+from sqlalchemy import delete
 from app.database import SessionLocal
+from app.core.exceptions import ConflictException
 from app.history.store import ChatHistoryStore
 from app.llm.model_factory import use_llm_runtime_config
 from app.memory.consolidation import Consolidator
 from app.memory.extraction import LangChainMemoryExtractor
+from app.models.memory import (
+    MemoryConsolidationCursor,
+    MemoryEpisode,
+    MemoryFact,
+)
 from collections.abc import AsyncIterator, Awaitable
 from typing import Any, Callable, Optional
 from uuid import uuid4
@@ -40,6 +47,8 @@ class AgentRuntime:
         self._active_stream_tasks: set[asyncio.Task[None]] = set()
         self._active_consolidation_scopes: set[tuple[str, str]] = set()
         self._active_consolidation_tasks: set[asyncio.Task[None]] = set()
+        self._active_conversation_runs: dict[str, int] = {}
+        self._deleting_conversations: set[str] = set()
         
     async def chat(
         self,
@@ -53,48 +62,51 @@ class AgentRuntime:
         memory_llm_config = resolve_small_model_runtime_config(db)
         resolved_conversation_id = self.resolve_conversation_id(conversation_id)
         source_limits = get_source_limits(db)
-
-        session = Session.create(
-            message=message,
-            conversation_id=resolved_conversation_id,
-            db=db,
-            user_id=DEFAULT_USER_ID,
-            llm_profile=llm_config.snapshot() if llm_config else None,
-            memory_llm_profile=self._memory_llm_profile_snapshot(
-                llm_config,
-                memory_llm_config,
-            ),
-            paper_search_source_limits=source_limits,
-        )
-
-        assistant_message_id = await self.history_store.start_turn(
-            user_id=session.user_id,
-            conversation_id=session.conversation_id,
-            run_id=str(session.run_id),
-            user_content=message,
-        )
-        started_at = time.perf_counter()
-
+        self._begin_conversation_run(resolved_conversation_id)
         try:
-            response = await self._service_for_config(
-                llm_config,
-                memory_llm_config,
-            ).invoke(session)
-        except Exception:
-            await self.history_store.mark_interrupted(
-                message_id=assistant_message_id,
+            session = Session.create(
+                message=message,
+                conversation_id=resolved_conversation_id,
+                db=db,
+                user_id=DEFAULT_USER_ID,
+                llm_profile=llm_config.snapshot() if llm_config else None,
+                memory_llm_profile=self._memory_llm_profile_snapshot(
+                    llm_config,
+                    memory_llm_config,
+                ),
+                paper_search_source_limits=source_limits,
             )
-            raise
 
-        await self.history_store.complete_assistant_message(
-            message_id=assistant_message_id,
-            response=response,
-            latency_ms=self._elapsed_ms(started_at),
-            extra_meta=self._llm_profile_meta(session),
-        )
-        self._schedule_consolidation(session=session, response=response)
+            assistant_message_id = await self.history_store.start_turn(
+                user_id=session.user_id,
+                conversation_id=session.conversation_id,
+                run_id=str(session.run_id),
+                user_content=message,
+            )
+            started_at = time.perf_counter()
 
-        return response
+            try:
+                response = await self._service_for_config(
+                    llm_config,
+                    memory_llm_config,
+                ).invoke(session)
+            except Exception:
+                await self.history_store.mark_interrupted(
+                    message_id=assistant_message_id,
+                )
+                raise
+
+            await self.history_store.complete_assistant_message(
+                message_id=assistant_message_id,
+                response=response,
+                latency_ms=self._elapsed_ms(started_at),
+                extra_meta=self._llm_profile_meta(session),
+            )
+            self._schedule_consolidation(session=session, response=response)
+
+            return response
+        finally:
+            self._finish_conversation_run(resolved_conversation_id)
 
     async def chat_stream(
         self,
@@ -109,40 +121,44 @@ class AgentRuntime:
         resolved_conversation_id = self.resolve_conversation_id(conversation_id)
         source_limits = get_source_limits(db)
         run_id = f"run_{uuid4().hex}"
-        assistant_message_id = await self.history_store.start_turn(
-            user_id=DEFAULT_USER_ID,
-            conversation_id=resolved_conversation_id,
-            run_id=run_id,
-            user_content=message,
-        )
-
-        stream_run = DetachedStreamRun(run_id)
-        self._register_stream_run(stream_run)
-        self._start_stream_task(
-            self._run_stream_task(
-                stream_run=stream_run,
-                message=message,
+        self._begin_conversation_run(resolved_conversation_id)
+        try:
+            assistant_message_id = await self.history_store.start_turn(
+                user_id=DEFAULT_USER_ID,
                 conversation_id=resolved_conversation_id,
                 run_id=run_id,
-                resume_payload=None,
-                resume_action_id=None,
-                assistant_message_id=assistant_message_id,
-                service=self._service_for_config(
-                    llm_config,
-                    memory_llm_config,
-                ),
-                llm_profile=llm_config.snapshot() if llm_config else None,
-                memory_llm_profile=self._memory_llm_profile_snapshot(
-                    llm_config,
-                    memory_llm_config,
-                ),
-                paper_search_source_limits=source_limits,
-            ),
-            run_id=run_id,
-        )
+                user_content=message,
+            )
 
-        async for event in stream_run.subscribe():
-            yield event
+            stream_run = DetachedStreamRun(run_id)
+            self._register_stream_run(stream_run)
+            self._start_stream_task(
+                self._run_stream_task(
+                    stream_run=stream_run,
+                    message=message,
+                    conversation_id=resolved_conversation_id,
+                    run_id=run_id,
+                    resume_payload=None,
+                    resume_action_id=None,
+                    assistant_message_id=assistant_message_id,
+                    service=self._service_for_config(
+                        llm_config,
+                        memory_llm_config,
+                    ),
+                    llm_profile=llm_config.snapshot() if llm_config else None,
+                    memory_llm_profile=self._memory_llm_profile_snapshot(
+                        llm_config,
+                        memory_llm_config,
+                    ),
+                    paper_search_source_limits=source_limits,
+                ),
+                run_id=run_id,
+            )
+        except Exception:
+            self._finish_conversation_run(resolved_conversation_id)
+            raise
+
+        return stream_run.subscribe()
 
     async def resume_chat(
         self,
@@ -153,43 +169,50 @@ class AgentRuntime:
         requested_action_id: str | None = None,
         db: DbSession,
     ) -> dict[str, Any]:
-        session, action_id, service = await self._resume_session(
-            conversation_id=conversation_id,
-            resume_payload=resume_payload,
-            requested_run_id=requested_run_id,
-            requested_action_id=requested_action_id,
-            db=db,
-        )
-        claim = await self.history_store.claim_pending_action(
-            user_id=session.user_id,
-            conversation_id=conversation_id,
-            run_id=str(session.run_id),
-            action_id=action_id,
-            decision=str(resume_payload["decision"]),
-            comment=resume_payload.get("comment"),
-        )
-        if not claim.claimed:
-            raise ValueError("The requested approval is already being processed")
-        assistant_message_id = claim.message_id
-        started_at = time.perf_counter()
-
+        self._begin_conversation_run(conversation_id)
         try:
-            response = await service.invoke(session)
-        except Exception:
-            await self.history_store.mark_interrupted(
-                message_id=assistant_message_id,
+            session, action_id, service = await self._resume_session(
+                conversation_id=conversation_id,
+                resume_payload=resume_payload,
+                requested_run_id=requested_run_id,
+                requested_action_id=requested_action_id,
+                db=db,
             )
-            raise
+            claim = await self.history_store.claim_pending_action(
+                user_id=session.user_id,
+                conversation_id=conversation_id,
+                run_id=str(session.run_id),
+                action_id=action_id,
+                decision=str(resume_payload["decision"]),
+                comment=resume_payload.get("comment"),
+            )
+            if not claim.claimed:
+                raise ValueError("The requested approval is already being processed")
+            assistant_message_id = claim.message_id
+            started_at = time.perf_counter()
 
-        await self.history_store.complete_assistant_message(
-            message_id=assistant_message_id,
-            response=response,
-            latency_ms=self._elapsed_ms(started_at),
-            extra_meta={**self._resume_meta(resume_payload, action_id), **self._llm_profile_meta(session)},
-        )
-        self._schedule_consolidation(session=session, response=response)
+            try:
+                response = await service.invoke(session)
+            except Exception:
+                await self.history_store.mark_interrupted(
+                    message_id=assistant_message_id,
+                )
+                raise
 
-        return response
+            await self.history_store.complete_assistant_message(
+                message_id=assistant_message_id,
+                response=response,
+                latency_ms=self._elapsed_ms(started_at),
+                extra_meta={
+                    **self._resume_meta(resume_payload, action_id),
+                    **self._llm_profile_meta(session),
+                },
+            )
+            self._schedule_consolidation(session=session, response=response)
+
+            return response
+        finally:
+            self._finish_conversation_run(conversation_id)
 
     async def resume_chat_stream(
         self,
@@ -200,47 +223,81 @@ class AgentRuntime:
         requested_action_id: str | None = None,
         db: DbSession,
     ) -> AsyncIterator[str]:
-        session, action_id, service = await self._resume_session(
-            conversation_id=conversation_id,
-            resume_payload=resume_payload,
-            requested_run_id=requested_run_id,
-            requested_action_id=requested_action_id,
-            db=db,
-        )
-        run_id = str(session.run_id)
-        claim = await self.history_store.claim_pending_action(
-            user_id=session.user_id,
-            conversation_id=conversation_id,
-            run_id=run_id,
-            action_id=action_id,
-            decision=str(resume_payload["decision"]),
-            comment=resume_payload.get("comment"),
-        )
-        if not claim.claimed:
-            raise ValueError("The requested approval is already being processed")
-        assistant_message_id = claim.message_id
-
-        stream_run = DetachedStreamRun(run_id)
-        self._register_stream_run(stream_run)
-        self._start_stream_task(
-            self._run_stream_task(
-                stream_run=stream_run,
-                message=None,
+        self._begin_conversation_run(conversation_id)
+        try:
+            session, action_id, service = await self._resume_session(
+                conversation_id=conversation_id,
+                resume_payload=resume_payload,
+                requested_run_id=requested_run_id,
+                requested_action_id=requested_action_id,
+                db=db,
+            )
+            run_id = str(session.run_id)
+            claim = await self.history_store.claim_pending_action(
+                user_id=session.user_id,
                 conversation_id=conversation_id,
                 run_id=run_id,
-                resume_payload=resume_payload,
-                resume_action_id=action_id,
-                assistant_message_id=assistant_message_id,
-                service=service,
-                llm_profile=session.llm_profile,
-                memory_llm_profile=session.memory_llm_profile,
-                paper_search_source_limits=None,
-            ),
-            run_id=run_id,
-        )
+                action_id=action_id,
+                decision=str(resume_payload["decision"]),
+                comment=resume_payload.get("comment"),
+            )
+            if not claim.claimed:
+                raise ValueError("The requested approval is already being processed")
+            assistant_message_id = claim.message_id
 
-        async for event in stream_run.subscribe():
-            yield event
+            stream_run = DetachedStreamRun(run_id)
+            self._register_stream_run(stream_run)
+            self._start_stream_task(
+                self._run_stream_task(
+                    stream_run=stream_run,
+                    message=None,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    resume_payload=resume_payload,
+                    resume_action_id=action_id,
+                    assistant_message_id=assistant_message_id,
+                    service=service,
+                    llm_profile=session.llm_profile,
+                    memory_llm_profile=session.memory_llm_profile,
+                    paper_search_source_limits=None,
+                ),
+                run_id=run_id,
+            )
+        except Exception:
+            self._finish_conversation_run(conversation_id)
+            raise
+
+        return stream_run.subscribe()
+
+    async def delete_conversation(
+        self,
+        *,
+        conversation_id: str,
+        db: DbSession,
+    ) -> dict[str, Any]:
+        if self._is_conversation_busy(conversation_id):
+            raise ConflictException("会话正在执行，暂不能删除")
+        if conversation_id in self._deleting_conversations:
+            raise ConflictException("会话正在删除，请稍后重试")
+
+        self._deleting_conversations.add(conversation_id)
+        try:
+            await self.agent_service.checkpointer.adelete_thread(conversation_id)
+            self._delete_conversation_memory(
+                db=db,
+                conversation_id=conversation_id,
+            )
+            await self.history_store.delete_conversation(
+                user_id=DEFAULT_USER_ID,
+                conversation_id=conversation_id,
+            )
+        finally:
+            self._deleting_conversations.discard(conversation_id)
+
+        return {
+            "conversation_id": conversation_id,
+            "deleted": True,
+        }
 
     def _register_stream_run(self, stream_run: DetachedStreamRun) -> None:
         self._active_stream_runs.add(stream_run)
@@ -257,6 +314,57 @@ class AgentRuntime:
         task = asyncio.create_task(coroutine, name=f"agent-stream:{run_id}")
         self._active_stream_tasks.add(task)
         task.add_done_callback(self._active_stream_tasks.discard)
+
+    def _begin_conversation_run(self, conversation_id: str) -> None:
+        if conversation_id in self._deleting_conversations:
+            raise ConflictException("会话正在删除，暂不能执行")
+        self._active_conversation_runs[conversation_id] = (
+            self._active_conversation_runs.get(conversation_id, 0) + 1
+        )
+
+    def _finish_conversation_run(self, conversation_id: str) -> None:
+        active_count = self._active_conversation_runs.get(conversation_id, 0)
+        if active_count <= 1:
+            self._active_conversation_runs.pop(conversation_id, None)
+            return
+        self._active_conversation_runs[conversation_id] = active_count - 1
+
+    def _is_conversation_busy(self, conversation_id: str) -> bool:
+        return (
+            self._active_conversation_runs.get(conversation_id, 0) > 0
+            or (DEFAULT_USER_ID, conversation_id)
+            in self._active_consolidation_scopes
+        )
+
+    @staticmethod
+    def _delete_conversation_memory(
+        *,
+        db: DbSession,
+        conversation_id: str,
+    ) -> None:
+        try:
+            db.execute(
+                delete(MemoryFact).where(
+                    MemoryFact.user_id == DEFAULT_USER_ID,
+                    MemoryFact.source_conversation_id == conversation_id,
+                )
+            )
+            db.execute(
+                delete(MemoryEpisode).where(
+                    MemoryEpisode.user_id == DEFAULT_USER_ID,
+                    MemoryEpisode.source_conversation_id == conversation_id,
+                )
+            )
+            db.execute(
+                delete(MemoryConsolidationCursor).where(
+                    MemoryConsolidationCursor.user_id == DEFAULT_USER_ID,
+                    MemoryConsolidationCursor.conversation_id == conversation_id,
+                )
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
 
     def _schedule_consolidation(
         self,
@@ -369,6 +477,7 @@ class AgentRuntime:
         finally:
             stream_run.finish()
             self._unregister_stream_run(stream_run)
+            self._finish_conversation_run(conversation_id)
 
     async def _run_stream_worker(
         self,
