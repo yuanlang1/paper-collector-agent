@@ -10,10 +10,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
+from app.llm.graph.workflows.paper_search_schemas import PromptUnderstandingArgs
 from app.llm.model_factory import create_validated_structured_chat_model
-from app.llm.tools.task_tools.search_task.args import (
-    PromptUnderstandingArgs,
-)
 
 
 RECOMMENDATION_SYSTEM_PROMPT = """

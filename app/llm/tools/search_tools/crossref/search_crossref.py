@@ -9,10 +9,9 @@ from typing import Any, Dict
 from urllib.parse import quote
 
 import httpx
-from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.llm.tools.registry import Tool
+from app.llm.tools.registry import Tool, ToolExecutionContext
 from app.llm.tools.search_tools.common import (
     RETRYABLE_STATUS_CODES,
     clean_text,
@@ -294,9 +293,9 @@ def _query_label(args: CrossrefSearchArgs) -> str:
 
 async def crossref_search_handler(
     params: Dict[str, Any],
-    _db: Session,
+    context: ToolExecutionContext,
 ) -> Dict[str, Any]:
-    del _db
+    del context
 
     args = CrossrefSearchArgs.model_validate(params)
     started_at = time.perf_counter()

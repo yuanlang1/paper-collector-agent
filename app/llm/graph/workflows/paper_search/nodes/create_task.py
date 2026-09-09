@@ -11,9 +11,7 @@ from app.infrastructure.grpc.task_service_grpc_client import (
     task_service_grpc_client,
 )
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.tools.task_tools.search_task.args import (
-    AddQueryTaskArgs,
-)
+from app.llm.tools.task_tools.search_task.search_task_create import AddQueryTaskArgs
 
 
 def _is_valid_task_id(value: Any) -> bool:

@@ -11,19 +11,15 @@ from app.config import settings
 from app.llm.model_factory import (
     create_validated_structured_chat_model,
 )
-from app.llm.tools.search_tools.arxiv.search_args import (
-    ArxivSearchArgs,
-)
-from app.llm.tools.search_tools.crossref.search_crossref import CrossrefSearchArgs
-from app.llm.tools.search_tools.dblp.search_args import (
-    DblpSearchArgs,
-)
-from app.llm.tools.search_tools.google_scholar.search_google_scholar import GoogleScholarSearchArgs
-from app.llm.tools.task_tools.search_task.args import (
+from app.llm.graph.workflows.paper_search_schemas import (
     PromptUnderstandingArgs,
     SearchTagArgs,
     SourceTypeValue,
 )
+from app.llm.tools.search_tools.arxiv.search_arxiv import ArxivSearchArgs
+from app.llm.tools.search_tools.crossref.search_crossref import CrossrefSearchArgs
+from app.llm.tools.search_tools.dblp.search_dblp import DblpSearchArgs
+from app.llm.tools.search_tools.google_scholar.search_google_scholar import GoogleScholarSearchArgs
 
 
 SourceName = Literal["arXiv", "DBLP", "Crossref", "Google Scholar"]

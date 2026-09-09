@@ -8,7 +8,7 @@ from langchain_core.runnables.config import set_config_context
 from langgraph.types import interrupt
 
 from app.llm.graph.workflows.paper_search.nodes.build_search_tag import with_derived_year_tag
-from app.llm.tools.task_tools.search_task.args import (
+from app.llm.graph.workflows.paper_search_schemas import (
     PromptUnderstandingArgs,
     SearchTagArgs,
 )

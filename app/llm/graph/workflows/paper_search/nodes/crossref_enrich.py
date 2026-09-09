@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from app.llm.artifacts.store import LocalArtifactStore
+from app.llm.graph.workflows.paper_search_schemas import PaperTypeCode
 from app.llm.tools.search_tools.crossref.search_crossref import (
     crossref_search_handler,
 )
-from app.llm.tools.task_tools.search_task.args import PaperTypeCode
 
 
 CrossrefSearch = Callable[
