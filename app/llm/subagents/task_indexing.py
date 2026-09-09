@@ -36,27 +36,5 @@ def build_task_indexing_runtime() -> SubAgentRuntime:
         graph=build_task_indexing_workflow(),
         error_code="TASK_INDEXING_SUBGRAPH_FAILED",
         failure_summary="知识库索引工作流执行失败，未确认索引完成。",
-        stream=SubAgentStreamSpec(
-            workflow="task_indexing",
-            phases=(
-                ("prepare", "校验任务状态"),
-                ("index", "索引论文到知识库"),
-                ("verify", "确认索引结果"),
-                ("finalize", "汇总索引结果"),
-            ),
-            node_phases={
-                "initialize": "prepare",
-                "check_rag_status": "prepare",
-                "run_or_wait": "index",
-                "verify_completion": "verify",
-                "finalize_result": "finalize",
-            },
-            detail_state_keys={
-                "overall_summary": "overall_summary",
-                "committed_summary": "committed_summary",
-                "overall_progress_percent": "overall_progress_percent",
-                "committed_progress_percent": "committed_progress_percent",
-                "error_code": "error_code",
-            },
-        ),
+        stream=SubAgentStreamSpec(workflow="task_indexing"),
     )

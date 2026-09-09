@@ -4,11 +4,12 @@ from collections.abc import Callable
 import logging
 
 from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.runnables import RunnableConfig
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.llm.graph.main.state import MainAgentState
-from app.llm.streaming.tool_event import emit_custom_event
+from app.llm.streaming.notify import langgraph_notifier
 from app.llm.streaming.utils import content_to_text
 from app.memory.schemas import MemoryUsage
 from app.memory.soul import SoulLoadError
@@ -34,7 +35,12 @@ class MemoryNode:
         self.llm_config = llm_config
         self.memory_llm_config = memory_llm_config
 
-    async def __call__(self, state: MainAgentState) -> dict[str, object]:
+    async def __call__(
+        self,
+        state: MainAgentState,
+        config: RunnableConfig | None = None,
+    ) -> dict[str, object]:
+        notify = langgraph_notifier(config).scoped(source="memory", node="memory")
         conversation_window_start_id = (
             self._conversation_window_start_id(state)
         )
@@ -48,7 +54,10 @@ class MemoryNode:
                 db=db,
                 llm_config=self.llm_config,
                 memory_llm_config=self.memory_llm_config,
-                on_memory_event=emit_custom_event,
+                on_memory_event=lambda event: notify(
+                    str(event.get("event") or "memory_progress"),
+                    {key: value for key, value in event.items() if key != "event"},
+                ),
             )
             return {
                 "conversation_window_start_id": conversation_window_start_id,
@@ -59,12 +68,9 @@ class MemoryNode:
             raise
         except Exception:
             logger.exception("Memory node failed; continuing without retrieved memory")
-            emit_custom_event(
-                {
-                    "event": "memory_retrieval_failed",
-                    "facts_count": 0,
-                    "episodes_count": 0,
-                }
+            notify(
+                "memory_retrieval_failed",
+                {"facts_count": 0, "episodes_count": 0},
             )
             fallback_content = ""
             try:

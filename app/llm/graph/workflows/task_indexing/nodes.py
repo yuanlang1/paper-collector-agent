@@ -4,16 +4,12 @@ import asyncio
 from collections.abc import Mapping
 from typing import Any
 
+from langchain_core.runnables import RunnableConfig
 from pydantic import ValidationError
 
 from app.infrastructure.grpc.task_service_grpc_client import TaskState
 from app.llm.graph.main.nodes.tool import build_action_result_update
-from app.llm.streaming.tool_event import (
-    emit_tool_completed,
-    emit_tool_failed,
-    emit_tool_progress,
-    emit_tool_started,
-)
+from app.llm.streaming.notify import Notifier, langgraph_notifier
 from app.llm.subagents.task_indexing import TaskIndexingDelegation
 from app.rag.processing.task_rag_batch_runner import (
     RagProgressEvent,
@@ -50,7 +46,7 @@ def _status_update(status: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _emit_total_progress(
+def _total_progress_payload(
     *,
     task_id: int,
     summary: Mapping[str, int],
@@ -60,7 +56,7 @@ def _emit_total_progress(
     committed_summary: Mapping[str, int] | None = None,
     committed_progress_percent: int | None = None,
     batch_summary: Mapping[str, int] | None = None,
-) -> None:
+) -> dict[str, Any]:
     completed = sum(int(summary.get(key, 0)) for key in ("ready", "skipped", "failed"))
     batch = dict(batch_summary or {})
     batch_completed = sum(int(batch.get(key, 0)) for key in ("ready", "skipped", "failed"))
@@ -68,13 +64,15 @@ def _emit_total_progress(
     if batch.get("total"):
         message += f"；当前批次：{batch_completed}/{batch['total']} 篇"
 
-    emit_tool_progress(
-        "task_indexing_agent",
-        progress=progress_percent,
-        display_name="知识库索引子代理",
-        message=message,
-        data={
-            "task_id": task_id,
+    return {
+        "progress": progress_percent,
+        "progress_percent": progress_percent,
+        "phase": "index",
+        "phase_label": "索引论文到知识库",
+        "status": "running",
+        "task_id": task_id,
+        "message": message,
+        "data": {
             "batch_id": batch_id,
             "event_type": event_type,
             "summary": dict(summary),
@@ -86,7 +84,7 @@ def _emit_total_progress(
                 else committed_progress_percent
             ),
         },
-    )
+    }
 
 
 def _failure(
@@ -186,29 +184,36 @@ class RunOrWaitTaskRagNode:
     def __init__(self, runner=None) -> None:
         self.runner = runner or get_task_rag_batch_runner()
 
-    async def __call__(self, state: Mapping[str, Any]) -> dict[str, Any]:
+    async def __call__(
+        self,
+        state: Mapping[str, Any],
+        config: RunnableConfig | None = None,
+    ) -> dict[str, Any]:
         task_id = state["task_id"]
         latest_event: RagProgressEvent | None = None
+        notify = langgraph_notifier(config).scoped(
+            source="subagent",
+            workflow="task_indexing",
+            node="run_or_wait",
+        )
 
         def on_rag_event(event: RagProgressEvent) -> None:
             nonlocal latest_event
             latest_event = event
-            _emit_total_progress(
-                task_id=event.task_id,
-                summary=event.summary,
-                progress_percent=event.progress_percent,
-                batch_id=event.batch_id,
-                event_type=event.type,
-                committed_summary=event.committed_summary,
-                committed_progress_percent=event.committed_progress_percent,
-                batch_summary=event.batch_summary,
+            notify(
+                "subagent_progress",
+                _total_progress_payload(
+                    task_id=event.task_id,
+                    summary=event.summary,
+                    progress_percent=event.progress_percent,
+                    batch_id=event.batch_id,
+                    event_type=event.type,
+                    committed_summary=event.committed_summary,
+                    committed_progress_percent=event.committed_progress_percent,
+                    batch_summary=event.batch_summary,
+                ),
             )
 
-        emit_tool_started(
-            "task_indexing_agent",
-            display_name="知识库索引子代理",
-            message="正在索引任务论文到知识库。",
-        )
         if state["remote_task_state"] == TaskState.SEARCH_COMPLETED.name:
             handle = await self.runner.start_or_join(
                 task_id,
@@ -221,7 +226,7 @@ class RunOrWaitTaskRagNode:
                 listener=on_rag_event,
             )
             if handle is None:
-                return await self._wait_for_remote_task(state)
+                return await self._wait_for_remote_task(state, notify)
 
         try:
             worker_result = await wait_for_rag_run(
@@ -235,6 +240,8 @@ class RunOrWaitTaskRagNode:
                 state=state,
                 timed_out=True,
             )
+        finally:
+            await handle.unsubscribe()
 
         event_update = self._event_update(latest_event)
         worker = {
@@ -270,14 +277,18 @@ class RunOrWaitTaskRagNode:
     async def _wait_for_remote_task(
         self,
         state: Mapping[str, Any],
+        notify: Notifier,
     ) -> dict[str, Any]:
         async def on_status(status: dict[str, Any]) -> None:
             summary = status["result"]["summary"]
-            _emit_total_progress(
-                task_id=state["task_id"],
-                summary=summary,
-                progress_percent=rag_progress_percent(summary),
-                event_type="remote_status",
+            notify(
+                "subagent_progress",
+                _total_progress_payload(
+                    task_id=state["task_id"],
+                    summary=summary,
+                    progress_percent=rag_progress_percent(summary),
+                    event_type="remote_status",
+                ),
             )
 
         status = await wait_for_rag_terminal_status(
@@ -365,12 +376,6 @@ async def finalize_task_indexing_node(
         "worker_result": state.get("worker_result"),
     }
     if state.get("stage") == "completed":
-        emit_tool_completed(
-            "task_indexing_agent",
-            display_name="知识库索引子代理",
-            message="任务论文已全部保存到知识库。",
-            data=data,
-        )
         return build_action_result_update(
             call=call,
             status="success",
@@ -384,12 +389,6 @@ async def finalize_task_indexing_node(
 
     error_code = str(state.get("error_code") or "TASK_INDEXING_FAILED")
     retryable = state.get("stage") == "timed_out"
-    emit_tool_failed(
-        "task_indexing_agent",
-        display_name="知识库索引子代理",
-        message=str(state.get("error") or "知识库索引失败。"),
-        data=data,
-    )
     return build_action_result_update(
         call=call,
         status="error",

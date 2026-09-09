@@ -1,11 +1,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy.orm import Session
+
+from app.llm.streaming.notify import NOOP_NOTIFIER, Notifier
 
 
 @dataclass(frozen=True)
@@ -16,6 +18,14 @@ class ToolExecutionContext:
     user_id: str = "0"
     conversation_id: str = ""
     run_id: str = ""
+    _notify: Notifier = NOOP_NOTIFIER
+
+    def notify(
+        self,
+        kind: str,
+        payload: Mapping[str, Any] | None = None,
+    ) -> None:
+        self._notify(kind, payload)
 
 
 ToolHandler = Callable[

@@ -7,7 +7,7 @@ from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 
-from app.llm.streaming.tool_event import emit_custom_event
+from app.llm.streaming.notify import langgraph_notifier
 
 
 Node = Callable[..., Awaitable[dict[str, Any]]]
@@ -242,8 +242,6 @@ def _event_payload(
     suffix = f":{iteration}" if iteration is not None else ""
 
     return {
-        "event": "timeline_step",
-        "workflow": workflow,
         "step_id": f"{workflow}:{step.key}{suffix}",
         "step_key": step.key,
         "label": label,
@@ -271,8 +269,12 @@ def instrument_timeline_node(
         state: Mapping[str, Any],
         config: RunnableConfig,
     ) -> dict[str, Any]:
+        notify = langgraph_notifier(config).scoped(
+            workflow=workflow,
+            node=node_name,
+        )
         if node_name in step.starts_at:
-            emit_custom_event(_event_payload(
+            notify("timeline_step", _event_payload(
                 workflow=workflow,
                 step=step,
                 state=state,
@@ -285,7 +287,7 @@ def instrument_timeline_node(
                 node(state, config) if accepts_config else node(state)
             )
         except Exception as exc:
-            emit_custom_event(_event_payload(
+            notify("timeline_step", _event_payload(
                 workflow=workflow,
                 step=step,
                 state=state,
@@ -297,7 +299,7 @@ def instrument_timeline_node(
 
         error = result.get("error")
         if error:
-            emit_custom_event(_event_payload(
+            notify("timeline_step", _event_payload(
                 workflow=workflow,
                 step=step,
                 state=state,
@@ -306,7 +308,7 @@ def instrument_timeline_node(
                 error=str(error),
             ))
         elif node_name in step.completes_at:
-            emit_custom_event(_event_payload(
+            notify("timeline_step", _event_payload(
                 workflow=workflow,
                 step=step,
                 state=state,

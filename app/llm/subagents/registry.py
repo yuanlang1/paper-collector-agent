@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel
@@ -27,15 +27,6 @@ class SubAgentSpec:
 @dataclass(frozen=True)
 class SubAgentStreamSpec:
     workflow: str
-    phases: tuple[tuple[str, str], ...]
-    node_phases: Mapping[str, str]
-    iteration_key: str | None = None
-    task_id_keys: tuple[str, ...] = (
-        "paper_service_task_id",
-        "task_id",
-    )
-    terminal_nodes: frozenset[str] = frozenset({"finalize_result"})
-    detail_state_keys: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -64,15 +55,6 @@ class SubAgentRegistry:
                 raise ValueError(f"子代理 {runtime.spec.name} 缺少执行图。")
             if not runtime.error_code or not runtime.failure_summary:
                 raise ValueError(f"子代理 {runtime.spec.name} 缺少失败策略。")
-            phase_keys = {key for key, _label in runtime.stream.phases}
-            if not phase_keys:
-                raise ValueError(f"子代理 {runtime.spec.name} 缺少流式阶段。")
-            unknown_phases = set(runtime.stream.node_phases.values()) - phase_keys
-            if unknown_phases:
-                raise ValueError(
-                    f"子代理 {runtime.spec.name} 含未定义流式阶段："
-                    f"{sorted(unknown_phases)}"
-                )
 
     def all_specs(self) -> tuple[SubAgentSpec, ...]:
         return tuple(runtime.spec for runtime in self._runtimes.values())

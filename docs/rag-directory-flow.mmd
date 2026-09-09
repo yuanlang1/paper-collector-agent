@@ -1,0 +1,76 @@
+flowchart TD
+    Trigger(["任务检索完成<br/>task_indexing 工作流"])
+    Runner["TaskRagBatchRunner<br/>同一 task_id 复用同一个后台 worker"]
+    Claim["RagGrpcClient 领取待索引论文<br/>每批最多 20 篇，租约 1800 秒"]
+
+    subgraph Indexing["一、建库：app/rag/processing + file_parser + data_preparation + index_construction"]
+        Inputs["PaperRagInput<br/>paper_id、标题、摘要、PDF URL"]
+        Url{"PDF URL 是否存在且格式有效？"}
+        Skipped["结果：skipped<br/>缺少或无可索引正文"]
+        Parser["FileParser / MinerU<br/>按兼容选项分组，单批最多 50 个文件<br/>限制并行批次"]
+        ParseError["结果：failed<br/>PDF 解析、下载或 MinerU 错误"]
+        Parent["父文档 Document<br/>绑定 paper_id、title、abstract、year"]
+        Split["DataPreparationModule<br/>清理 Markdown → 按标题切分<br/>递归分块：1200 字符、200 重叠<br/>写入 section_path、chunk_id、chunk_index"]
+        IndexLock["索引临界区<br/>PaperRagProcessor._index_lock"]
+        PaperIndex["PaperIndexConstructionModule<br/>一篇论文一条：title + abstract"]
+        ContentIndex["PaperContentIndexConstructionModule<br/>每个正文块一条；清理已过期块"]
+        Embed["每批同时生成两种向量<br/>稠密：SiliconFlow BGE-M3 或本地 BGE-M3<br/>稀疏：FastEmbed BM25"]
+        Qdrant[("Qdrant<br/>paper collection + paper_content collection<br/>COSINE dense / IDF sparse")]
+
+        Inputs --> Url
+        Url -->|否| Skipped
+        Url -->|是| Parser
+        Parser -->|解析失败| ParseError
+        Parser -->|Markdown Document| Parent
+        Parent --> Split
+        Parent --> IndexLock
+        Split --> IndexLock
+        IndexLock --> PaperIndex
+        IndexLock --> ContentIndex
+        PaperIndex --> Embed
+        ContentIndex --> Embed
+        Embed --> Qdrant
+    end
+
+    Commit["complete_task_rag_batch<br/>回写每篇 ready / skipped / failed 与 chunk_count"]
+    State{"远端任务状态"}
+    Done(["RAG_COMPLETED<br/>可生成综述"])
+    Failed(["RAG_FAILED 或 worker 异常<br/>停止后续批次"])
+
+    subgraph Retrieval["二、取证：app/rag/retrieval，被 review_generate 调用"]
+        Claims["综述工作流生成 Claims<br/>每项包含 rag_query + paper_ids_snapshot"]
+        QueryVectors["对 rag_query 同时生成<br/>稠密向量 + BM25 稀疏向量"]
+        PaperSearch["PaperHybridRetrievalModule<br/>在 paper collection 做 RRF 混合检索<br/>过滤为任务快照内论文，取前 5 篇"]
+        Candidates["候选 paper_id 集合<br/>若无候选则回退到完整任务快照"]
+        ChunkSearch["PaperContentHybridRetrievalModule<br/>在 paper_content collection 做 RRF 检索<br/>以候选论文过滤，取前 10 个正文块"]
+        Ledger["Evidence Ledger<br/>支持论文、文本片段、section_path、分数"]
+        Generate(["渲染章节与生成文献综述"])
+
+        Claims --> QueryVectors
+        QueryVectors --> PaperSearch
+        PaperSearch --> Candidates
+        Candidates --> ChunkSearch
+        ChunkSearch --> Ledger
+        Ledger --> Generate
+    end
+
+    Trigger --> Runner
+    Runner --> Claim
+    Claim --> Inputs
+    Skipped --> Commit
+    ParseError --> Commit
+    Qdrant --> Commit
+    Commit --> State
+    State -->|RAG_RUNNING 且本批成功| Claim
+    State -->|RAG_COMPLETED| Done
+    State -->|本批失败、无可领取论文或异常| Failed
+    Done --> Claims
+
+    classDef store fill:#e8f1ff,stroke:#4d78c9,color:#102a43;
+    classDef process fill:#eaf7ee,stroke:#39855a,color:#16351f;
+    classDef result fill:#fff5db,stroke:#ba8b24,color:#493506;
+    classDef error fill:#ffe9e7,stroke:#bc4741,color:#5e1713;
+    class Qdrant store;
+    class Runner,Claim,Parser,Parent,Split,IndexLock,PaperIndex,ContentIndex,Embed,Claims,QueryVectors,PaperSearch,Candidates,ChunkSearch,Ledger process;
+    class Skipped,Done,Generate result;
+    class ParseError,Failed error;

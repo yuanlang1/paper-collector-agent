@@ -1,5 +1,4 @@
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import AsyncIterator, Awaitable, Callable
 import logging
 from typing import Any
 
@@ -19,6 +18,7 @@ from app.services.llm_profile_service import LlmRuntimeConfig
 from app.llm.response import build_chat_response, build_done_payload
 from app.llm.streaming import AgentStreamAdapter
 from app.llm.streaming.card_snapshot import CardMetaAccumulator
+from app.llm.streaming.notify import EventEnvelope, build_event
 from app.llm.streaming.utils import (
     content_to_text,
     extract_interrupt_payload,
@@ -26,7 +26,6 @@ from app.llm.streaming.utils import (
 )
 from app.llm.subagents.registry import (
     SubAgentRegistry,
-    SubAgentRuntime,
     build_default_subagent_registry,
 )
 from app.runtime.session import Session
@@ -40,27 +39,6 @@ TerminalCallback = Callable[
     [dict[str, Any], dict[str, Any]],
     Awaitable[None],
 ]
-
-
-@dataclass(frozen=True)
-class _SubagentStreamContext:
-    action_id: str
-    runtime: SubAgentRuntime
-
-
-def _subagent_checkpoint_namespace(
-    namespace: tuple[Any, ...],
-    subagent_registry: SubAgentRegistry,
-) -> str | None:
-    for item in namespace:
-        value = str(item)
-        workflow = value.split(":", 1)[0]
-        if (
-            workflow == "subagent"
-            or subagent_registry.get_by_stream_workflow(workflow) is not None
-        ):
-            return value
-    return None
 
 
 class AgentService:
@@ -134,50 +112,17 @@ class AgentService:
             provider=(getattr(self, "llm_config", None).provider if getattr(self, "llm_config", None) else getattr(settings, "LLM_PROVIDER", None)),
         )
         latest_root_state: dict[str, Any] = {}
-        active_subagent_context: _SubagentStreamContext | None = None
-        subagent_context_by_namespace: dict[
-            str,
-            _SubagentStreamContext,
-        ] = {}
-        subagent_states: dict[str, dict[str, Any]] = {}
 
-        def emit(event: str, data: dict[str, Any]) -> str:
-            envelope = session.build_sse_envelope(event, data)
+        def encode_sse_event(event: EventEnvelope) -> str:
+            envelope = session.build_sse_envelope(
+                str(event["event"]),
+                {key: value for key, value in event.items() if key != "event"},
+            )
             card_meta.observe(envelope)
             return session.encode_sse_envelope(envelope)
 
-        def subagent_context(
-            namespace: tuple[Any, ...],
-            *,
-            workflow: str | None = None,
-        ) -> tuple[str, _SubagentStreamContext] | None:
-            key = _subagent_checkpoint_namespace(
-                namespace,
-                self.subagent_registry,
-            )
-            if key is None:
-                return None
-
-            existing = subagent_context_by_namespace.get(key)
-            if existing is not None:
-                return key, existing
-
-            runtime = self.subagent_registry.get_by_stream_workflow(workflow)
-            if runtime is None and active_subagent_context is not None:
-                runtime = active_subagent_context.runtime
-            if (
-                runtime is None
-                or active_subagent_context is None
-                or runtime.spec.name
-                != active_subagent_context.runtime.spec.name
-            ):
-                return None
-
-            subagent_context_by_namespace[key] = active_subagent_context
-            return key, active_subagent_context
-
         try:
-            yield emit("run_started", {"status": "running"})
+            yield encode_sse_event(build_event("run_started", {"status": "running"}))
 
             async for namespace, stream_type, chunk in self.graph.astream(
                 session.graph_input,
@@ -196,36 +141,12 @@ class AgentService:
                         getattr(message_chunk, "content", ""),
                     )
                     if text:
-                        yield emit("message", {"content": text})
+                        yield encode_sse_event(build_event("message", {"content": text}))
                     continue
 
                 if stream_type == "custom":
-                    for event_name, payload in adapter.handle_custom(chunk):
-                        timeline_context: dict[str, Any] = {}
-                        if event_name == "timeline_step":
-                            context = subagent_context(
-                                namespace,
-                                workflow=str(payload.get("workflow") or ""),
-                            )
-                            if context is not None:
-                                child_namespace, child_context = context
-                                timeline_context = {
-                                    "delegation_id": child_context.action_id,
-                                    "child_thread_id": (
-                                        f"{session.conversation_id}:"
-                                        f"{child_context.runtime.spec.name}:"
-                                        f"{child_context.action_id}"
-                                    ),
-                                    "checkpoint_namespace": child_namespace,
-                                }
-                        yield emit(
-                            event_name,
-                            {
-                                **payload,
-                                **timeline_context,
-                                "namespace": list(namespace),
-                            },
-                        )
+                    for event in adapter.handle_custom(chunk):
+                        yield encode_sse_event(event)
                     continue
 
                 if stream_type != "updates":
@@ -242,12 +163,8 @@ class AgentService:
                         conversation_id=session.conversation_id,
                         run_id=str(session.run_id),
                     )
-                    event_name, payload = adapter.confirmation_required(
-                        interrupt_payload,
-                    )
-                    terminal_event = emit(
-                        event_name,
-                        {**payload, "namespace": list(namespace)},
+                    terminal_event = encode_sse_event(
+                        adapter.confirmation_required(interrupt_payload),
                     )
                     await self._notify_terminal(
                         on_terminal,
@@ -266,63 +183,12 @@ class AgentService:
 
                     if not namespace:
                         latest_root_state.update(update)
-                        if node_name == "dispatch":
-                            active_call = update.get("active_tool_call")
-                            if (
-                                isinstance(active_call, Mapping)
-                                and active_call.get("kind") == "subagent"
-                            ):
-                                action_id = active_call.get("id")
-                                runtime = self.subagent_registry.get_runtime(
-                                    str(active_call.get("name") or ""),
-                                )
-                                if action_id is not None and runtime is not None:
-                                    active_subagent_context = (
-                                        _SubagentStreamContext(
-                                            action_id=str(action_id),
-                                            runtime=runtime,
-                                        )
-                                    )
-                        elif node_name == "subagent":
-                            result = update.get("last_action_result")
-                            if (
-                                isinstance(result, Mapping)
-                                and active_subagent_context is not None
-                                and str(result.get("action_id") or "")
-                                == active_subagent_context.action_id
-                            ):
-                                active_subagent_context = None
 
-                    context = subagent_context(namespace)
-                    if context is not None:
-                        child_namespace, child_context = context
-                        state = subagent_states.setdefault(child_namespace, {})
-                        state.update(update)
-                        event_name, payload = adapter.subagent_progress(
-                            runtime=child_context.runtime,
-                            action_id=child_context.action_id,
-                            child_thread_id=(
-                                f"{session.conversation_id}:"
-                                f"{child_context.runtime.spec.name}:"
-                                f"{child_context.action_id}"
-                            ),
-                            checkpoint_namespace=child_namespace,
-                            node_name=node_name,
-                            update=state,
-                        )
-                        yield emit(
-                            event_name,
-                            {**payload, "namespace": list(namespace)},
-                        )
-
-                    for event_name, payload in adapter.handle_update(
+                    for event in adapter.handle_update(
                         node_name=node_name,
                         update=update,
                     ):
-                        yield emit(
-                            event_name,
-                            {**payload, "namespace": list(namespace)},
-                        )
+                        yield encode_sse_event(event)
 
             final_state = await self._read_final_state(
                 config=session.graph_config,
@@ -338,7 +204,7 @@ class AgentService:
                 if response["status"] == "failed"
                 else "run_completed"
             )
-            terminal_event = emit(event_name, response)
+            terminal_event = encode_sse_event(build_event(event_name, response))
             await self._notify_terminal(
                 on_terminal,
                 response,
@@ -365,7 +231,7 @@ class AgentService:
                 "error": str(exc),
             }
 
-            terminal_event = emit("run_failed", response)
+            terminal_event = encode_sse_event(build_event("run_failed", response))
             await self._notify_terminal(
                 on_terminal,
                 response,

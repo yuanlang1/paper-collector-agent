@@ -2,16 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.llm.subagents.registry import SubAgentRegistry, SubAgentRuntime
+from app.llm.streaming.notify import EventEnvelope, build_event
+from app.llm.subagents.registry import SubAgentRegistry
 from app.llm.streaming.utils import (
     to_jsonable,
 )
 
 
-StreamEvent = tuple[
-    str,
-    dict[str, Any],
-]
+StreamEvent = EventEnvelope
 
 class AgentStreamAdapter:
     def __init__(
@@ -42,7 +40,7 @@ class AgentStreamAdapter:
             ):
                 self._seen_action_starts.add(str(action_id))
                 events.append(
-                    (
+                    build_event(
                         "action_started",
                         {
                             "action_id": str(action_id),
@@ -72,7 +70,7 @@ class AgentStreamAdapter:
                 self._seen_action_results.add(str(action_id))
 
                 events.append(
-                    (
+                    build_event(
                         "action_result",
                         self._result_payload(
                             result=result,
@@ -85,7 +83,7 @@ class AgentStreamAdapter:
 
         if (run_status == "failed" or update.get("error")):
             events.append(
-                (
+                build_event(
                     "node_error",
                     {
                         "node": node_name,
@@ -105,116 +103,15 @@ class AgentStreamAdapter:
         if not isinstance(normalized, dict):
             return []
 
-        event_name = normalized.get("event")
-
-        if not event_name:
-            return [(
-                    "progress",
-                    normalized,
-                )
-            ]
-
-        data = {
-            key: value
-            for key, value in normalized.items()
-            if key != "event"
-        }
-
-        return [(
-                str(event_name),
-                data,
-            )
-        ]
+        return [normalized] if normalized.get("event") else []
 
     def confirmation_required(
         self,
         payload: Any,
     ) -> StreamEvent:
-        return (
+        return build_event(
             "confirmation_required",
-            {
-                "interrupt": to_jsonable(payload)
-            },
-        )
-
-    def subagent_progress(
-        self,
-        *,
-        runtime: SubAgentRuntime,
-        action_id: str | None,
-        child_thread_id: str,
-        checkpoint_namespace: str,
-        node_name: str,
-        update: dict[str, Any],
-    ) -> StreamEvent:
-        stream = runtime.stream
-        phases = stream.phases
-        phase_key = stream.node_phases.get(node_name, phases[0][0])
-        phase_index = next(
-            (
-                index
-                for index, (key, _label) in enumerate(
-                    phases,
-                    start=1,
-                )
-                if key == phase_key
-            ),
-            1,
-        )
-        phase_label = dict(phases)[phase_key]
-        stage = update.get("stage")
-        terminal = node_name in stream.terminal_nodes
-        iteration = None
-        if stream.iteration_key and stream.iteration_key in update:
-            try:
-                iteration = int(update.get(stream.iteration_key, 0)) + 1
-            except (TypeError, ValueError):
-                iteration = 1
-        task_id = next(
-            (
-                update.get(key)
-                for key in stream.task_id_keys
-                if update.get(key) is not None
-            ),
-            None,
-        )
-        progress_percent = (
-            100
-            if terminal
-            else round(
-                phase_index / len(phases) * 100
-            )
-        )
-        details = {
-            public_key: to_jsonable(update[state_key])
-            for public_key, state_key in stream.detail_state_keys.items()
-            if state_key in update
-        }
-
-        return (
-            "subagent_progress",
-            {
-                "subagent": runtime.spec.name,
-                "workflow": stream.workflow,
-                "delegation_id": action_id,
-                "child_thread_id": child_thread_id,
-                "checkpoint_namespace": checkpoint_namespace,
-                "node": node_name,
-                "phase": phase_key,
-                "phase_label": phase_label,
-                "phase_index": phase_index,
-                "phase_count": len(phases),
-                "progress_percent": progress_percent,
-                "terminal": terminal,
-                "task_id": task_id,
-                "stage": stage,
-                "status": update.get("status"),
-                "progress": to_jsonable(update.get("progress") or {}),
-                "warnings": to_jsonable(update.get("warnings") or []),
-                "error": update.get("error"),
-                "iteration": iteration,
-                "details": details,
-            },
+            {"interrupt": to_jsonable(payload)},
         )
 
     def _workflow_for(self, action_name: Any) -> str | None:

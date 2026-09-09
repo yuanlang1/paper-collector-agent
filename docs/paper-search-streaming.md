@@ -1,43 +1,15 @@
-# Paper search 前端可视化接入
+# Agent SSE 事件
 
-前端通过 `POST /api/agent/chat/stream` 消费 SSE。task-service 只保存
-`SEARCH_PENDING/SEARCH_RUNNING/SEARCH_COMPLETED/SEARCH_FAILED/`
-`SEARCH_PARTIAL_COMPLETED` 等粗粒度状态；论文检索的
-实时节点、阶段、计数和警告由 `subagent_progress` 事件提供。
+前端通过 `POST /api/agent/chat/stream` 和
+`POST /api/agent/chat/resume/stream` 消费 SSE。由于接口使用 POST，前端应使用
+支持 POST 的 SSE 客户端或基于 `fetch()` 的 `ReadableStream` 解析响应。
 
-## 发起检索
-
-```http
-POST /api/agent/chat/stream
-Content-Type: application/json
-Accept: text/event-stream
-
-{
-  "message": "检索 2023 至 2026 年 arXiv 和 DBLP 中的 RAG evaluation 相关论文",
-  "conversation_id": "conv-123"
-}
-```
-
-该接口当前只接受 `message`、`conversation_id` 与 `llm_profile_id`。模型根据
-自然语言选择已注册子代理；请求体不支持 `subagent` 或 `constraints`，传入它们会
-被 Pydantic 忽略，不能用于强制指定子代理或约束条件。
-
-由于接口使用 POST，浏览器原生 `EventSource` 不能直接使用。前端可以使用
-支持 POST 的 SSE 客户端，或者基于 `fetch()` 的 `ReadableStream` 解析 SSE。
-
-## 可视化事件
+每条响应使用标准 SSE 事件名，`data` 是统一 JSON 信封：
 
 ```text
-run_started
-decision
-confirmation_required
-subagent_progress
-action_result
-message
-run_completed | run_failed
+event: subagent_progress
+data: {"event_id":"run_xxx:12","sequence":12,"event":"subagent_progress",...}
 ```
-
-每条 SSE 的 `data` 都包含统一信封：
 
 ```json
 {
@@ -46,153 +18,36 @@ run_completed | run_failed
   "event": "subagent_progress",
   "conversation_id": "conv-123",
   "run_id": "run_xxx",
-  "timestamp": "2026-07-29T08:00:00+00:00",
+  "timestamp": "2026-09-09T08:00:00+00:00",
   "data": {
-    "workflow": "paper_search"
+    "source": "subagent",
+    "delegation_id": "call-42",
+    "workflow": "task_indexing",
+    "progress": 47,
+    "message": "知识库索引：47/100 篇（47%）"
   }
 }
 ```
 
-`subagent_progress` 是论文检索时间线的主要数据源，其信封中的 `data` 为：
+`action_id` 和 `delegation_id` 是前端关联工具、子图和时间线的稳定键。SSE 不暴露
+LangGraph 的 `namespace`、`checkpoint_namespace` 或派生的子图线程标识。
 
-```json
-{
-  "workflow": "paper_search",
-  "subagent": "paper_search_agent",
-  "delegation_id": "action_xxx",
-  "task_id": 42,
-  "node": "search_arxiv",
-  "phase": "search",
-  "phase_label": "多来源检索",
-  "phase_index": 3,
-  "phase_count": 8,
-  "progress_percent": 38,
-  "terminal": false,
-  "stage": "normalizing",
-  "status": "running",
-  "progress": {
-    "task_created": 1,
-    "discovered": 25
-  },
-  "iteration": 1,
-  "details": {
-    "source_stats": {},
-    "task_status_update_error": null,
-    "pdf_cleanup_error": null,
-    "degraded": false,
-    "remote_task_state": "SEARCH_RUNNING"
-  },
-  "warnings": [],
-  "error": null
-}
-```
+## 事件
 
-`details` 只包含该子代理注册并且当前状态已提供的专属字段；其他子代理不会收到
-论文检索专属的空值或默认值。
+| 事件 | 用途 |
+| --- | --- |
+| `run_started`、`run_completed`、`run_failed` | 整个请求的生命周期。 |
+| `message`、`reasoning_delta` | 助手回复和推理增量。 |
+| `action_started`、`action_result` | 所有工具与子图共享的动作生命周期。 |
+| `tool_*` | 工具执行事件。 |
+| `subagent_*` | 子图的启动、真实业务进度、完成或失败。 |
+| `timeline_step` | 子图中可见阶段的开始、完成或失败。 |
+| `confirmation_required` | 需要用户确认后才能继续。 |
 
-同一个 `checkpoint_namespace` 的事件已经是后端累积后的子图快照。前端可以直接
-使用最新事件替换对应检索卡片，不需要自行拼接各节点的增量字段。
+`timeline_step` 描述当前子图执行到哪一步；`subagent_progress` 只在存在真实业务进度时
+发送。当前任务索引子图会转发 RAG worker 的进度；论文检索和文献综述主要发送
+`timeline_step`。
 
-## 推荐的前端状态
-
-```ts
-type PaperSearchView = {
-  delegationId: string
-  taskId: number | null
-  phase: string
-  phaseLabel: string
-  phaseIndex: number
-  phaseCount: number
-  progressPercent: number
-  node: string
-  stage: string | null
-  status: string | null
-  progress: Record<string, number>
-  iteration: number | null
-  details: Record<string, unknown>
-  warnings: string[]
-  error: string | null
-  terminal: boolean
-}
-```
-
-以 `delegation_id` 作为检索卡片主键；它来自根图 `dispatch` 输出的
-`active_tool_call.id`。主图通过通用 `subagent` 节点执行已注册子图，后端会把
-该调用 ID 绑定到实际 checkpoint namespace；因此 `timeline_step`、
-`subagent_progress` 与 `action_result` 可关联到同一个调用。
-
-论文检索的 `workflow`、阶段和节点映射由论文检索子图的运行时注册项提供。新增
-其他子图时，应在其自身注册项定义对应阶段，不应在主图或 SSE 分发代码新增名称分支。
-
-## 页面呈现建议
-
-固定展示八个阶段：
-
-1. 准备检索
-2. 生成检索计划
-3. 多来源检索
-4. 清洗与质量审核
-5. 论文信息补充
-6. 论文推荐
-7. 保存与清理
-8. 同步任务状态
-
-收到 `task_id` 后展示远程任务编号。收到
-`details.task_status_update_error` 时，应显示
-“检索结果已生成，但远程任务状态同步失败”，不能把它展示为完全成功。
-`terminal` 仅在 `finalize_result` 节点为 `true`；`persist` 返回终态结果时仍需
-等待 PDF 清理和远程任务状态同步。
-
-`run_completed` 表示主图已完成，不代表远程 task-service 一定同步成功；最终仍应
-检查最近一次 `subagent_progress.details.task_status_update_error` 和
-`action_result.status`。
-
-## TypeScript 消费示例
-
-以下示例使用支持 POST 的 SSE 客户端。关键点是读取统一信封的 `data` 字段：
-
-```ts
-import { fetchEventSource } from "@microsoft/fetch-event-source"
-
-const searches = new Map<string, PaperSearchView>()
-
-await fetchEventSource("/api/agent/chat/stream", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    Accept: "text/event-stream",
-  },
-  body: JSON.stringify({
-    message: "检索 2023 至 2026 年 arXiv 和 DBLP 中的 RAG evaluation 相关论文",
-    conversation_id: "conv-123",
-  }),
-  onmessage(message) {
-    const envelope = JSON.parse(message.data)
-
-    if (envelope.event === "subagent_progress") {
-      const progress = envelope.data
-      const key =
-        progress.delegation_id ?? progress.child_thread_id
-
-      searches.set(key, {
-        delegationId: progress.delegation_id,
-        taskId: progress.task_id,
-        phase: progress.phase,
-        phaseLabel: progress.phase_label,
-        phaseIndex: progress.phase_index,
-        phaseCount: progress.phase_count,
-        progressPercent: progress.progress_percent,
-        node: progress.node,
-        stage: progress.stage,
-        status: progress.status,
-        progress: progress.progress,
-        iteration: progress.iteration,
-        details: progress.details,
-        warnings: progress.warnings,
-        error: progress.error,
-        terminal: progress.terminal,
-      })
-    }
-  },
-})
-```
+前端以 `delegation_id` 建立子图卡片，以 `step_id` 更新其时间线。最终状态以
+`action_result.status` 为准。子图完成或失败事件中的嵌套 `data` 会持久化为
+`meta.card.subagents[].result`，用于会话刷新后的最终诊断展示。

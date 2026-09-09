@@ -236,7 +236,7 @@ class TaskRagBatchRunner:
             if self._runs.get(task_id) is run:
                 run.listeners.pop(listener_id, None)
 
-    async def _emit(
+    async def _publish_progress(
         self,
         *,
         task_id: int,
@@ -286,7 +286,7 @@ class TaskRagBatchRunner:
         ok: bool,
         error: RagError | None = None,
     ) -> RagRunResult:
-        await self._emit(
+        await self._publish_progress(
             task_id=task_id,
             run=run,
             event_type="completed" if ok else "failed",
@@ -310,7 +310,7 @@ class TaskRagBatchRunner:
 
         try:
             logger.info("Task %s RAG worker start.", task_id)
-            await self._emit(
+            await self._publish_progress(
                 task_id=task_id,
                 run=run,
                 event_type="started",
@@ -445,7 +445,7 @@ class TaskRagBatchRunner:
             run.summary["total"] = len(papers)
         run.summary["pending"] = max(0, run.summary["pending"] - len(papers))
         run.summary["indexing"] += len(papers)
-        await self._emit(
+        await self._publish_progress(
             task_id=task_id,
             run=run,
             event_type="claimed",
@@ -466,7 +466,7 @@ class TaskRagBatchRunner:
             run.summary[item.status] += 1
             if item.status == "ready":
                 run.summary["ready_chunks"] += item.chunk_count
-            await self._emit(
+            await self._publish_progress(
                 task_id=task_id,
                 run=run,
                 event_type="processing",
@@ -547,7 +547,7 @@ class TaskRagBatchRunner:
         run.summary = summary
         run.committed_summary = dict(summary)
         task_state = str(complete_result["task_state"])
-        await self._emit(
+        await self._publish_progress(
             task_id=task_id,
             run=run,
             event_type="batch_committed",
@@ -617,7 +617,7 @@ class TaskRagBatchRunner:
         summary = self._summary_from_complete(complete_result)
         run.summary = summary
         run.committed_summary = dict(summary)
-        await self._emit(
+        await self._publish_progress(
             task_id=task_id,
             run=run,
             event_type="batch_committed",

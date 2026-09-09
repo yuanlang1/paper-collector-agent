@@ -44,8 +44,13 @@ class CardMetaAccumulator:
             self._observe_action_started(data, sequence, timestamp)
         elif event == "action_result":
             self._observe_action_result(data, sequence, timestamp)
-        elif event == "subagent_progress":
-            self._observe_subagent_progress(data, sequence, timestamp)
+        elif event in {
+            "subagent_started",
+            "subagent_progress",
+            "subagent_completed",
+            "subagent_failed",
+        }:
+            self._observe_subagent_event(event, data, sequence, timestamp)
         elif event == "timeline_step":
             self._observe_timeline_step(data, sequence, timestamp)
         elif event.startswith("memory_retrieval_"):
@@ -206,19 +211,20 @@ class CardMetaAccumulator:
             current["finished_at"] = None
         self._memory = current
 
-    def _observe_subagent_progress(
+    def _observe_subagent_event(
         self,
+        event: str,
         data: dict[str, Any],
         sequence: int,
         timestamp: str,
     ) -> None:
         item = self._subagent_for(data, sequence, timestamp)
+        result_data = to_jsonable(data.get("data"))
         item.update(
             {
-                "child_thread_id": data.get("child_thread_id"),
                 "phase": data.get("phase"),
                 "phase_label": data.get("phase_label"),
-                "progress_percent": data.get("progress_percent"),
+                "progress_percent": data.get("progress_percent", data.get("progress")),
                 "iteration": data.get("iteration"),
                 "last_seq": sequence,
                 "last_updated_at": timestamp,
@@ -228,8 +234,20 @@ class CardMetaAccumulator:
             }
         )
         status = data.get("status")
-        if status:
+        if event == "subagent_started":
+            item["status"] = "running"
+        elif event == "subagent_completed":
+            item["status"] = str(status or "success")
+        elif event == "subagent_failed":
+            item["status"] = str(status or "error")
+        elif status:
             item["status"] = str(status)
+
+        if event in {"subagent_completed", "subagent_failed"} and isinstance(
+            result_data,
+            dict,
+        ):
+            item["result"] = result_data
 
     def _observe_timeline_step(
         self,
@@ -303,8 +321,7 @@ class CardMetaAccumulator:
         timestamp: str,
     ) -> dict[str, Any]:
         action_id = data.get("delegation_id") or data.get("action_id")
-        child_thread_id = data.get("child_thread_id")
-        key = str(action_id or child_thread_id or data.get("workflow") or "subagent")
+        key = str(action_id or data.get("workflow") or "subagent")
         item = self._subagents.setdefault(
             key,
             {
@@ -317,7 +334,6 @@ class CardMetaAccumulator:
                 "started_at": timestamp,
                 "finished_at": None,
                 "duration_ms": None,
-                "child_thread_id": child_thread_id,
                 "input": to_jsonable(data.get("input") or {}),
                 "timeline": [],
                 "_timeline": {},

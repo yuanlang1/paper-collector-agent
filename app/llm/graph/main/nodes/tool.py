@@ -7,6 +7,7 @@ from langchain_core.runnables import RunnableConfig
 
 from app.llm.graph.main.state import MainAgentState
 from app.database import SessionLocal
+from app.llm.streaming.notify import langgraph_notifier
 from app.llm.tools.registry import ToolExecutionContext, ToolRegistry
 
 
@@ -62,8 +63,13 @@ async def tool_node(
     *,
     tool_registry: ToolRegistry,
 ) -> dict:
-    del config
     call = state["active_tool_call"]
+    notify = langgraph_notifier(config).scoped(
+        source="tool",
+        action_id=str(call["id"]),
+        tool_name=str(call["name"]),
+    )
+    notify("tool_started", {"message": "工具开始执行。", "progress": 0, "data": {}})
     db = SessionLocal()
     try:
         result = await tool_registry.execute(
@@ -74,16 +80,26 @@ async def tool_node(
                 user_id=str(state.get("user_id") or "0"),
                 conversation_id=str(state.get("conversation_id") or ""),
                 run_id=str(state.get("run_id") or ""),
+                _notify=notify,
             ),
         )
     finally:
         db.close()
 
     artifact_refs = result.get("artifact_refs")
+    ok = result.get("ok", True)
+    notify(
+        "tool_completed" if ok else "tool_failed",
+        {
+            "message": "工具执行完成。" if ok else str(result.get("message") or "工具执行失败。"),
+            "progress": 100 if ok else None,
+            "data": {"artifact_refs": artifact_refs if isinstance(artifact_refs, list) else []},
+        },
+    )
     return build_action_result_update(
         call=call,
-        status="success" if result.get("ok", True) else "error",
-        summary="tool completed",
+        status="success" if ok else "error",
+        summary="tool completed" if ok else "tool failed",
         data=result,
         artifact_refs=artifact_refs if isinstance(artifact_refs, list) else [],
         error_code=result.get("error"),
