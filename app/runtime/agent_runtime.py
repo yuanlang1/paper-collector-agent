@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import time
@@ -5,23 +7,21 @@ import time
 from sqlalchemy import delete, select
 from app.database import SessionLocal
 from app.core.exceptions import ConflictException
-from app.history.store import ChatHistoryStore
+from app.history.store import ChatHistoryStore, ConversationDeletionJob
+from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.model_factory import use_llm_runtime_config
 from app.memory.consolidation import Consolidator
 from app.memory.extraction import LangChainMemoryExtractor
-from app.rag.index_construction.memory_index_sync import (
-    get_memory_index_synchronizer,
-)
 from app.models.memory import (
     MemoryConsolidationCursor,
     MemoryEpisode,
     MemoryFact,
 )
 from collections.abc import AsyncIterator, Awaitable
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 from uuid import uuid4
 from sqlalchemy.orm import Session as DbSession
-from app.llm.agent import AgentService
+from app.llm.artifacts.access import ArtifactAccessService
 from app.runtime.session import Session
 from app.runtime.threaded_stream import DetachedStreamRun
 from app.services.llm_profile_service import (
@@ -30,6 +30,9 @@ from app.services.llm_profile_service import (
     resolve_small_model_runtime_config,
 )
 from app.services.setting_service import get_source_limits
+
+if TYPE_CHECKING:
+    from app.llm.agent import AgentService
 
 
 logger = logging.getLogger(__name__)
@@ -42,10 +45,12 @@ class AgentRuntime:
         agent_service: AgentService,
         history_store: ChatHistoryStore,
         db_factory: Callable[[], DbSession] = SessionLocal,
+        artifact_store: LocalArtifactStore | None = None,
     ) -> None:
         self.agent_service = agent_service
         self.history_store = history_store
         self.db_factory = db_factory
+        self.artifact_store = artifact_store or LocalArtifactStore()
         self._active_stream_runs: set[DetachedStreamRun] = set()
         self._active_stream_tasks: set[asyncio.Task[None]] = set()
         self._active_consolidation_scopes: set[tuple[str, str]] = set()
@@ -65,7 +70,7 @@ class AgentRuntime:
         memory_llm_config = resolve_small_model_runtime_config(db)
         resolved_conversation_id = self.resolve_conversation_id(conversation_id)
         source_limits = get_source_limits(db)
-        self._begin_conversation_run(resolved_conversation_id)
+        await self._claim_conversation_run(resolved_conversation_id)
         try:
             session = Session.create(
                 message=message,
@@ -124,7 +129,7 @@ class AgentRuntime:
         resolved_conversation_id = self.resolve_conversation_id(conversation_id)
         source_limits = get_source_limits(db)
         run_id = f"run_{uuid4().hex}"
-        self._begin_conversation_run(resolved_conversation_id)
+        await self._claim_conversation_run(resolved_conversation_id)
         try:
             assistant_message_id = await self.history_store.start_turn(
                 user_id=DEFAULT_USER_ID,
@@ -172,7 +177,7 @@ class AgentRuntime:
         requested_action_id: str | None = None,
         db: DbSession,
     ) -> dict[str, Any]:
-        self._begin_conversation_run(conversation_id)
+        await self._claim_conversation_run(conversation_id)
         try:
             session, action_id, service = await self._resume_session(
                 conversation_id=conversation_id,
@@ -226,7 +231,7 @@ class AgentRuntime:
         requested_action_id: str | None = None,
         db: DbSession,
     ) -> AsyncIterator[str]:
-        self._begin_conversation_run(conversation_id)
+        await self._claim_conversation_run(conversation_id)
         try:
             session, action_id, service = await self._resume_session(
                 conversation_id=conversation_id,
@@ -284,16 +289,23 @@ class AgentRuntime:
             raise ConflictException("会话正在删除，请稍后重试")
 
         self._deleting_conversations.add(conversation_id)
+        job: ConversationDeletionJob | None = None
         try:
-            await self.agent_service.checkpointer.adelete_thread(conversation_id)
-            await self._delete_conversation_memory(
-                db=db,
-                conversation_id=conversation_id,
-            )
-            await self.history_store.delete_conversation(
+            job = await self.history_store.prepare_conversation_deletion(
                 user_id=DEFAULT_USER_ID,
                 conversation_id=conversation_id,
             )
+            await self._run_conversation_deletion(job=job, db=db)
+        except Exception as exc:
+            if job is not None:
+                try:
+                    await self.history_store.record_conversation_deletion_error(
+                        job_id=job.job_id,
+                        error=str(exc),
+                    )
+                except Exception:
+                    logger.exception("Failed to record conversation deletion error")
+            raise
         finally:
             self._deleting_conversations.discard(conversation_id)
 
@@ -324,6 +336,64 @@ class AgentRuntime:
         self._active_conversation_runs[conversation_id] = (
             self._active_conversation_runs.get(conversation_id, 0) + 1
         )
+
+    async def _claim_conversation_run(self, conversation_id: str) -> None:
+        if await self.history_store.has_pending_conversation_deletion(
+            user_id=DEFAULT_USER_ID,
+            conversation_id=conversation_id,
+        ):
+            raise ConflictException("会话正在删除，暂不能执行")
+        self._begin_conversation_run(conversation_id)
+
+    async def _run_conversation_deletion(
+        self,
+        *,
+        job: ConversationDeletionJob,
+        db: DbSession,
+    ) -> None:
+        stage = job.stage
+        if stage == "prepared":
+            await self.artifact_store.stage_run_directories(
+                run_ids=job.run_ids,
+                deletion_id=job.job_id,
+            )
+            await self.history_store.advance_conversation_deletion(
+                job_id=job.job_id,
+                stage="artifacts_staged",
+            )
+            stage = "artifacts_staged"
+        if stage == "artifacts_staged":
+            await self.agent_service.checkpointer.adelete_thread(job.conversation_id)
+            await self.history_store.advance_conversation_deletion(
+                job_id=job.job_id,
+                stage="checkpoints_deleted",
+            )
+            stage = "checkpoints_deleted"
+        if stage == "checkpoints_deleted":
+            await self._delete_conversation_memory(
+                db=db,
+                conversation_id=job.conversation_id,
+            )
+            await self.history_store.advance_conversation_deletion(
+                job_id=job.job_id,
+                stage="memory_deleted",
+            )
+            stage = "memory_deleted"
+        if stage == "memory_deleted":
+            await self.history_store.delete_conversation(
+                user_id=job.user_id,
+                conversation_id=job.conversation_id,
+            )
+            await self.history_store.advance_conversation_deletion(
+                job_id=job.job_id,
+                stage="history_deleted",
+            )
+            stage = "history_deleted"
+        if stage == "history_deleted":
+            await self.artifact_store.purge_staged_directories(
+                deletion_id=job.job_id,
+            )
+            await self.history_store.finish_conversation_deletion(job_id=job.job_id)
 
     def _finish_conversation_run(self, conversation_id: str) -> None:
         active_count = self._active_conversation_runs.get(conversation_id, 0)
@@ -381,9 +451,14 @@ class AgentRuntime:
                 )
             )
             db.commit()
-            synchronizer = get_memory_index_synchronizer()
-            await synchronizer.delete_facts(fact_ids)
-            await synchronizer.delete_episodes(episode_ids)
+            if fact_ids or episode_ids:
+                from app.rag.index_construction.memory_index_sync import (
+                    get_memory_index_synchronizer,
+                )
+
+                synchronizer = get_memory_index_synchronizer()
+                await synchronizer.delete_facts(fact_ids)
+                await synchronizer.delete_episodes(episode_ids)
         except Exception:
             db.rollback()
             raise
@@ -804,10 +879,13 @@ class AgentRuntime:
     ) -> AgentService:
         if llm_config is None and memory_llm_config is None:
             return self.agent_service
+        from app.llm.agent import AgentService
+
         return AgentService(
             checkpointer=self.agent_service.checkpointer,
             llm_config=llm_config,
             memory_llm_config=memory_llm_config,
+            artifact_access_service=self.agent_service.artifact_access_service,
         )
 
     @staticmethod
@@ -836,8 +914,13 @@ def initialize_agent_runtime(
 ) -> None:
     global _agent_runtime
 
+    from app.llm.agent import AgentService
+
     _agent_runtime = AgentRuntime(
-        agent_service=AgentService(checkpointer=checkpointer),
+        agent_service=AgentService(
+            checkpointer=checkpointer,
+            artifact_access_service=ArtifactAccessService(history_store),
+        ),
         history_store=history_store,
     )
 

@@ -18,23 +18,29 @@ async def finalize_task_review_node(
     reflection_report_artifact_ref = state.get("reflection_report_artifact_ref")
 
     if stage == "completed":
+        available_artifacts = {
+            name: artifact_ref
+            for name, artifact_ref in {
+                "corpus": state.get("corpus_artifact_ref"),
+                "framework": state.get("framework_artifact_ref"),
+                "claims": state.get("claims_artifact_ref"),
+                "evidence_ledger": state.get("evidence_ledger_artifact_ref"),
+                "final_review": final_review_artifact_ref,
+                "reflection_report": reflection_report_artifact_ref,
+            }.items()
+            if artifact_ref
+        }
         result = {
             "status": "success",
             "summary": "学术综述已生成并通过反思审核。",
             "data": {
                 "task_id": state["task_id"],
                 "final_review_artifact_ref": final_review_artifact_ref,
+                "available_artifacts": available_artifacts,
                 "review_id": state.get("review_id"),
                 "version_number": state.get("review_version_number"),
             },
-            "artifact_refs": [
-                artifact_ref
-                for artifact_ref in [
-                    final_review_artifact_ref,
-                    reflection_report_artifact_ref,
-                ]
-                if artifact_ref
-            ],
+            "artifact_refs": list(dict.fromkeys(available_artifacts.values())),
             "retryable": False,
             "error_code": None,
             "error_message": None,

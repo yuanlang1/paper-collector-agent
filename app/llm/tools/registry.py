@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.llm.artifacts.access import ArtifactAccessService
 from app.llm.streaming.notify import NOOP_NOTIFIER, Notifier
 
 
@@ -18,6 +19,7 @@ class ToolExecutionContext:
     user_id: str = "0"
     conversation_id: str = ""
     run_id: str = ""
+    artifact_access: ArtifactAccessService | None = None
     _notify: Notifier = NOOP_NOTIFIER
 
     def notify(
@@ -97,6 +99,7 @@ class ToolRegistry:
 
 
 def build_tool_registry(db: Session | None = None) -> ToolRegistry:
+    from app.llm.tools.artifact_tools.read_artifact import READ_ARTIFACT_TOOL
     from app.llm.tools.file_tools.download_file import DOWNLOAD_FILE_TOOL
     from app.llm.tools.memory_tools.create_skill import CREATE_SKILL_TOOL
     from app.llm.tools.memory_tools.manage_memory import MANAGE_MEMORY_TOOL
@@ -124,6 +127,7 @@ def build_tool_registry(db: Session | None = None) -> ToolRegistry:
         GET_TASK_RAG_STATUS_TOOL,
         EASY_SCHOLAR_VENUE_TOOL,
         DOWNLOAD_FILE_TOOL,
+        READ_ARTIFACT_TOOL,
         SAVE_NOTE_TOOL,
         MANAGE_MEMORY_TOOL,
         UPDATE_SOUL_TOOL,

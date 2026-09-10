@@ -32,4 +32,4 @@ sequenceDiagram
     R->>H: "persist final card, latency, tool and subagent traces"
     R-->>S: "run_completed or run_failed"
     R->>M: "after completed: asynchronously consolidate if 6 turns due"
-    M-->>M: "extract durable facts and an episode; sync memory RAG"
+    Note over M: extract facts and episode then sync memory RAG

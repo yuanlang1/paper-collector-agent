@@ -27,6 +27,7 @@ from app.llm.graph.main.nodes.tool import (
 from app.llm.graph.main.state import (
     MainAgentState,
 )
+from app.llm.artifacts.access import ArtifactAccessService
 from app.llm.subagents.registry import SubAgentRegistry
 from app.llm.tools.registry import ToolRegistry, build_tool_registry
 
@@ -43,6 +44,7 @@ def build_main_agent_workflow(
     solve_node,
     subagent_registry: SubAgentRegistry,
     tool_registry: ToolRegistry | None = None,
+    artifact_access_service: ArtifactAccessService | None = None,
     checkpointer=None,
 ):
     registry = tool_registry or build_tool_registry()
@@ -51,7 +53,14 @@ def build_main_agent_workflow(
     builder.add_node("memory", memory_node or _passthrough_memory_node)
     builder.add_node("solve", solve_node)
     builder.add_node("dispatch", dispatch_tool_call_node)
-    builder.add_node("tool", partial(tool_node, tool_registry=registry))
+    builder.add_node(
+        "tool",
+        partial(
+            tool_node,
+            tool_registry=registry,
+            artifact_access_service=artifact_access_service,
+        ),
+    )
     builder.add_node(
         "subagent",
         SubAgentNode(subagent_registry=subagent_registry),

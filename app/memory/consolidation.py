@@ -15,7 +15,6 @@ from app.memory.schemas import (
 )
 from app.memory.semantic.service import FactService
 from app.models.memory import MemoryConsolidationCursor
-from app.rag.index_construction.memory_index_sync import get_memory_index_synchronizer
 
 
 class HistoryReader(Protocol):
@@ -119,6 +118,10 @@ class Consolidator:
                     last_assistant_message_id=last_message_id,
                 )
                 self.db.commit()
+                from app.rag.index_construction.memory_index_sync import (
+                    get_memory_index_synchronizer,
+                )
+
                 synchronizer = get_memory_index_synchronizer()
                 await synchronizer.upsert_facts(created_fact_records)
                 if created_episode_record is not None:

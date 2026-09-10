@@ -1,0 +1,17 @@
+flowchart TD
+    A["DELETE conversation"] --> B{"Conversation busy or already deleting?"}
+    B -- Yes --> X["Reject; do not change data"]
+    B -- No --> C["Persist deletion job and snapshot distinct run_ids"]
+    C --> D["For every run_id, validate exact run directory"]
+    D --> E["Atomically move ARTIFACT_BASE_DIR/run_id to .trash/job_id/run_id"]
+    E --> F["Delete LangGraph checkpoints"]
+    F --> G["Delete SQL memory and vector index entries"]
+    G --> H["Delete chat_log rows"]
+    H --> I["Permanently remove .trash/job_id"]
+    I --> J["Mark deletion job completed"]
+
+    D -. staging failure .-> K["Keep history intact; mark job failed/retryable"]
+    F -. later failure .-> L["Keep job and staged artifacts; retry remaining steps"]
+    G -. later failure .-> L
+    H -. later failure .-> L
+    I -. purge failure .-> M["History is gone; retry quarantine purge safely"]

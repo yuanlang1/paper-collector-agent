@@ -1,0 +1,25 @@
+flowchart LR
+    U["用户：查看某条 claim 的证据"] --> A["主 Agent"]
+    F["综述子图 finalizer\n返回 corpus / claims / ledger URI"] --> A
+    A --> T["read_artifact 原生工具\n只读，无需确认"]
+
+    subgraph C["调用上下文"]
+        CTX["ToolExecutionContext\n真实 user_id、conversation_id、run_id"]
+    end
+    CTX --> T
+
+    T --> V["URI 与参数校验\n仅 artifact://、JSON、限额"]
+    V --> H["ChatHistoryStore\n按 run_id 查询 owner"]
+    H --> D{"owner user_id\n等于当前 user_id？"}
+    D -->|"否或不存在"| X["统一拒绝\n不存在或无访问权限"]
+    D -->|"是"| P["安全解析路径\nresolve 后仍在 ARTIFACT_BASE_DIR"]
+    P --> J["局部 JSON 读取\nsummary / text / json / search"]
+    J --> R["受限工具结果\n截断、分页、命中上限"]
+    R --> A
+
+    classDef process fill:#eaf7ee,stroke:#39855a,color:#16351f;
+    classDef decision fill:#fff5db,stroke:#ba8b24,color:#493506;
+    classDef error fill:#ffe9e7,stroke:#bc4741,color:#5e1713;
+    class T,V,H,P,J,R process;
+    class D decision;
+    class X error;

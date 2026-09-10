@@ -4,6 +4,7 @@ from typing import Any
 
 from app.config import settings
 from app.database import SessionLocal
+from app.llm.artifacts.access import ArtifactAccessService
 from app.llm.graph.main.native_tools import build_native_tool_schemas
 from app.llm.graph.main.nodes.memory import MemoryNode
 from app.llm.graph.main.nodes.solve import SolveNode
@@ -48,10 +49,12 @@ class AgentService:
         subagent_registry: SubAgentRegistry | None = None,
         llm_config: LlmRuntimeConfig | None = None,
         memory_llm_config: LlmRuntimeConfig | None = None,
+        artifact_access_service: ArtifactAccessService | None = None,
     ):
         self.checkpointer = checkpointer
         self.llm_config = llm_config
         self.memory_llm_config = memory_llm_config
+        self.artifact_access_service = artifact_access_service
         self.tool_registry = build_tool_registry()
         with use_llm_runtime_config(llm_config):
             if subagent_registry is None:
@@ -83,6 +86,7 @@ class AgentService:
                 ),
                 subagent_registry=self.subagent_registry,
                 tool_registry=self.tool_registry,
+                artifact_access_service=self.artifact_access_service,
                 checkpointer=self.checkpointer,
             )
 

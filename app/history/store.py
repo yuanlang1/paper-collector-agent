@@ -5,9 +5,11 @@ import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from app.memory.schemas import HistoryTurn
 
@@ -89,6 +91,10 @@ class PendingActionConflictError(ValueError):
     """The requested approval cannot be applied to the stored assistant card."""
 
 
+class ConversationDeletionInProgressError(RuntimeError):
+    """The conversation has a durable deletion job that must finish first."""
+
+
 class PendingActionClaim:
     def __init__(
         self,
@@ -98,6 +104,21 @@ class PendingActionClaim:
     ) -> None:
         self.message_id = message_id
         self.claimed = claimed
+
+
+@dataclass(frozen=True)
+class RunScope:
+    user_id: str
+    conversation_id: str
+
+
+@dataclass(frozen=True)
+class ConversationDeletionJob:
+    job_id: str
+    user_id: str
+    conversation_id: str
+    run_ids: tuple[str, ...]
+    stage: str
 
 
 class ChatHistoryStore:
@@ -137,6 +158,26 @@ class ChatHistoryStore:
                 CREATE INDEX IF NOT EXISTS
                     ix_chat_log_run_id
                 ON chat_log (run_id);
+
+                CREATE TABLE IF NOT EXISTS conversation_deletion_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    conversation_id TEXT NOT NULL,
+                    run_ids_json TEXT NOT NULL,
+                    stage TEXT NOT NULL CHECK (
+                        stage IN (
+                            'prepared',
+                            'artifacts_staged',
+                            'checkpoints_deleted',
+                            'memory_deleted',
+                            'history_deleted'
+                        )
+                    ),
+                    last_error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE (user_id, conversation_id)
+                );
                 """
             )
             self._migrate(connection)
@@ -260,6 +301,60 @@ class ChatHistoryStore:
             conversation_id,
         )
 
+    async def prepare_conversation_deletion(
+        self,
+        *,
+        user_id: str = "0",
+        conversation_id: str,
+    ) -> ConversationDeletionJob:
+        return await asyncio.to_thread(
+            self._prepare_conversation_deletion,
+            user_id,
+            conversation_id,
+        )
+
+    async def advance_conversation_deletion(
+        self,
+        *,
+        job_id: str,
+        stage: str,
+    ) -> None:
+        await asyncio.to_thread(
+            self._advance_conversation_deletion,
+            job_id,
+            stage,
+        )
+
+    async def record_conversation_deletion_error(
+        self,
+        *,
+        job_id: str,
+        error: str,
+    ) -> None:
+        await asyncio.to_thread(
+            self._record_conversation_deletion_error,
+            job_id,
+            error,
+        )
+
+    async def finish_conversation_deletion(self, *, job_id: str) -> None:
+        await asyncio.to_thread(self._finish_conversation_deletion, job_id)
+
+    async def has_pending_conversation_deletion(
+        self,
+        *,
+        user_id: str = "0",
+        conversation_id: str,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._has_pending_conversation_deletion,
+            user_id,
+            conversation_id,
+        )
+
+    async def get_run_scope(self, run_id: str) -> RunScope | None:
+        return await asyncio.to_thread(self._get_run_scope, run_id)
+
     async def list_completed_turns_after(
         self,
         *,
@@ -306,6 +401,12 @@ class ChatHistoryStore:
         created_at = _utc_now()
 
         with self._connect() as connection:
+            if self._has_pending_conversation_deletion(
+                user_id,
+                conversation_id,
+                connection=connection,
+            ):
+                raise ConversationDeletionInProgressError("conversation is deleting")
             connection.execute(
                 """
                 INSERT INTO chat_log (
@@ -689,6 +790,151 @@ class ChatHistoryStore:
                 (user_id, conversation_id),
             )
             return cursor.rowcount
+
+    def _prepare_conversation_deletion(
+        self,
+        user_id: str,
+        conversation_id: str,
+    ) -> ConversationDeletionJob:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT job_id, user_id, conversation_id, run_ids_json, stage
+                FROM conversation_deletion_jobs
+                WHERE user_id = ? AND conversation_id = ?
+                """,
+                (user_id, conversation_id),
+            ).fetchone()
+            if row is not None:
+                return self._deletion_job_from_row(row)
+
+            rows = connection.execute(
+                """
+                SELECT DISTINCT run_id
+                FROM chat_log
+                WHERE user_id = ? AND conversation_id = ?
+                ORDER BY run_id
+                """,
+                (user_id, conversation_id),
+            ).fetchall()
+            run_ids = tuple(str(row["run_id"]) for row in rows)
+            now = _utc_now()
+            job = ConversationDeletionJob(
+                job_id=f"delete_{uuid4().hex}",
+                user_id=user_id,
+                conversation_id=conversation_id,
+                run_ids=run_ids,
+                stage="prepared",
+            )
+            connection.execute(
+                """
+                INSERT INTO conversation_deletion_jobs (
+                    job_id, user_id, conversation_id, run_ids_json, stage,
+                    created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job.job_id,
+                    job.user_id,
+                    job.conversation_id,
+                    json.dumps(job.run_ids),
+                    job.stage,
+                    now,
+                    now,
+                ),
+            )
+            return job
+
+    def _advance_conversation_deletion(self, job_id: str, stage: str) -> None:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE conversation_deletion_jobs
+                SET stage = ?, last_error = NULL, updated_at = ?
+                WHERE job_id = ?
+                """,
+                (stage, _utc_now(), job_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("conversation deletion job does not exist")
+
+    def _record_conversation_deletion_error(self, job_id: str, error: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE conversation_deletion_jobs
+                SET last_error = ?, updated_at = ?
+                WHERE job_id = ?
+                """,
+                (error[:1000], _utc_now(), job_id),
+            )
+
+    def _finish_conversation_deletion(self, job_id: str) -> None:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM conversation_deletion_jobs WHERE job_id = ?",
+                (job_id,),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("conversation deletion job does not exist")
+
+    def _has_pending_conversation_deletion(
+        self,
+        user_id: str,
+        conversation_id: str,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> bool:
+        if connection is None:
+            with self._connect() as own_connection:
+                return self._has_pending_conversation_deletion(
+                    user_id,
+                    conversation_id,
+                    connection=own_connection,
+                )
+        return connection.execute(
+            """
+            SELECT 1
+            FROM conversation_deletion_jobs
+            WHERE user_id = ? AND conversation_id = ?
+            """,
+            (user_id, conversation_id),
+        ).fetchone() is not None
+
+    @staticmethod
+    def _deletion_job_from_row(row: sqlite3.Row) -> ConversationDeletionJob:
+        run_ids = json.loads(row["run_ids_json"])
+        if not isinstance(run_ids, list) or not all(
+            isinstance(run_id, str) for run_id in run_ids
+        ):
+            raise ValueError("conversation deletion job has invalid run IDs")
+        return ConversationDeletionJob(
+            job_id=str(row["job_id"]),
+            user_id=str(row["user_id"]),
+            conversation_id=str(row["conversation_id"]),
+            run_ids=tuple(run_ids),
+            stage=str(row["stage"]),
+        )
+
+    def _get_run_scope(self, run_id: str) -> RunScope | None:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT user_id, conversation_id
+                FROM chat_log
+                WHERE run_id = ?
+                GROUP BY user_id, conversation_id
+                LIMIT 2
+                """,
+                (run_id,),
+            ).fetchall()
+        if len(rows) != 1:
+            return None
+        return RunScope(
+            user_id=str(rows[0]["user_id"]),
+            conversation_id=str(rows[0]["conversation_id"]),
+        )
 
     def _list_completed_turns_after(
         self,

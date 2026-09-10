@@ -3,14 +3,21 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import re
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from app.config import settings
 from app.llm.artifacts.schemas import ArtifactRef
+
+
+class ArtifactUriError(ValueError):
+    """The URI does not identify a JSON artifact inside the local store."""
 
 
 def _safe_path_part(value: str | None, default: str = "unknown") -> str:
@@ -68,6 +75,114 @@ class LocalArtifactStore:
             return f"artifact://{relative_path.as_posix()}"
         except ValueError:
             return resolved.as_uri()
+
+    def resolve_json_uri(self, artifact_uri: str) -> tuple[str, Path]:
+        """Resolve an internal artifact URI without allowing directory traversal."""
+        parsed = urlsplit(artifact_uri)
+        if (
+            parsed.scheme != "artifact"
+            or not parsed.netloc
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ArtifactUriError("invalid artifact URI")
+
+        parts = [unquote(parsed.netloc)]
+        parts.extend(unquote(part) for part in parsed.path.lstrip("/").split("/"))
+        if len(parts) < 3 or any(
+            not part
+            or part in {".", ".."}
+            or "/" in part
+            or "\\" in part
+            or ":" in part
+            for part in parts
+        ):
+            raise ArtifactUriError("invalid artifact URI")
+
+        path = (self.base_dir.joinpath(*parts)).resolve()
+        try:
+            path.relative_to(self.base_dir)
+        except ValueError as exc:
+            raise ArtifactUriError("artifact URI is outside the artifact store") from exc
+        if path.suffix.lower() != ".json":
+            raise ArtifactUriError("artifact is not a JSON file")
+        return parts[0], path
+
+    async def stage_run_directories(
+        self,
+        *,
+        run_ids: tuple[str, ...],
+        deletion_id: str,
+    ) -> None:
+        await asyncio.to_thread(
+            self._stage_run_directories,
+            run_ids,
+            deletion_id,
+        )
+
+    async def purge_staged_directories(self, *, deletion_id: str) -> None:
+        await asyncio.to_thread(self._purge_staged_directories, deletion_id)
+
+    def _stage_run_directories(
+        self,
+        run_ids: tuple[str, ...],
+        deletion_id: str,
+    ) -> None:
+        for run_id in run_ids:
+            source = self._run_directory(run_id)
+            target = self._staged_run_directory(deletion_id, run_id)
+            if target.exists():
+                if target.is_symlink() or not target.is_dir():
+                    raise ArtifactUriError("invalid staged artifact directory")
+                continue
+            if not source.exists():
+                continue
+            if source.is_symlink() or not source.is_dir():
+                raise ArtifactUriError("invalid artifact directory")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(source, target)
+
+    def _purge_staged_directories(self, deletion_id: str) -> None:
+        staged_directory = self._staged_directory(deletion_id)
+        if not staged_directory.exists():
+            return
+        if staged_directory.is_symlink() or not staged_directory.is_dir():
+            raise ArtifactUriError("invalid staged artifact directory")
+        shutil.rmtree(staged_directory)
+
+    def _run_directory(self, run_id: str) -> Path:
+        return self._safe_directory(self.base_dir / self._path_part(run_id), run_id)
+
+    def _staged_directory(self, deletion_id: str) -> Path:
+        return self._safe_directory(
+            self.base_dir / ".trash" / self._path_part(deletion_id),
+            deletion_id,
+        )
+
+    def _staged_run_directory(self, deletion_id: str, run_id: str) -> Path:
+        return self._safe_directory(
+            self.base_dir
+            / ".trash"
+            / self._path_part(deletion_id)
+            / self._path_part(run_id),
+            run_id,
+        )
+
+    def _safe_directory(self, raw_path: Path, value: str) -> Path:
+        if raw_path.is_symlink():
+            raise ArtifactUriError(f"invalid artifact directory: {value}")
+        path = raw_path.resolve()
+        try:
+            path.relative_to(self.base_dir)
+        except ValueError as exc:
+            raise ArtifactUriError("artifact directory is outside the artifact store") from exc
+        return path
+
+    @staticmethod
+    def _path_part(value: str) -> str:
+        if _safe_path_part(value) != value:
+            raise ArtifactUriError("invalid artifact directory name")
+        return value
 
     def write_json_sync(self, path: Path, payload: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -133,7 +248,7 @@ class LocalArtifactStore:
         self,
         artifact_uri: str,
     ) -> dict[str, Any]:
-        path = self.base_dir / artifact_uri.removeprefix("artifact://")
+        _, path = self.resolve_json_uri(artifact_uri)
 
         return await asyncio.to_thread(
             lambda: json.loads(

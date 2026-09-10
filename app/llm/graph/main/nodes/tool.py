@@ -6,6 +6,7 @@ from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableConfig
 
 from app.llm.graph.main.state import MainAgentState
+from app.llm.artifacts.access import ArtifactAccessService
 from app.database import SessionLocal
 from app.llm.streaming.notify import langgraph_notifier
 from app.llm.tools.registry import ToolExecutionContext, ToolRegistry
@@ -62,6 +63,7 @@ async def tool_node(
     config: RunnableConfig,
     *,
     tool_registry: ToolRegistry,
+    artifact_access_service: ArtifactAccessService | None = None,
 ) -> dict:
     call = state["active_tool_call"]
     notify = langgraph_notifier(config).scoped(
@@ -80,6 +82,7 @@ async def tool_node(
                 user_id=str(state.get("user_id") or "0"),
                 conversation_id=str(state.get("conversation_id") or ""),
                 run_id=str(state.get("run_id") or ""),
+                artifact_access=artifact_access_service,
                 _notify=notify,
             ),
         )
