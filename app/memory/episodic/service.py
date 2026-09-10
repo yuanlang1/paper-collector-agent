@@ -126,6 +126,19 @@ class EpisodeService:
             limit=self._limit(limit),
         )
 
+    def get_active_by_ids_for_conversation(
+        self,
+        *,
+        episode_ids: Sequence[int],
+        conversation_id: str,
+    ) -> Sequence[MemoryEpisode]:
+        return self.repository.list_by_ids_for_conversation(
+            user_id=self.user_id,
+            episode_ids=episode_ids,
+            conversation_id=conversation_id,
+            statuses=("active",),
+        )
+
     @staticmethod
     def _limit(value: int) -> int:
         if not 1 <= value <= 50:

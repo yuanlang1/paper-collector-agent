@@ -1,0 +1,52 @@
+flowchart LR
+    U["用户 / 前端"] --> API["FastAPI API\n/api/agent/chat 或 stream"]
+    API --> RT["AgentRuntime\n会话、历史、SSE、后台记忆归纳"]
+    RT --> CP[("SQLite\nLangGraph checkpoint + chat history")]
+    RT --> MG
+
+    subgraph MG["主 Agent：LangGraph"]
+        direction TB
+        MEM["memory\n组装 System Context"] --> SOLVE["solve\nLLM 决策或调用工具"]
+        SOLVE -->|"直接回答"| FINAL["final"]
+        SOLVE -->|"工具调用"| DISPATCH["dispatch\n逐个激活调用"]
+        DISPATCH -->|"原子工具"| TOOL["tool"]
+        DISPATCH -->|"需要确认"| CONFIRM["confirm / interrupt"]
+        CONFIRM --> DISPATCH
+        DISPATCH -->|"子代理"| SUB["SafeSubgraph"]
+        TOOL --> DISPATCH
+        SUB --> DISPATCH
+        DISPATCH -->|"队列清空"| SOLVE
+    end
+
+    subgraph CTX["memory 节点的上下文来源"]
+        direction TB
+        SOUL["Soul：共享固定准则"]
+        PREF["Preference：用户显式偏好"]
+        FACT["Semantic facts\n跨会话研究偏好 / 决策"]
+        EP["Episodes\n当前会话摘要"]
+        SKILL["Procedural skills\n按触发词匹配"]
+        SOUL & PREF & FACT & EP & SKILL --> MEM
+    end
+
+    RT -->|"每 6 个完成回合后异步归纳"| CONS["Consolidator + 小模型\n候选事实和会话摘要"]
+    CONS --> MDB[("SQL memory_facts / memory_episodes")]
+    CONS --> MIDX["MemoryIndexSynchronizer"]
+
+    subgraph RAG["Qdrant：混合检索知识库"]
+        direction TB
+        P1[("paper\n标题 + 摘要")]
+        P2[("paper_content\n正文 chunks")]
+        M1[("memory_facts")]
+        M2[("memory_episodes")]
+    end
+    MIDX --> M1 & M2
+    FACT -->|"Hybrid RRF + SQL 回表"| M1
+    EP -->|"Hybrid RRF + SQL 回表"| M2
+
+    SUB --> SEARCH["paper_search_agent\n多源检索、筛选、保存论文"]
+    SEARCH --> INDEX["task_indexing_agent\nPDF / MinerU → Markdown → 分块 → 索引"]
+    INDEX --> P1 & P2
+    SUB --> REVIEW["task_review_agent\n按 claim 取证、渲染、反思"]
+    REVIEW -->|"先从 paper 选候选\n再从 paper_content 取片段"| P1
+    REVIEW --> P2
+    REVIEW --> FINAL

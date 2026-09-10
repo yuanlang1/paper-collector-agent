@@ -38,7 +38,7 @@ def build_subagent_failure_update(
     )
 
 
-class SafeSubgraphNode:
+class SubAgentNode:
 
     def __init__(
         self,

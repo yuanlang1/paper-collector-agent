@@ -5,15 +5,10 @@ from collections.abc import Sequence
 from sqlalchemy.orm import Session
 
 from app.memory.semantic.service import FactService
-from app.models.memory import MemoryFact
-
-
-PREFERENCE_SUBJECT = "__agent_preference__"
+from app.models.memory import MemoryFact, PREFERENCE_SUBJECT
 
 
 class UserPreferenceService:
-    """Stores durable per-user agent preferences in the existing fact store."""
-
     def __init__(self, db: Session, *, user_id: str) -> None:
         self.facts = FactService(db, user_id=user_id)
 

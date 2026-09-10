@@ -23,8 +23,9 @@
 
 1. 调用 `paper_search_agent`。
 2. 从其真实结果取得有效的任务 ID。
-3. 调用 `task_indexing_agent`，将该任务保存到知识库。该子代理会检查索引状态、启动或接管索引，并等待明确的终态结果。
-4. 只有 `task_indexing_agent` 明确成功，且任务索引状态确认完成，任务才是 `RAG-ready`。
+3. 调用`task_indexing_agent`之前需要查看任务的索引状态。
+4. 调用 `task_indexing_agent`，将该任务保存到知识库。该子代理会检查索引状态、启动或接管索引，并等待明确的终态结果。
+5. 只有 `task_indexing_agent` 明确成功，且任务索引状态确认完成，任务才是 `RAG-ready`。
 
 不得把“论文检索完成”当作 `RAG-ready`。如果论文检索未返回有效任务 ID，或 `task_indexing_agent` 超时、失败或未确认完成，应如实说明原因并结束当前流程；不得宣称成功，也不得调用依赖该索引的后续工具。
 

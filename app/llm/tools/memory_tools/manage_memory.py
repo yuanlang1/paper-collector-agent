@@ -7,6 +7,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.llm.tools.memory_tools.common import fact_data, require_database
 from app.llm.tools.registry import Tool, ToolExecutionContext
 from app.memory.semantic.service import FactService
+from app.rag.index_construction.memory_index_sync import (
+    get_memory_index_synchronizer,
+)
 
 
 class ManageMemoryArgs(BaseModel):
@@ -68,6 +71,7 @@ async def manage_memory_handler(
             subject=args.subject or "",
             content=args.content or "",
         )
+        await get_memory_index_synchronizer().upsert_facts([fact])
         return {
             "ok": True,
             "data": fact_data(fact),
@@ -75,6 +79,7 @@ async def manage_memory_handler(
         }
 
     fact = facts.forget(fact_id=args.fact_id or 0)
+    await get_memory_index_synchronizer().delete_facts([fact.id])
     return {
         "ok": True,
         "data": fact_data(fact),

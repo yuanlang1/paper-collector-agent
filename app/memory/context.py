@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import logging
 from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.memory.episodic.service import EpisodeService
 from app.memory.retrieval_gate import MemoryRetrievalGate
 from app.memory.schemas import (
@@ -13,10 +15,13 @@ from app.memory.schemas import (
     MemoryUsage,
 )
 from app.memory.semantic.service import FactService
+from app.models.memory import MemoryEpisode, MemoryFact
+from app.rag.retrieval.memory_retrieval import MemoryHybridRetrieval
 from app.services.llm_profile_service import LlmRuntimeConfig
 
 
 MemoryEventCallback = Callable[[dict[str, Any]], None]
+logger = logging.getLogger(__name__)
 
 
 class MemoryContextService:
@@ -26,6 +31,7 @@ class MemoryContextService:
         *,
         user_id: str,
         retrieval_gate: MemoryRetrievalGate | None = None,
+        memory_retrieval: MemoryHybridRetrieval | None = None,
         max_characters: int = 1_500,
     ) -> None:
         self.user_id = user_id
@@ -33,6 +39,7 @@ class MemoryContextService:
         self.fact_service = FactService(db, user_id=user_id)
         self.episode_service = EpisodeService(db, user_id=user_id)
         self.retrieval_gate = retrieval_gate or MemoryRetrievalGate()
+        self.memory_retrieval = memory_retrieval
 
     async def build_context(
         self,
@@ -62,11 +69,9 @@ class MemoryContextService:
         )
 
         query = decision.query or user_message
-        facts = self.fact_service.search_active(query=query, limit=6)
-
-        episodes = self.episode_service.list_active_for_conversation(
+        facts, episodes = await self._retrieve_records(
+            query=query,
             conversation_id=conversation_id,
-            limit=2,
         )
 
         sections: list[str] = []
@@ -104,6 +109,66 @@ class MemoryContextService:
             },
         )
         return MemoryContextResult(content=content, usage=usage)
+
+    async def _retrieve_records(
+        self,
+        *,
+        query: str,
+        conversation_id: str,
+    ) -> tuple[list[MemoryFact], list[MemoryEpisode]]:
+        if settings.MEMORY_RETRIEVAL_MODE == "hybrid":
+            try:
+                retrieval = self.memory_retrieval or MemoryHybridRetrieval()
+                self.memory_retrieval = retrieval
+                result = await retrieval.retrieve(
+                    query=query,
+                    user_id=self.user_id,
+                    conversation_id=conversation_id,
+                )
+                return (
+                    self._order_by_ids(
+                        self.fact_service.get_active_by_ids(result.fact_ids),
+                        result.fact_ids,
+                        limit=6,
+                    ),
+                    self._order_by_ids(
+                        self.episode_service.get_active_by_ids_for_conversation(
+                            episode_ids=result.episode_ids,
+                            conversation_id=conversation_id,
+                        ),
+                        result.episode_ids,
+                        limit=2,
+                    ),
+                )
+            except Exception:
+                logger.warning(
+                    "Hybrid memory retrieval failed; falling back to SQL",
+                    exc_info=True,
+                )
+
+        return (
+            list(self.fact_service.search_active(query=query, limit=6)),
+            list(
+                self.episode_service.list_active_for_conversation(
+                    conversation_id=conversation_id,
+                    limit=2,
+                )
+            ),
+        )
+
+    @staticmethod
+    def _order_by_ids(
+        records: Any,
+        ids: list[int],
+        *,
+        limit: int,
+    ) -> list[Any]:
+        records_by_id = {record.id: record for record in records}
+        return [
+            records_by_id[record_id]
+            for record_id in ids
+            if record_id in records_by_id
+        ][:limit]
 
     @staticmethod
     def _usage(

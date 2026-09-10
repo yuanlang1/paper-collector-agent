@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 import logging
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Sequence
 from uuid import NAMESPACE_URL, uuid5
 
 from fastembed import SparseEmbedding, SparseTextEmbedding
@@ -182,6 +182,25 @@ class BaseQdrantIndexConstructionModule(ABC):
 
     async def collection_exists(self) -> bool:
         return await self.client.collection_exists(collection_name = self.collection_name)
+
+    async def delete_by_business_ids(
+        self,
+        business_ids: Sequence[object],
+    ) -> None:
+        """Delete points whose deterministic IDs are derived from business IDs."""
+        if not business_ids or not await self.collection_exists():
+            return
+
+        await self.client.delete(
+            collection_name = self.collection_name,
+            points_selector = models.PointIdsList(
+                points = [
+                    self._build_point_id(str(business_id))
+                    for business_id in business_ids
+                ]
+            ),
+            wait = True,
+        )
 
     async def _ensure_collection(
         self,

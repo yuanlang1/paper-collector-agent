@@ -1,0 +1,35 @@
+sequenceDiagram
+    participant C as "Client"
+    participant A as "FastAPI /api/agent/chat/stream"
+    participant R as "AgentRuntime"
+    participant H as "ChatHistoryStore (SQLite)"
+    participant G as "LangGraph + checkpoint"
+    participant L as "LLM / tools / subagents"
+    participant S as "SSE subscriber"
+    participant M as "Background memory consolidation"
+
+    C->>A: "message + optional conversation_id / llm_profile_id"
+    A->>R: "chat_stream(...)"
+    R->>H: "start_turn: persist user + running assistant"
+    R->>G: "create Session(thread_id = conversation_id)"
+    par Run graph
+        G->>L: "memory → solve → tools / subagents → final"
+    and Send progress
+        R-->>S: "run_started / reasoning / tool / subagent / message events"
+    end
+
+    alt "A write action requires approval"
+        G-->>R: "LangGraph interrupt"
+        R->>H: "persist confirmation_required + pending action"
+        R-->>S: "confirmation_required"
+        C->>A: "resume: approved or rejected"
+        A->>R: "claim pending action atomically"
+        R->>G: "Command(resume=decision)"
+        G->>L: "continue from checkpoint"
+    end
+
+    G-->>R: "terminal response / artifacts / status"
+    R->>H: "persist final card, latency, tool and subagent traces"
+    R-->>S: "run_completed or run_failed"
+    R->>M: "after completed: asynchronously consolidate if 6 turns due"
+    M-->>M: "extract durable facts and an episode; sync memory RAG"

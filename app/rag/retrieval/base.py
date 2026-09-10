@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 from fastembed import SparseEmbedding, SparseTextEmbedding
 from langchain_core.documents import Document
@@ -9,6 +10,12 @@ from langchain_core.embeddings import Embeddings
 from qdrant_client import AsyncQdrantClient, models
 
 from app.rag.index_construction.base import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME, get_dense_embeddings, get_qdrant_client, get_sparse_embeddings
+
+
+@dataclass(frozen = True, slots = True)
+class HybridQueryVectors:
+    dense: list[float]
+    sparse: models.SparseVector
 
 
 class BaseHybridRetrievalModule(ABC):
@@ -41,42 +48,73 @@ class BaseHybridRetrievalModule(ABC):
         query_filter: models.Filter | None = None,
         dense_score_threshold: float | None = None,
     ) -> list[Document]:
-        query = query.strip()
+        vectors = await self.encode_query(
+            query,
+            sparse_query = sparse_query,
+        )
+        return await self.search_with_vectors(
+            vectors,
+            top_k = top_k,
+            prefetch_limit = prefetch_limit,
+            query_filter = query_filter,
+            dense_score_threshold = dense_score_threshold,
+        )
 
-        if not query:
+    async def encode_query(
+        self,
+        query: str,
+        *,
+        sparse_query: str | None = None,
+    ) -> HybridQueryVectors:
+        normalized_query = query.strip()
+        if not normalized_query:
             raise ValueError("query cannot be empty")
 
-        sparse_query = (
+        normalized_sparse_query = (
             sparse_query.strip()
             if sparse_query
-            else query
+            else normalized_query
         )
-
-        result_limit = top_k or self.default_top_k
-        candidate_limit = prefetch_limit or self.default_prefetch_limit
-        
         dense_vector, sparse_vector = await asyncio.gather(
-            self.dense_embeddings.aembed_query(query),
+            self.dense_embeddings.aembed_query(normalized_query),
             asyncio.to_thread(
                 self._embed_sparse_query,
-                sparse_query,
+                normalized_sparse_query,
             ),
         )
+        return HybridQueryVectors(
+            dense = dense_vector,
+            sparse = sparse_vector,
+        )
+
+    async def search_with_vectors(
+        self,
+        vectors: HybridQueryVectors,
+        *,
+        top_k: int | None = None,
+        prefetch_limit: int | None = None,
+        query_filter: models.Filter | None = None,
+        dense_score_threshold: float | None = None,
+    ) -> list[Document]:
+        result_limit = top_k or self.default_top_k
+        candidate_limit = prefetch_limit or self.default_prefetch_limit
 
         response = await self.client.query_points(
             collection_name = self.collection_name,
             prefetch = [
                 models.Prefetch(
-                    query = dense_vector,
+                    query = vectors.dense,
                     using = DENSE_VECTOR_NAME,
                     limit = candidate_limit,
+                    filter = query_filter,
                     score_threshold = (
                         dense_score_threshold
                     ),
                 ),
                 models.Prefetch(
-                    query = sparse_vector,
+                    query = vectors.sparse,
                     using = SPARSE_VECTOR_NAME,
+                    filter = query_filter,
                     limit = candidate_limit,
                 ),
             ],

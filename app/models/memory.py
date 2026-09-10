@@ -8,6 +8,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
 
+PREFERENCE_SUBJECT = "__agent_preference__"
+
+
 class MemoryFact(Base):
     __tablename__ = "memory_facts"
     __table_args__ = (

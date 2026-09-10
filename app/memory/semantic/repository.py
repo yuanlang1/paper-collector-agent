@@ -106,6 +106,25 @@ class FactRepository:
         )
         return list(self.db.scalars(statement))
 
+    def list_by_ids(
+        self,
+        *,
+        user_id: str,
+        fact_ids: Sequence[int],
+        statuses: tuple[str, ...],
+    ) -> Sequence[MemoryFact]:
+        if not fact_ids:
+            return []
+        return list(
+            self.db.scalars(
+                select(MemoryFact).where(
+                    MemoryFact.id.in_(fact_ids),
+                    MemoryFact.user_id == user_id,
+                    MemoryFact.status.in_(statuses),
+                )
+            )
+        )
+
     def search_active(
         self,
         *,

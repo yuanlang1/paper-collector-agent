@@ -20,7 +20,7 @@ from app.llm.graph.main.nodes.final import (
     final_node,
 )
 from app.llm.graph.main.nodes.dispatch import dispatch_tool_call_node
-from app.llm.graph.main.nodes.safe_subgraph import SafeSubgraphNode
+from app.llm.graph.main.nodes.safe_subgraph import SubAgentNode
 from app.llm.graph.main.nodes.tool import (
     tool_node,
 )
@@ -54,7 +54,7 @@ def build_main_agent_workflow(
     builder.add_node("tool", partial(tool_node, tool_registry=registry))
     builder.add_node(
         "subagent",
-        SafeSubgraphNode(subagent_registry=subagent_registry),
+        SubAgentNode(subagent_registry=subagent_registry),
     )
     builder.add_node(
         "confirm",

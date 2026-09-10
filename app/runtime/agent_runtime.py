@@ -2,13 +2,16 @@ import asyncio
 import logging
 import time
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from app.database import SessionLocal
 from app.core.exceptions import ConflictException
 from app.history.store import ChatHistoryStore
 from app.llm.model_factory import use_llm_runtime_config
 from app.memory.consolidation import Consolidator
 from app.memory.extraction import LangChainMemoryExtractor
+from app.rag.index_construction.memory_index_sync import (
+    get_memory_index_synchronizer,
+)
 from app.models.memory import (
     MemoryConsolidationCursor,
     MemoryEpisode,
@@ -283,7 +286,7 @@ class AgentRuntime:
         self._deleting_conversations.add(conversation_id)
         try:
             await self.agent_service.checkpointer.adelete_thread(conversation_id)
-            self._delete_conversation_memory(
+            await self._delete_conversation_memory(
                 db=db,
                 conversation_id=conversation_id,
             )
@@ -337,12 +340,28 @@ class AgentRuntime:
         )
 
     @staticmethod
-    def _delete_conversation_memory(
+    async def _delete_conversation_memory(
         *,
         db: DbSession,
         conversation_id: str,
     ) -> None:
         try:
+            fact_ids = list(
+                db.scalars(
+                    select(MemoryFact.id).where(
+                        MemoryFact.user_id == DEFAULT_USER_ID,
+                        MemoryFact.source_conversation_id == conversation_id,
+                    )
+                )
+            )
+            episode_ids = list(
+                db.scalars(
+                    select(MemoryEpisode.id).where(
+                        MemoryEpisode.user_id == DEFAULT_USER_ID,
+                        MemoryEpisode.source_conversation_id == conversation_id,
+                    )
+                )
+            )
             db.execute(
                 delete(MemoryFact).where(
                     MemoryFact.user_id == DEFAULT_USER_ID,
@@ -362,6 +381,9 @@ class AgentRuntime:
                 )
             )
             db.commit()
+            synchronizer = get_memory_index_synchronizer()
+            await synchronizer.delete_facts(fact_ids)
+            await synchronizer.delete_episodes(episode_ids)
         except Exception:
             db.rollback()
             raise

@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import model_validator
-from typing import List
+from typing import List, Literal
 
 from sqlalchemy import false
 
@@ -106,6 +106,9 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: str | None = None
     PAPER_COLLECTION_NAME: str
     PAPER_CONTENT_COLLECTION_NAME: str
+    MEMORY_FACT_COLLECTION_NAME: str = "memory_facts"
+    MEMORY_EPISODE_COLLECTION_NAME: str = "memory_episodes"
+    MEMORY_RETRIEVAL_MODE: Literal["sql", "hybrid"] = "hybrid"
     MODEL_DIR: str = "models"
     SPARSE_EMBEDDING_MODEL_NAME: str = "Qdrant/bm25"
     EMBEDDING_DEVICE: str = "cpu"

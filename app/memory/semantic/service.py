@@ -133,6 +133,13 @@ class FactService:
             limit=self._limit(limit),
         )
 
+    def get_active_by_ids(self, fact_ids: Sequence[int]) -> Sequence[MemoryFact]:
+        return self.repository.list_by_ids(
+            user_id=self.user_id,
+            fact_ids=fact_ids,
+            statuses=("active",),
+        )
+
     def correct(
         self,
         *,

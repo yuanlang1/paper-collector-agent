@@ -113,3 +113,24 @@ class EpisodeRepository:
             .limit(limit)
         )
         return list(self.db.scalars(statement))
+
+    def list_by_ids_for_conversation(
+        self,
+        *,
+        user_id: str,
+        episode_ids: Sequence[int],
+        conversation_id: str,
+        statuses: tuple[str, ...],
+    ) -> Sequence[MemoryEpisode]:
+        if not episode_ids:
+            return []
+        return list(
+            self.db.scalars(
+                select(MemoryEpisode).where(
+                    MemoryEpisode.id.in_(episode_ids),
+                    MemoryEpisode.user_id == user_id,
+                    MemoryEpisode.source_conversation_id == conversation_id,
+                    MemoryEpisode.status.in_(statuses),
+                )
+            )
+        )

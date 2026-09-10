@@ -65,25 +65,4 @@ class PaperIndexConstructionModule(
         self,
         paper_ids: list[str],
     ) -> None:
-        if not paper_ids:
-            return
-
-        exists = await self.client.collection_exists(collection_name = self.collection_name)
-
-        if not exists:
-            return
-
-        point_ids = [
-            self._build_point_id(
-                str(paper_id)
-            )
-            for paper_id in paper_ids
-        ]
-
-        await self.client.delete(
-            collection_name = self.collection_name,
-            points_selector = models.PointIdsList(
-                points = point_ids
-            ),
-            wait = True,
-        )
+        await self.delete_by_business_ids(paper_ids)

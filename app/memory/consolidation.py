@@ -15,6 +15,7 @@ from app.memory.schemas import (
 )
 from app.memory.semantic.service import FactService
 from app.models.memory import MemoryConsolidationCursor
+from app.rag.index_construction.memory_index_sync import get_memory_index_synchronizer
 
 
 class HistoryReader(Protocol):
@@ -88,7 +89,7 @@ class Consolidator:
             episode_service = EpisodeService(self.db, user_id=self.user_id)
 
             try:
-                created_facts = 0
+                created_fact_records = []
                 source_message_ids = [
                     turn.assistant_message_id
                     for turn in turns
@@ -101,16 +102,15 @@ class Consolidator:
                         source_message_ids=source_message_ids,
                     )
                     if created is not None:
-                        created_facts += 1
+                        created_fact_records.append(created)
 
-                created_episode = False
+                created_episode_record = None
                 if extracted.episode is not None:
-                    created_episode = (
+                    created_episode_record = (
                         episode_service.stage_consolidated_candidate(
                             candidate=extracted.episode,
                             source_conversation_id=conversation_id,
                         )
-                        is not None
                     )
 
                 last_message_id = turns[-1].assistant_message_id
@@ -119,11 +119,15 @@ class Consolidator:
                     last_assistant_message_id=last_message_id,
                 )
                 self.db.commit()
+                synchronizer = get_memory_index_synchronizer()
+                await synchronizer.upsert_facts(created_fact_records)
+                if created_episode_record is not None:
+                    await synchronizer.upsert_episodes([created_episode_record])
 
                 return ConsolidationResult(
                     due=True,
-                    facts_created=created_facts,
-                    episode_created=created_episode,
+                    facts_created=len(created_fact_records),
+                    episode_created=created_episode_record is not None,
                     last_assistant_message_id=last_message_id,
                 )
             except Exception:
