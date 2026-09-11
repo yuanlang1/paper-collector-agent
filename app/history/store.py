@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -93,6 +94,24 @@ class PendingActionConflictError(ValueError):
 
 class ConversationDeletionInProgressError(RuntimeError):
     """The conversation has a durable deletion job that must finish first."""
+
+
+class InvalidRunIdError(ValueError):
+    """The run ID cannot be used as a stable artifact directory name."""
+
+
+_CANONICAL_RUN_ID = re.compile(
+    r"[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,118}[A-Za-z0-9])?"
+)
+
+
+def validate_run_id(value: str) -> str:
+    if not _CANONICAL_RUN_ID.fullmatch(value):
+        raise InvalidRunIdError(
+            "run_id must be 1-120 ASCII letters, digits, '.', '_' or '-', "
+            "and must start and end with a letter or digit"
+        )
+    return value
 
 
 class PendingActionClaim:
@@ -398,6 +417,7 @@ class ChatHistoryStore:
         user_content: str,
         source: str,
     ) -> int:
+        run_id = validate_run_id(run_id)
         created_at = _utc_now()
 
         with self._connect() as connection:

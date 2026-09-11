@@ -49,7 +49,6 @@ async def save_paper_search_artifact(
         kind="paper_search_result_json",
         payload=payload.model_dump(),
         count=len(papers),
-        name_hint=search_query or query or source,
         metadata={
             "query": query,
             "search_query": search_query,

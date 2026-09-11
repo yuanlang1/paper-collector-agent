@@ -16,8 +16,6 @@ class MemorySearchResult:
 
 
 class MemoryHybridRetrieval:
-    """Run the same query against isolated fact and episode collections."""
-
     def __init__(
         self,
         *,

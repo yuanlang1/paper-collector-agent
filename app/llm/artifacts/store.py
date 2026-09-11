@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import os
 import re
@@ -13,6 +12,7 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from app.config import settings
+from app.history.store import InvalidRunIdError, validate_run_id
 from app.llm.artifacts.schemas import ArtifactRef
 
 
@@ -29,10 +29,6 @@ def _safe_path_part(value: str | None, default: str = "unknown") -> str:
     value = value.strip("._-")
 
     return value[:120] or default
-
-
-def _short_hash(value: str, length: int = 12) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:length]
 
 
 class LocalArtifactStore:
@@ -54,18 +50,15 @@ class LocalArtifactStore:
         run_id: str,
         step_key: str,
         source: str,
-        name_hint: str | None = None,
     ) -> Path:
-        safe_run_id = _safe_path_part(run_id, "run")
+        run_id = validate_run_id(run_id)
         safe_step_key = _safe_path_part(step_key, "step")
         safe_source = _safe_path_part(source.lower(), "source")
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        suffix = _short_hash(name_hint or f"{run_id}:{step_key}:{source}:{timestamp}")
+        filename = f"{safe_source}_{timestamp}_{uuid.uuid4().hex[:12]}.json"
 
-        filename = f"{safe_source}_{timestamp}_{suffix}.json"
-
-        return self.base_dir / safe_run_id / safe_step_key / filename
+        return self.base_dir / run_id / safe_step_key / filename
 
     def to_artifact_uri(self, path: Path) -> str:
         resolved = path.resolve()
@@ -77,7 +70,6 @@ class LocalArtifactStore:
             return resolved.as_uri()
 
     def resolve_json_uri(self, artifact_uri: str) -> tuple[str, Path]:
-        """Resolve an internal artifact URI without allowing directory traversal."""
         parsed = urlsplit(artifact_uri)
         if (
             parsed.scheme != "artifact"
@@ -106,7 +98,10 @@ class LocalArtifactStore:
             raise ArtifactUriError("artifact URI is outside the artifact store") from exc
         if path.suffix.lower() != ".json":
             raise ArtifactUriError("artifact is not a JSON file")
-        return parts[0], path
+        try:
+            return validate_run_id(parts[0]), path
+        except InvalidRunIdError as exc:
+            raise ArtifactUriError("invalid artifact run ID") from exc
 
     async def stage_run_directories(
         self,
@@ -180,9 +175,10 @@ class LocalArtifactStore:
 
     @staticmethod
     def _path_part(value: str) -> str:
-        if _safe_path_part(value) != value:
-            raise ArtifactUriError("invalid artifact directory name")
-        return value
+        try:
+            return validate_run_id(value)
+        except InvalidRunIdError as exc:
+            raise ArtifactUriError("invalid artifact directory name") from exc
 
     def write_json_sync(self, path: Path, payload: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -208,14 +204,12 @@ class LocalArtifactStore:
         kind: str,
         payload: dict[str, Any],
         count: int = 0,
-        name_hint: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ArtifactRef:
         path = self.build_json_path(
             run_id=run_id,
             step_key=step_key,
             source=source,
-            name_hint=name_hint,
         )
 
         await asyncio.to_thread(

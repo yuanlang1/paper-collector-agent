@@ -7,6 +7,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 from sqlalchemy.orm import Session as DbSession
 
+from app.history.store import validate_run_id
 from app.llm.streaming.utils import encode_sse
 
 
@@ -38,9 +39,10 @@ class Session:
         memory_llm_profile: dict[str, Any] | None = None,
         paper_search_source_limits: dict[str, int] | None = None,
     ) -> "Session":
+        run_id = validate_run_id(run_id or f"run_{uuid4().hex}")
         return cls(
             conversation_id=conversation_id,
-            run_id=run_id or f"run_{uuid4().hex}",
+            run_id=run_id,
             assistant_message_id=assistant_message_id,
             message=message,
             db=db,
@@ -77,6 +79,7 @@ class Session:
         llm_profile: dict[str, Any] | None = None,
         memory_llm_profile: dict[str, Any] | None = None,
     ) -> "Session":
+        run_id = validate_run_id(run_id)
         return cls(
             conversation_id=conversation_id,
             run_id=run_id,
