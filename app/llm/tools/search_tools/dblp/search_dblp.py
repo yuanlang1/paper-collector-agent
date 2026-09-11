@@ -52,8 +52,34 @@ class DblpSearchArgs(BaseModel):
         return self
 
 
-class DblpResponseParseError(Exception):
+class DblpUpstreamResponseError(Exception):
+    code: str
+    retryable: bool
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        content_type: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.content_type = content_type
+
+
+class DblpResponseParseError(DblpUpstreamResponseError):
     """DBLP 返回了无法解析的 JSON 响应。"""
+
+    code = "UPSTREAM_PARSE_ERROR"
+    retryable = False
+
+
+class DblpAccessChallengeError(DblpUpstreamResponseError):
+    """DBLP 返回了访问挑战页，而不是 API 数据。"""
+
+    code = "UPSTREAM_ACCESS_CHALLENGE"
+    retryable = True
 
 
 def _parse_author(author: Any) -> str:
@@ -165,6 +191,18 @@ def _passes_local_filters(
     return True
 
 
+def _is_dblp_access_challenge(response: httpx.Response) -> bool:
+    content_type = response.headers.get("content-type", "").casefold()
+    if "json" in content_type:
+        return False
+
+    body = response.text[:10_000].casefold()
+    return (
+        "making sure you're not a bot" in body
+        or "within.website" in body
+    )
+
+
 async def _fetch_dblp(
     *,
     client: httpx.AsyncClient,
@@ -194,10 +232,31 @@ async def _fetch_dblp(
 
             response.raise_for_status()
 
+            content_type = response.headers.get("content-type")
+            if _is_dblp_access_challenge(response):
+                raise DblpAccessChallengeError(
+                    "DBLP returned an access challenge page.",
+                    status_code=response.status_code,
+                    content_type=content_type,
+                )
+
             try:
-                return response.json()
+                payload = response.json()
             except ValueError as exc:
-                raise DblpResponseParseError("DBLP returned invalid JSON") from exc
+                raise DblpResponseParseError(
+                    "DBLP returned invalid JSON",
+                    status_code=response.status_code,
+                    content_type=content_type,
+                ) from exc
+
+            if not isinstance(payload, dict):
+                raise DblpResponseParseError(
+                    "DBLP response must be a JSON object",
+                    status_code=response.status_code,
+                    content_type=content_type,
+                )
+
+            return payload
 
         except httpx.RequestError as exc:
             last_error = exc
@@ -256,12 +315,15 @@ async def dblp_search_handler(
         message: str,
         retryable: bool,
         status_code: int | None = None,
+        content_type: str | None = None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
             "duration_ms": elapsed_ms(started_at),
         }
         if status_code is not None:
             metadata["status_code"] = status_code
+        if content_type:
+            metadata["content_type"] = content_type
 
         return {
             "ok": False,
@@ -313,11 +375,15 @@ async def dblp_search_handler(
                 except (
                     httpx.HTTPStatusError,
                     httpx.RequestError,
-                    DblpResponseParseError,
+                    DblpUpstreamResponseError,
                 ) as exc:
                     if not papers:
                         raise
-                    page_warning = f"第 {pages_fetched + 1} 页请求失败：{exc}"
+                    error_code = getattr(exc, "code", None)
+                    page_warning = (
+                        f"第 {pages_fetched + 1} 页请求失败："
+                        f"{f'[{error_code}] ' if error_code else ''}{exc}"
+                    )
                     stop_reason = "upstream_error"
                     break
 
@@ -424,11 +490,13 @@ async def dblp_search_handler(
             retryable=True,
         )
 
-    except DblpResponseParseError as exc:
+    except DblpUpstreamResponseError as exc:
         return failure(
-            code="UPSTREAM_PARSE_ERROR",
+            code=exc.code,
             message=str(exc),
-            retryable=False,
+            retryable=exc.retryable,
+            status_code=exc.status_code,
+            content_type=exc.content_type,
         )
 
     except ValueError as exc:
