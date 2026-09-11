@@ -52,7 +52,7 @@ class FileParseRequest(BaseModel):
 @dataclass(frozen=True)
 class BatchDocumentParseResult:
     total: int
-    documents: list[Document]
+    documents: list["ParsedFileDocument"]
     errors: dict[str, str]
 
     @property
@@ -62,3 +62,18 @@ class BatchDocumentParseResult:
     @property
     def failed(self) -> int:
         return len(self.errors)
+
+
+@dataclass(frozen=True, slots=True)
+class PdfSourceBlock:
+    markdown: str
+    page_no: int
+    bbox: list[float] | None
+    block_type: str
+    source_index: int
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedFileDocument:
+    document: Document
+    pdf_source_blocks: tuple[PdfSourceBlock, ...] = ()

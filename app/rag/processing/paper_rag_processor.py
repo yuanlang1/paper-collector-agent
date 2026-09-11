@@ -12,7 +12,7 @@ from app.rag.data_preparation.data_preparation import DataPreparationModule
 from app.rag.file_parser.file_parser import FileParser
 from app.rag.index_construction.paper_content_index_construction import PaperContentIndexConstructionModule
 from app.rag.index_construction.paper_index_construction import PaperIndexConstructionModule
-from app.schemas.file_parser import FileParseRequest
+from app.schemas.file_parser import FileParseRequest, ParsedFileDocument
 
 logger = logging.getLogger(__name__)
 
@@ -112,14 +112,18 @@ class PaperRagProcessor:
             results_by_paper_id[paper.paper_id] = result
             await self._notify_paper_result(on_paper_result, result)
 
+        parsed_documents = [
+            self._as_parsed_file_document(document)
+            for document in parse_result.documents
+        ]
         index_tasks = [
             asyncio.create_task(
                 self._index_parsed_document(
-                    papers_by_file_id[str(document.metadata["file_id"])],
-                    document,
+                    papers_by_file_id[str(parsed.document.metadata["file_id"])],
+                    parsed,
                 )
             )
-            for document in parse_result.documents
+            for parsed in parsed_documents
         ]
 
         for task in asyncio.as_completed(index_tasks):
@@ -164,16 +168,23 @@ class PaperRagProcessor:
     async def _index_parsed_document(
         self,
         paper: PaperRagInput,
-        parsed_document: Document,
+        parsed_document: ParsedFileDocument,
     ) -> PaperRagResult:
         try:
             logger.info("paper: %s start RAG process.", paper.paper_id)
 
             parent_document = self._bind_paper_metadata(
-                parsed_document,
+                parsed_document.document,
                 paper,
             )
-            chunks = self.data_preparation.prepare_documents([parent_document])
+            chunks = (
+                self.data_preparation.prepare_pdf_document(
+                    parent_document,
+                    parsed_document.pdf_source_blocks,
+                )
+                if parsed_document.pdf_source_blocks
+                else self.data_preparation.prepare_documents([parent_document])
+            )
 
             async with self._index_lock:
                 await self.paper_index.build_index([parent_document])
@@ -200,6 +211,16 @@ class PaperRagProcessor:
                 status = "failed",
                 error = str(error),
             )
+
+    @staticmethod
+    def _as_parsed_file_document(
+        value: ParsedFileDocument | Document,
+    ) -> ParsedFileDocument:
+        if isinstance(value, ParsedFileDocument):
+            return value
+        if isinstance(value, Document):
+            return ParsedFileDocument(document = value)
+        raise TypeError(f"Unexpected parsed document type: {type(value)!r}")
 
     
     @staticmethod

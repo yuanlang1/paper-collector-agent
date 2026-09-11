@@ -230,6 +230,9 @@ class RetrieveEvidenceNode:
                         "chunk_id": chunk_id,
                         "chunk_index": metadata.get("chunk_index"),
                         "section_path": metadata.get("section_path", ""),
+                        "page_start": metadata.get("page_start"),
+                        "page_end": metadata.get("page_end"),
+                        "page_numbers": metadata.get("page_numbers", []),
                         "score": metadata.get("retrieval_score", 0.0),
                         "text": document.page_content,
                     }

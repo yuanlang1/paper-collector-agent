@@ -86,6 +86,17 @@ class PaperContentIndexConstructionModule(
         if metadata.get("year") is not None:
             payload["year"] = int(metadata["year"])
 
+        if metadata.get("page_start") is not None:
+            payload["page_start"] = int(metadata["page_start"])
+            payload["page_end"] = int(metadata["page_end"])
+            payload["page_numbers"] = [
+                int(page)
+                for page in metadata.get("page_numbers", [])
+            ]
+            payload["source_spans"] = list(
+                metadata.get("source_spans", [])
+            )
+
         return payload
 
     def _payload_indexes(

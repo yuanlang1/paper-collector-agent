@@ -38,6 +38,9 @@ Thumbs.db
 data/
 models/
 tests/
+!tests/
+tests/*
+!tests/test_pdf_page_aware_chunking.py
 !app/models/
 !app/models/*.py
 scripts/

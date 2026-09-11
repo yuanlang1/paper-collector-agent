@@ -57,13 +57,30 @@ class PaperContentHybridRetrievalModule(
         self,
         payload: dict,
     ) -> Document:
+        metadata = {
+            "paper_id": str(payload["paper_id"]),
+            "chunk_id": str(payload["chunk_id"]),
+            "chunk_index": int(payload["chunk_index"]),
+            "section_path": str(payload.get("section_path") or ""),
+            "retrieval_type": "paper_content",
+        }
+
+        if payload.get("page_start") is not None:
+            metadata.update(
+                {
+                    "page_start": int(payload["page_start"]),
+                    "page_end": int(payload["page_end"]),
+                    "page_numbers": [
+                        int(page)
+                        for page in payload.get("page_numbers", [])
+                    ],
+                    "source_spans": list(
+                        payload.get("source_spans", [])
+                    ),
+                }
+            )
+
         return Document(
             page_content = str(payload.get("content") or ""),
-            metadata = {
-                "paper_id": str(payload["paper_id"]),
-                "chunk_id": str(payload["chunk_id"]),
-                "chunk_index": int(payload["chunk_index"]),
-                "section_path": str(payload.get("section_path") or ""),
-                "retrieval_type": "paper_content",
-            },
+            metadata = metadata,
         )

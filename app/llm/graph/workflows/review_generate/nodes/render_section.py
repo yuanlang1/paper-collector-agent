@@ -266,6 +266,9 @@ class RenderSectionsNode:
                                 "section_path",
                                 "",
                             ),
+                            "page_start": snippet.get("page_start"),
+                            "page_end": snippet.get("page_end"),
+                            "page_numbers": snippet.get("page_numbers", []),
                             "text": snippet["text"],
                         }
                         for snippet in snippets[

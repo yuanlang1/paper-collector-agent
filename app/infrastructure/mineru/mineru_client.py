@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from io import BytesIO
 from typing import Any, Literal
@@ -239,6 +240,35 @@ class MinerUClient:
             )
 
         raise MinerUResultError("MinerU result does not contain full.md")
+
+    @staticmethod
+    def extract_content_list(
+        files: dict[str, bytes],
+    ) -> list[dict[str, Any]] | None:
+        for name, content in files.items():
+            normalized = name.replace("\\", "/")
+            basename = normalized.rsplit("/", 1)[-1].lower()
+
+            if (
+                basename != "content_list.json"
+                and not basename.endswith("_content_list.json")
+            ):
+                continue
+
+            try:
+                content_list = json.loads(content.decode("utf-8-sig"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                return None
+
+            if isinstance(content_list, list) and all(
+                isinstance(item, dict)
+                for item in content_list
+            ):
+                return content_list
+
+            return None
+
+        return None
 
     async def _request_json(
         self,

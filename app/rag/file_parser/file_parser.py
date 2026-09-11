@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
+import logging
 from pathlib import PurePosixPath
 from typing import Any, TypeVar, cast
 from urllib.parse import urlparse
@@ -10,9 +11,30 @@ from langchain_core.documents import Document
 
 from app.config import settings
 from app.infrastructure.mineru.mineru_client import MinerUClient
-from app.schemas.file_parser import BatchDocumentParseResult, FileParseRequest, FileType
+from app.schemas.file_parser import (
+    BatchDocumentParseResult,
+    FileParseRequest,
+    FileType,
+    ParsedFileDocument,
+    PdfSourceBlock,
+)
 
 T = TypeVar("T")
+
+logger = logging.getLogger(__name__)
+
+PDF_CONTENT_BLOCK_TYPES = frozenset({
+    "text",
+    "title",
+    "equation",
+    "table",
+    "image",
+    "chart",
+    "code",
+    "algorithm",
+    "list",
+    "index",
+})
 
 GENERAL_FILE_TYPES: set[FileType] = {
     FileType.PDF,
@@ -58,7 +80,7 @@ class FileParser:
         request: FileParseRequest,
     ) -> Document:
         normalized = self._normalize_request(request)
-        return await self._parse_single(normalized)
+        return (await self._parse_single(normalized)).document
 
     async def parse_files_result(
         self,
@@ -96,7 +118,7 @@ class FileParser:
 
         async def execute_batch(
             batch: list[FileParseRequest],
-        ) -> tuple[list[Document], dict[str, str]]:
+        ) -> tuple[list[ParsedFileDocument], dict[str, str]]:
             async with semaphore:
                 return await self._parse_batch(batch)
 
@@ -105,7 +127,7 @@ class FileParser:
             return_exceptions = True,
         )
 
-        documents: list[Document] = []
+        documents: list[ParsedFileDocument] = []
         errors: dict[str, str] = {}
 
         for batch, result in zip(
@@ -127,8 +149,8 @@ class FileParser:
             errors.update(batch_errors)
 
         documents_by_id = {
-            str(document.metadata["file_id"]): document
-            for document in documents
+            str(parsed.document.metadata["file_id"]): parsed
+            for parsed in documents
         }
 
         return BatchDocumentParseResult(
@@ -150,12 +172,12 @@ class FileParser:
         if result.errors:
             raise BatchFileParseError(result.errors)
 
-        return result.documents
+        return [parsed.document for parsed in result.documents]
 
     async def _parse_single(
         self,
         request: FileParseRequest,
-    ) -> Document:
+    ) -> ParsedFileDocument:
         file_type = cast(FileType, request.file_type)
         model_version = self._select_model(file_type)
 
@@ -178,7 +200,7 @@ class FileParser:
     async def _parse_batch(
         self,
         requests: list[FileParseRequest],
-    ) -> tuple[list[Document], dict[str, str]]:
+    ) -> tuple[list[ParsedFileDocument], dict[str, str]]:
         if len(requests) == 1:
             request = requests[0]
 
@@ -214,7 +236,7 @@ class FileParser:
             if result.get("data_id") is not None
         }
 
-        documents: list[Document] = []
+        documents: list[ParsedFileDocument] = []
         errors: dict[str, str] = {}
 
         for request in requests:
@@ -249,7 +271,7 @@ class FileParser:
         model_version: str,
         task_id: str | None = None,
         batch_id: str | None = None,
-    ) -> Document:
+    ) -> ParsedFileDocument:
         zip_content = await self.mineru_client.download_result_zip(
             result["full_zip_url"]
         )
@@ -257,23 +279,137 @@ class FileParser:
         markdown = self.mineru_client.extract_markdown(result_files)
 
         file_type = cast(FileType, request.file_type)
+        pdf_source_blocks = ()
 
-        return Document(
-            page_content = markdown,
-            metadata = {
-                **request.metadata,
-                "file_id": request.file_id,
-                "file_name": request.file_name,
-                "file_type": file_type.value,
-                "source": str(request.uri),
-                "doc_type": "parent",
-                "parent_id": request.file_id,
-                "parser": "mineru",
-                "parser_model": model_version,
-                "mineru_task_id": task_id,
-                "mineru_batch_id": batch_id,
-            },
+        if file_type == FileType.PDF:
+            content_list = self.mineru_client.extract_content_list(result_files)
+            pdf_source_blocks = self._build_pdf_source_blocks(content_list)
+
+            if not pdf_source_blocks:
+                logger.warning(
+                    "MinerU PDF result has no usable content_list; "
+                    "falling back to generic chunking: file_id=%s",
+                    request.file_id,
+                )
+
+        return ParsedFileDocument(
+            document = Document(
+                page_content = markdown,
+                metadata = {
+                    **request.metadata,
+                    "file_id": request.file_id,
+                    "file_name": request.file_name,
+                    "file_type": file_type.value,
+                    "source": str(request.uri),
+                    "doc_type": "parent",
+                    "parent_id": request.file_id,
+                    "parser": "mineru",
+                    "parser_model": model_version,
+                    "mineru_task_id": task_id,
+                    "mineru_batch_id": batch_id,
+                },
+            ),
+            pdf_source_blocks = pdf_source_blocks,
         )
+
+    @classmethod
+    def _build_pdf_source_blocks(
+        cls,
+        content_list: list[dict[str, Any]] | None,
+    ) -> tuple[PdfSourceBlock, ...]:
+        if not content_list:
+            return ()
+
+        blocks = []
+        for source_index, item in enumerate(content_list):
+            block_type = str(item.get("type") or "").lower()
+            page_idx = item.get("page_idx")
+
+            if (
+                block_type not in PDF_CONTENT_BLOCK_TYPES
+                or not isinstance(page_idx, int)
+                or page_idx < 0
+            ):
+                continue
+
+            markdown = cls._content_item_to_markdown(item, block_type)
+            if not markdown:
+                continue
+
+            bbox = item.get("bbox")
+            blocks.append(
+                PdfSourceBlock(
+                    markdown = markdown,
+                    page_no = page_idx + 1,
+                    bbox = bbox if isinstance(bbox, list) else None,
+                    block_type = block_type,
+                    source_index = source_index,
+                )
+            )
+
+        return tuple(blocks)
+
+    @classmethod
+    def _content_item_to_markdown(
+        cls,
+        item: dict[str, Any],
+        block_type: str,
+    ) -> str:
+        if block_type in {"text", "title"}:
+            text = cls._text_value(item.get("text") or item.get("content"))
+            level = item.get("text_level")
+            if text and isinstance(level, int) and level > 0:
+                return f"{'#' * min(level, 4)} {text}"
+            return text
+
+        if block_type == "equation":
+            return cls._text_value(item.get("text") or item.get("content"))
+
+        if block_type in {"table", "image", "chart"}:
+            return cls._join_text_values(
+                item.get(f"{block_type}_caption"),
+                item.get("content"),
+                item.get("table_body"),
+                item.get(f"{block_type}_footnote"),
+            )
+
+        if block_type in {"code", "algorithm"}:
+            body = cls._text_value(item.get("code_body"))
+            if body:
+                body = f"```\n{body}\n```"
+            return cls._join_text_values(item.get("code_caption"), body)
+
+        if block_type in {"list", "index"}:
+            items = item.get("list_items")
+            if isinstance(items, list):
+                return "\n".join(
+                    f"- {value}"
+                    for value in items
+                    if isinstance(value, str) and value.strip()
+                )
+            return cls._text_value(item.get("text") or item.get("content"))
+
+        return ""
+
+    @staticmethod
+    def _join_text_values(*values: Any) -> str:
+        return "\n\n".join(
+            text
+            for value in values
+            if (text := FileParser._text_value(value))
+        )
+
+    @staticmethod
+    def _text_value(value: Any) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, list):
+            return "\n".join(
+                item.strip()
+                for item in value
+                if isinstance(item, str) and item.strip()
+            )
+        return ""
 
     def _normalize_request(
         self,
