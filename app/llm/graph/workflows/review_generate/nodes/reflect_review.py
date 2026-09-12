@@ -10,43 +10,11 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, model_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
+from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.model_factory import create_validated_structured_chat_model
 
 
 REF_PATTERN = re.compile(r"\[\[REF_([^\]]+)\]\]")
-
-
-class ReflectionIssue(BaseModel):
-    severity: Literal["critical", "major", "minor"]
-    category: str = "uncategorized"
-    description: str
-
-
-class ReflectionResult(BaseModel):
-    satisfied: bool
-    summary: str = ""
-    issues: list[ReflectionIssue] = Field(default_factory = list)
-
-    retrieve_claim_ids: list[str] = Field(default_factory = list)
-    revise_claim_ids: list[str] = Field(default_factory = list)
-    render_section_ids: list[str] = Field(default_factory = list)
-
-    @model_validator(mode="after")
-    def provide_summary_when_missing(self) -> "ReflectionResult":
-        if self.summary.strip():
-            return self
-
-        if self.issues:
-            self.summary = "；".join(
-                issue.description
-                for issue in self.issues
-            )
-        else:
-            self.summary = (
-                "Review passed." if self.satisfied else "Review requires revision."
-            )
-        return self
-
 
 REFLECT_REVIEW_PROMPT = """
     你是一位严格的学术综述审稿人。
@@ -85,6 +53,36 @@ REFLECT_REVIEW_PROMPT = """
     }
 """.strip()
 
+class ReflectionIssue(BaseModel):
+    severity: Literal["critical", "major", "minor"]
+    category: str = "uncategorized"
+    description: str
+
+
+class ReflectionResult(BaseModel):
+    satisfied: bool
+    summary: str = ""
+    issues: list[ReflectionIssue] = Field(default_factory = list)
+
+    retrieve_claim_ids: list[str] = Field(default_factory = list)
+    revise_claim_ids: list[str] = Field(default_factory = list)
+    render_section_ids: list[str] = Field(default_factory = list)
+
+    @model_validator(mode="after")
+    def provide_summary_when_missing(self) -> "ReflectionResult":
+        if self.summary.strip():
+            return self
+
+        if self.issues:
+            self.summary = "；".join(
+                issue.description
+                for issue in self.issues
+            )
+        else:
+            self.summary = (
+                "Review passed." if self.satisfied else "Review requires revision."
+            )
+        return self
 
 class ReflectReviewNode:
     def __init__(
@@ -164,11 +162,7 @@ class ReflectReviewNode:
                 else ReflectionResult.model_validate(result)
             )
         except Exception as exc:
-            return {
-                "stage": "failed",
-                "status": "failed",
-                "error": f"review reflection failed: {exc}",
-            }
+            return failed(f"review reflection failed: {exc}")
 
         claim_ids = {
             claim["claim_id"]
@@ -263,14 +257,12 @@ class ReflectReviewNode:
         )
 
         if next_round >= state["max_reflection_rounds"]:
-            return {
-                "reflection_round": next_round,
-                "reflection_report_artifact_ref": artifact.artifact_uri,
-                "revision_plan_artifact_ref": revision_artifact.artifact_uri,
-                "stage": "failed",
-                "status": "failed",
-                "error": "review did not satisfy reflection criteria",
-            }
+            return failed(
+                "review did not satisfy reflection criteria",
+                reflection_round=next_round,
+                reflection_report_artifact_ref=artifact.artifact_uri,
+                revision_plan_artifact_ref=revision_artifact.artifact_uri,
+            )
 
         if revise_claim_ids:
             next_stage = "generating_claims"
@@ -279,14 +271,12 @@ class ReflectReviewNode:
         elif render_section_ids:
             next_stage = "rendering_sections"
         else:
-            return {
-                "reflection_round": next_round,
-                "reflection_report_artifact_ref": artifact.artifact_uri,
-                "revision_plan_artifact_ref": revision_artifact.artifact_uri,
-                "stage": "failed",
-                "status": "failed",
-                "error": "reflection produced no executable revision target",
-            }
+            return failed(
+                "reflection produced no executable revision target",
+                reflection_round=next_round,
+                reflection_report_artifact_ref=artifact.artifact_uri,
+                revision_plan_artifact_ref=revision_artifact.artifact_uri,
+            )
 
         return {
             "reflection_round": next_round,

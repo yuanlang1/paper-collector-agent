@@ -59,6 +59,26 @@ class PdfPageAwareChunkingTests(unittest.TestCase):
             chunks[0].metadata["source_spans"][0]["bbox"],
             [1, 2, 3, 4],
         )
+        self.assertEqual(
+            chunks[0].metadata["source_spans"],
+            [
+                {
+                    "page": 1,
+                    "type": "text",
+                    "source_index": 0,
+                    "char_start": 0,
+                    "char_end": 5,
+                    "bbox": [1, 2, 3, 4],
+                },
+                {
+                    "page": 2,
+                    "type": "text",
+                    "source_index": 1,
+                    "char_start": 7,
+                    "char_end": 12,
+                },
+            ],
+        )
 
         index = object.__new__(PaperContentIndexConstructionModule)
         payload = index._build_payload(chunks[0])
@@ -67,6 +87,10 @@ class PdfPageAwareChunkingTests(unittest.TestCase):
 
         self.assertEqual(retrieved.metadata["page_numbers"], [1, 2])
         self.assertEqual(retrieved.metadata["page_start"], 1)
+        self.assertEqual(
+            retrieved.metadata["source_spans"][1]["char_start"],
+            7,
+        )
 
     def test_long_text_block_keeps_its_source_page(self) -> None:
         chunks = DataPreparationModule(

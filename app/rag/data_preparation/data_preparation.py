@@ -241,28 +241,31 @@ class DataPreparationModule:
         section_path: str,
     ) -> Document:
         page_numbers = sorted({block.page_no for block in source_blocks})
-        source_spans = []
-        seen_source_indexes = set()
+        source_spans: list[dict[str, Any]] = []
+        parts: list[str] = []
+        cursor = 0
 
         for block in source_blocks:
-            if block.source_index in seen_source_indexes:
-                continue
-            seen_source_indexes.add(block.source_index)
+            if parts:
+                cursor += 2
+
+            char_start = cursor
+            parts.append(block.markdown)
+            cursor += len(block.markdown)
 
             span: dict[str, Any] = {
                 "page": block.page_no,
                 "type": block.block_type,
                 "source_index": block.source_index,
+                "char_start": char_start,
+                "char_end": cursor,
             }
             if block.bbox is not None:
                 span["bbox"] = block.bbox
             source_spans.append(span)
 
         return Document(
-            page_content = "\n\n".join(
-                block.markdown
-                for block in source_blocks
-            ),
+            page_content = "\n\n".join(parts),
             metadata = {
                 **document.metadata,
                 "section_path": section_path,

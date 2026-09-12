@@ -20,7 +20,7 @@ from app.llm.graph.main.nodes.final import (
     final_node,
 )
 from app.llm.graph.main.nodes.dispatch import dispatch_tool_call_node
-from app.llm.graph.main.nodes.safe_subgraph import SubAgentNode
+from app.llm.graph.main.nodes.subgraph import SubAgentNode
 from app.llm.graph.main.nodes.tool import (
     tool_node,
 )

@@ -6,6 +6,39 @@ from qdrant_client import models
 from app.config import settings
 from app.rag.retrieval.base import BaseHybridRetrievalModule
 
+
+def paper_content_document_from_payload(
+    payload: dict,
+) -> Document:
+    metadata = {
+        "paper_id": str(payload["paper_id"]),
+        "chunk_id": str(payload["chunk_id"]),
+        "chunk_index": int(payload["chunk_index"]),
+        "section_path": str(payload.get("section_path") or ""),
+        "retrieval_type": "paper_content",
+    }
+
+    if payload.get("page_start") is not None:
+        metadata.update(
+            {
+                "page_start": int(payload["page_start"]),
+                "page_end": int(payload["page_end"]),
+                "page_numbers": [
+                    int(page)
+                    for page in payload.get("page_numbers", [])
+                ],
+                "source_spans": list(
+                    payload.get("source_spans", [])
+                ),
+            }
+        )
+
+    return Document(
+        page_content = str(payload.get("content") or ""),
+        metadata = metadata,
+    )
+
+
 class PaperContentHybridRetrievalModule(
     BaseHybridRetrievalModule
 ):
@@ -57,30 +90,4 @@ class PaperContentHybridRetrievalModule(
         self,
         payload: dict,
     ) -> Document:
-        metadata = {
-            "paper_id": str(payload["paper_id"]),
-            "chunk_id": str(payload["chunk_id"]),
-            "chunk_index": int(payload["chunk_index"]),
-            "section_path": str(payload.get("section_path") or ""),
-            "retrieval_type": "paper_content",
-        }
-
-        if payload.get("page_start") is not None:
-            metadata.update(
-                {
-                    "page_start": int(payload["page_start"]),
-                    "page_end": int(payload["page_end"]),
-                    "page_numbers": [
-                        int(page)
-                        for page in payload.get("page_numbers", [])
-                    ],
-                    "source_spans": list(
-                        payload.get("source_spans", [])
-                    ),
-                }
-            )
-
-        return Document(
-            page_content = str(payload.get("content") or ""),
-            metadata = metadata,
-        )
+        return paper_content_document_from_payload(payload)

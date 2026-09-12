@@ -7,6 +7,7 @@ from app.infrastructure.grpc.paper_service_grpc_client import (
     paper_service_grpc_client,
 )
 from app.llm.artifacts.store import LocalArtifactStore
+from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 
 RagStatus = Literal["ready", "pending", "skipped", "failed", "indexing"]
 RAG_STATUSES = {"ready", "pending", "skipped", "failed", "indexing"}
@@ -26,15 +27,6 @@ class TaskReviewCorpus(BaseModel):
     task_id: int = Field(..., gt = 0)
     papers: list[CorpusPaper] = Field(default_factory = list)
 
-def _failed(error: str) -> dict:
-    return {
-        "stage": "failed",
-        "status": "failed",
-        "error": error,
-    }
-
-
-
 class LoadTaskCorpusNode:
     def __init__(
         self,
@@ -49,7 +41,7 @@ class LoadTaskCorpusNode:
         state: dict
     ) -> dict:
         if state.get("stage") != "loading_corpus":
-            return _failed(
+            return failed(
                 "load_task_corpus called in invalid stage"
             )
 
@@ -57,34 +49,34 @@ class LoadTaskCorpusNode:
         task_id = state.get("task_id")
 
         if not isinstance(run_id, str) or not run_id.strip():
-            return _failed("missing valid run_id")
+            return failed("missing valid run_id")
 
         if (
             not isinstance(task_id, int)
             or isinstance(task_id, bool)
             or task_id <= 0
         ):
-            return _failed("missing valid task_id")
+            return failed("missing valid task_id")
 
         response = await self.client.get_task_review_papers(task_id)
 
         if not response["ok"]:
-            return _failed(response["error"] or "failed to load task review papers")
+            return failed(response["error"] or "failed to load task review papers")
 
         result = response["result"]
         if not isinstance(result, dict):
-            return _failed("task review papers response is invalid")
+            return failed("task review papers response is invalid")
 
 
         if result.get("task_id") != task_id:
-            return _failed("task review papers returned a mismatched task_id")
+            return failed("task review papers returned a mismatched task_id")
 
         raw_papers = result.get("papers")
         if not isinstance(raw_papers, list):
-            return _failed("task review papers payload is invalid")
+            return failed("task review papers payload is invalid")
 
         if not raw_papers:
-            return _failed("task has no associated papers")
+            return failed("task has no associated papers")
 
         papers: list[dict[str, Any]] = []
         seen_paper_ids: set[int] = set()
@@ -92,7 +84,7 @@ class LoadTaskCorpusNode:
 
         for raw_paper in raw_papers:
             if not isinstance(raw_paper, dict):
-                return _failed("task review paper item is invalid")
+                return failed("task review paper item is invalid")
 
             paper_id = raw_paper.get("paper_id")
             if (
@@ -100,7 +92,7 @@ class LoadTaskCorpusNode:
                 or isinstance(paper_id, bool)
                 or paper_id <= 0
             ):
-                return _failed("task review paper_id is invalid")
+                return failed("task review paper_id is invalid")
 
             if paper_id in seen_paper_ids:
                 duplicate_count += 1
@@ -109,7 +101,7 @@ class LoadTaskCorpusNode:
             rag_status = str(raw_paper.get("rag_status") or "").strip().lower()
 
             if rag_status not in RAG_STATUSES:
-                return _failed(
+                return failed(
                     f"paper_id = {paper_id} has invalid "
                     f"rag_status = {rag_status!r}"
                 )
@@ -120,10 +112,10 @@ class LoadTaskCorpusNode:
                 or isinstance(chunk_count, bool)
                 or chunk_count < 0
             ):
-                return _failed(f"paper_id = {paper_id} has invalid chunk_count")
+                return failed(f"paper_id = {paper_id} has invalid chunk_count")
 
             if rag_status == "ready" and chunk_count == 0:
-                return _failed(f"paper_id = {paper_id} is ready but has no chunks")
+                return failed(f"paper_id = {paper_id} is ready but has no chunks")
 
             seen_paper_ids.add(paper_id)
 

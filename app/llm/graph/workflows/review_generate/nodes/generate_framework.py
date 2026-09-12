@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, model_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
+from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.model_factory import create_validated_structured_chat_model
 
 
@@ -195,11 +196,7 @@ class GenerateFrameworkNode:
             )
 
         except Exception as exc:
-            return {
-                "stage": "failed",
-                "status": "failed",
-                "error": f"framework generation failed: {exc}",
-            }
+            return failed(f"framework generation failed: {exc}")
 
         return {
             "framework_artifact_ref": artifact.artifact_uri,

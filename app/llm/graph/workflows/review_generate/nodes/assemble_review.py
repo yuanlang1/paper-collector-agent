@@ -10,6 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 from app.llm.artifacts.store import LocalArtifactStore
+from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.graph.workflows.review_generate.nodes.generate_framework import ReviewFramework
 from app.llm.model_factory import create_validated_structured_chat_model
 
@@ -74,11 +75,7 @@ class AssembleReviewNode:
                 ]
             )
         except Exception as exc:
-            return {
-                "stage": "failed",
-                "status": "failed",
-                "error": f"review assembly failed: {exc}",
-            }
+            return failed(f"review assembly failed: {exc}")
 
         drafts_by_section = {
             draft["section_id"]: draft
@@ -226,11 +223,7 @@ class AssembleReviewNode:
                 payload = review_draft,
             )
         except Exception as exc:
-            return {
-                "stage": "failed",
-                "status": "failed",
-                "error": f"review draft persistence failed: {exc}",
-            }
+            return failed(f"review draft persistence failed: {exc}")
 
         return {
             "review_draft_artifact_ref": artifact.artifact_uri,

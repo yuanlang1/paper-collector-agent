@@ -1,0 +1,5 @@
+# Install this after requirements.venv311.lock.txt in a dedicated evaluation
+# virtual environment.
+# It intentionally remains separate from the service runtime dependencies because
+# Ragas upgrades parts of the LangChain stack.
+ragas==0.4.3

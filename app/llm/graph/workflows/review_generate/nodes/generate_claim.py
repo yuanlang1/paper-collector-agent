@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
+from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.graph.workflows.review_generate.nodes.generate_framework import (
     ReviewFramework,
 )
@@ -91,6 +92,17 @@ CLAIMS_PROMPT = """
 }
 """.strip()
 
+REVISE_CLAIMS_PROMPT = """
+    你是一位学术综述编辑。请根据反思报告修订指定的 Claim。
+
+    规则：
+    1. 仅修改 revision_targets 中的 Claim，不新增章节或 Claim。
+    2. 保持 claim_id、section_id 和 section_title 不变。
+    3. 将过宽或过强的论断收缩为可由固定任务论文集证据支撑的候选论断。
+    4. 可以调整 rag_query 和 evidence_requirement，但不得引入新论文、新事实或引用。
+    5. 仅返回结构化输出。
+""".strip()
+
 
 ClaimType = Literal[
     "descriptive",
@@ -130,19 +142,6 @@ class ClaimsPlan(BaseModel):
 
 class RevisedClaims(BaseModel):
     claims: list[Claim]
-
-
-REVISE_CLAIMS_PROMPT = """
-你是一位学术综述编辑。请根据反思报告修订指定的 Claim。
-
-规则：
-1. 仅修改 revision_targets 中的 Claim，不新增章节或 Claim。
-2. 保持 claim_id、section_id 和 section_title 不变。
-3. 将过宽或过强的论断收缩为可由固定任务论文集证据支撑的候选论断。
-4. 可以调整 rag_query 和 evidence_requirement，但不得引入新论文、新事实或引用。
-5. 仅返回结构化输出。
-""".strip()
-
 
 class GenerateClaimsNode:
     def __init__(
@@ -303,11 +302,7 @@ class GenerateClaimsNode:
             )
 
         except Exception as exc:
-            return {
-                "stage": "failed",
-                "status": "failed",
-                "error": f"claim generation failed: {exc}",
-            }
+            return failed(f"claim generation failed: {exc}")
 
         retrieve_claim_ids = list(
             dict.fromkeys(

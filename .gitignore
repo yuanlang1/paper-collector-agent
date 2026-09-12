@@ -41,6 +41,7 @@ tests/
 !tests/
 tests/*
 !tests/test_pdf_page_aware_chunking.py
+!tests/test_rag_evaluation_*.py
 !app/models/
 !app/models/*.py
 scripts/
@@ -49,3 +50,8 @@ scripts/
 .agents
 .mermaid-npm-cache
 .mermaid-renderer
+docs/
+evals
+evals/rag/drafts/
+evals/rag/runs/
+app/rag/evaluation/

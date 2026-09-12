@@ -6,6 +6,15 @@ from typing import Any
 from app.llm.graph.main.nodes.tool import build_action_result_update
 
 
+def failed(error: str, **details: Any) -> dict[str, Any]:
+    return {
+        **details,
+        "stage": "failed",
+        "status": "failed",
+        "error": error,
+    }
+
+
 async def finalize_task_review_node(
     state: Mapping[str, Any],
 ) -> dict[str, Any]:

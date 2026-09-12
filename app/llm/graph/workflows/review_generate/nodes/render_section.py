@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
+from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.graph.workflows.review_generate.nodes.generate_framework import (
     ReviewFramework,
 )
@@ -205,11 +206,7 @@ class RenderSectionsNode:
                 previous_summary = draft_data["summary"]
 
         except Exception as exc:
-            return {
-                "stage": "failed",
-                "status": "failed",
-                "error": f"section rendering failed: {exc}",
-            }
+            return failed(f"section rendering failed: {exc}")
 
         return {
             "section_draft_artifact_refs": section_refs,

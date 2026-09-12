@@ -65,3 +65,24 @@ python -m pip install -r requirements.venv311.lock.txt
 ```
 
 模型下载完成后可离线启动服务。`models/` 已被 Git 忽略，不会提交模型文件。
+
+## 运行论文 RAG 评测
+
+评测模块独立于主图和线上索引。PDF 论文重新索引后，使用以下命令生成带页码证据的候选集：
+
+```powershell
+python -m app.rag.evaluation generate --dataset paper-content-v1 --paper-id 120 --candidates-per-paper 5
+python -m app.rag.evaluation review --dataset paper-content-v1 --case-id CASE_ID --status approved --reviewer reviewer
+python -m app.rag.evaluation publish --dataset paper-content-v1
+python -m app.rag.evaluation run --dataset paper-content-v1 --top-k 20
+```
+
+Ragas 指标使用独立 Python 3.11 虚拟环境，避免升级服务运行时的 LangChain 依赖：
+
+```powershell
+python -m venv .venv-rag-eval
+.\.venv-rag-eval\Scripts\python.exe -m pip install -r requirements.venv311.lock.txt
+.\.venv-rag-eval\Scripts\python.exe -m pip install -r requirements.rag-eval.venv311.txt
+```
+
+随后使用该环境执行 `python -m app.rag.evaluation run --metrics deterministic ragas`。

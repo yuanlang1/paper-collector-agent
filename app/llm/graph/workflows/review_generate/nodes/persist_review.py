@@ -8,6 +8,7 @@ from app.infrastructure.grpc.review_service_grpc_client import (
     review_service_grpc_client,
 )
 from app.llm.artifacts.store import LocalArtifactStore
+from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 
 
 class PersistReviewNode:
@@ -25,30 +26,18 @@ class PersistReviewNode:
         state: Mapping[str, Any],
     ) -> dict[str, Any]:
         if state.get("stage") != "persisting_review":
-            return {
-                "stage": "failed",
-                "status": "failed",
-                "error": "persist_review called in invalid stage",
-            }
+            return failed("persist_review called in invalid stage")
 
         final_review_artifact_ref = state.get("final_review_artifact_ref")
         if not isinstance(final_review_artifact_ref, str):
-            return {
-                "stage": "failed",
-                "status": "failed",
-                "error": "missing final review artifact",
-            }
+            return failed("missing final review artifact")
 
         try:
             final_review = await self.artifact_store.read_json_uri(
                 final_review_artifact_ref
             )
         except Exception as exc:
-            return {
-                "stage": "failed",
-                "status": "failed",
-                "error": f"failed to load final review artifact: {exc}",
-            }
+            return failed(f"failed to load final review artifact: {exc}")
 
         result = await self.client.add_review(
             {
@@ -74,11 +63,7 @@ class PersistReviewNode:
         )
 
         if not result["ok"]:
-            return {
-                "stage": "failed",
-                "status": "failed",
-                "error": f"review persistence failed: {result['error']}",
-            }
+            return failed(f"review persistence failed: {result['error']}")
 
         review_id = result["result"]["review_id"]
         return {

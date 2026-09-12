@@ -5,16 +5,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.subagents.task_review import TaskReviewDelegation
-
-
-def _initialization_failed(error: str) -> dict[str, Any]:
-    return {
-        "stage": "failed",
-        "status": "failed",
-        "error": error,
-        "warnings": [],
-    }
 
 
 async def initialize_review_node(
@@ -22,17 +14,17 @@ async def initialize_review_node(
 ) -> dict[str, Any]:
     run_id = state.get("run_id")
     if not isinstance(run_id, str) or not run_id.strip():
-        return _initialization_failed("missing valid run_id")
+        return failed("missing valid run_id", warnings=[])
 
     call = state.get("active_tool_call")
     raw_request = call.get("args") if isinstance(call, Mapping) else None
     if not isinstance(raw_request, Mapping):
-        return _initialization_failed("missing active task review delegation")
+        return failed("missing active task review delegation", warnings=[])
 
     try:
         request = TaskReviewDelegation.model_validate(raw_request)
     except ValidationError as exc:
-        return _initialization_failed(f"invalid review request: {exc}")
+        return failed(f"invalid review request: {exc}", warnings=[])
 
     return {
         "task_id": request.task_id,

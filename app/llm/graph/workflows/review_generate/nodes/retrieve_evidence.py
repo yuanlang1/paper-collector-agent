@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.llm.artifacts.store import LocalArtifactStore
+from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.rag.retrieval.paper_content_retrieval import PaperContentHybridRetrievalModule
 from app.rag.retrieval.paper_retrieval import PaperHybridRetrievalModule
 
@@ -54,10 +55,7 @@ class RetrieveEvidenceNode:
                 state.get("retrieve_claim_ids", [])
             )
 
-            if (
-                state.get("evidence_ledger_artifact_ref")
-                and not retrieve_claim_ids
-            ):
+            if state.get("evidence_ledger_artifact_ref") and not retrieve_claim_ids:
                 return {
                     "stage": "rendering_sections",
                     "status": "running",
@@ -139,11 +137,7 @@ class RetrieveEvidenceNode:
             )
 
         except Exception as exc:
-            return {
-                "stage": "failed",
-                "status": "failed",
-                "error": f"evidence retrieval failed: {exc}",
-            }
+            return failed(f"evidence retrieval failed: {exc}")
 
         return {
             "evidence_ledger_artifact_ref": artifact.artifact_uri,

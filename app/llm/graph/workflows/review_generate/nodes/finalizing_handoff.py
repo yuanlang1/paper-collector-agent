@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.llm.artifacts.store import LocalArtifactStore
+from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 
 
 REF_PATTERN = re.compile(r"\[\[REF_(\d+)\]\]")
@@ -36,11 +37,7 @@ class FinalizingHandoffNode:
         )
 
         if not reflection_report["satisfied"]:
-            return {
-                "stage": "failed",
-                "status": "failed",
-                "error": "review was not approved by reflection",
-            }
+            return failed("review was not approved by reflection")
 
         final_review = self._build_final_review(
             review_draft=review_draft,
