@@ -21,45 +21,24 @@ MAX_KEYWORDS = 12
 MAX_KEYWORD_CHARS = 1_000
 
 
-AI_ABSTRACT_SYSTEM_PROMPT = """
-    你负责根据论文前几页内容生成中文 AI 摘要。
+PDF_FRONT_PAGE_ENRICHMENT_SYSTEM_PROMPT = """
+你负责仅根据论文前几页文本完成三个字段。
 
-    规则：
-    - 使用中文；
-    - 概括研究问题、核心方法、实验设置、主要结果和贡献；
-    - 可参考输入的原始摘要；
-    - 不得编造输入中没有的实验结果、指标、方法细节或结论；
-    - 输出适合作为论文检索系统展示的简洁摘要。
+- paper_abstract：提取页面中原始的 Abstract 段落，保留原文语言和含义；
+  未找到时返回 null，不得改写或编造。
+- keywords：提取页面中 Keywords、Index Terms 或“关键词”段落；如果未找到就根据论文内容生成关键词。
+- ai_abstract：使用中文概括研究问题、核心方法、实验设置、主要结果和贡献；
+  仅依据页面文本，不得编造其中没有的事实。
 """.strip()
 
 
-FALLBACK_ABSTRACT_SYSTEM_PROMPT = """
-    你负责基于有限论文信息生成谨慎的中文 AI 摘要。
-
-    若有原始摘要，仅根据原始摘要生成中文概括。
-    若没有原始摘要，只能依据标题、作者、关键词和来源描述研究方向，
-    不得编造实验、方法细节、结果、结论或指标。
-""".strip()
-
-
-KEYWORD_GENERATION_SYSTEM_PROMPT = """
-    根据论文标题、原始摘要和前几页正文生成论文关键词。
-
-    规则：
-    - 仅使用输入中有证据支持的术语，不得虚构方法、数据集、指标或结论；
-    - 生成 3 到 8 个简洁的学术短语，而不是完整句子；
-    - 优先保持论文原文语言；英文论文使用英文术语；
-    - 不要输出“Keywords”“Index Terms”等标题文本；
-    - 不要重复、不要编号、不要包含解释。
-""".strip()
-
-
-class AiAbstractResult(BaseModel):
-    ai_abstract: str = Field(min_length = 1, max_length = 3_000)
-
-
-class KeywordGenerationResult(BaseModel):
-    keywords: list[str] = Field(min_length=3, max_length=8)
+class PdfFrontPageEnrichmentResult(BaseModel):
+    paper_abstract: str | None = Field(
+        default=None,
+        max_length=MAX_ABSTRACT_CHARS,
+    )
+    keywords: list[str] = Field(default_factory=list, max_length=MAX_KEYWORDS)
+    ai_abstract: str = Field(min_length=1, max_length=3_000)
 
 
 def _text(value: Any) -> str | None:
@@ -87,38 +66,6 @@ def _extract_initial_pdf_text(
         raise ValueError("PDF 前四页没有可提取的文本层。")
 
     return text, len(pages)
-
-
-def _extract_original_abstract(initial_pdf_text: str) -> str:
-    match = re.search(
-        r"""
-        (?is)
-        \babstract\b
-        \s*[:\-—]?\s*
-        (?P<abstract>.+?)
-        (? = 
-            \n\s*(?:keywords?|index\s+terms?)\b
-            |\n\s*(?:\d+|[ivxlcdm]+)\.?\s*introduction\b
-            |\n\s*introduction\b
-        )
-        """,
-        initial_pdf_text,
-        flags = re.VERBOSE,
-    )
-
-    if match is None:
-        raise ValueError("未在 PDF 前四页定位到 Abstract 段落。")
-
-    abstract = re.sub(
-        r"\s+",
-        " ",
-        match.group("abstract"),
-    ).strip()
-
-    if len(abstract) < 80:
-        raise ValueError("提取到的 Abstract 内容过短。")
-
-    return abstract[:MAX_ABSTRACT_CHARS]
 
 
 def _normalize_keywords(value: Any) -> list[str]:
@@ -149,147 +96,38 @@ def _keywords_text(keywords: list[str]) -> str | None:
     return value[:MAX_KEYWORD_CHARS] or None
 
 
-def _extract_original_keywords(initial_pdf_text: str) -> list[str]:
-    match = re.search(
-        r"""
-        (?is)
-        (?:^|\n)\s*(?:keywords?|key\s*words?|index\s+terms?|关键词)
-        \s*[:：\-—]?\s*
-        (?P<keywords>.+?)
-        (?=
-            \n\s*(?:\d+|[ivxlcdm]+)\.?\s*(?:introduction|引言)\b
-            |\n\s*(?:introduction|引言)\b
-            |\n{2,}
-            |\Z
-        )
-        """,
-        initial_pdf_text,
-        flags=re.VERBOSE,
-    )
-    if match is None:
-        return []
-
-    return _normalize_keywords(match.group("keywords"))
-
-
 class AbstractEnrichNode:
     def __init__(
         self,
         artifact_store: LocalArtifactStore | None = None,
         model: Any | None = None,
-        keyword_model: Any | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
         self.model = model or create_validated_structured_chat_model(
-            AiAbstractResult,
-            temperature = 0,
-        )
-        self.keyword_model = keyword_model or create_validated_structured_chat_model(
-            KeywordGenerationResult,
+            PdfFrontPageEnrichmentResult,
             temperature=0,
         )
 
-    async def _generate_ai_abstract(
+    async def _enrich_from_pdf_front_pages(
         self,
-        *,
-        paper_info: Mapping[str, Any],
         initial_pdf_text: str,
-    ) -> str:
+    ) -> PdfFrontPageEnrichmentResult:
         result = await self.model.ainvoke(
             [
-                SystemMessage(
-                    content = AI_ABSTRACT_SYSTEM_PROMPT,
-                ),
-                HumanMessage(
-                    content = json.dumps(
-                        {
-                            "title": paper_info.get("title"),
-                            "authors": paper_info.get("authors"),
-                            "paper_abstract": paper_info.get(
-                                "paper_abstract"
-                            ),
-                            "pdf_front_pages": initial_pdf_text,
-                        },
-                        ensure_ascii = False,
-                    )
-                ),
-            ]
-        )
-
-        output = (
-            result
-            if isinstance(result, AiAbstractResult)
-            else AiAbstractResult.model_validate(result)
-        )
-
-        return output.ai_abstract.strip()
-
-    async def _generate_fallback_ai_abstract(
-        self,
-        paper_info: Mapping[str, Any],
-    ) -> str:
-        result = await self.model.ainvoke(
-            [
-                SystemMessage(
-                    content = FALLBACK_ABSTRACT_SYSTEM_PROMPT,
-                ),
-                HumanMessage(
-                    content = json.dumps(
-                        {
-                            "title": paper_info.get("title"),
-                            "authors": paper_info.get("authors"),
-                            "keywords": paper_info.get("keywords"),
-                            "source": paper_info.get("source"),
-                            "paper_abstract": paper_info.get(
-                                "paper_abstract"
-                            ),
-                        },
-                        ensure_ascii = False,
-                    )
-                ),
-            ]
-        )
-
-        output = (
-            result
-            if isinstance(result, AiAbstractResult)
-            else AiAbstractResult.model_validate(result)
-        )
-
-        return output.ai_abstract.strip()
-
-    async def _generate_keywords(
-        self,
-        *,
-        paper_info: Mapping[str, Any],
-        initial_pdf_text: str | None,
-    ) -> list[str]:
-        result = await self.keyword_model.ainvoke(
-            [
-                SystemMessage(content=KEYWORD_GENERATION_SYSTEM_PROMPT),
+                SystemMessage(content=PDF_FRONT_PAGE_ENRICHMENT_SYSTEM_PROMPT),
                 HumanMessage(
                     content=json.dumps(
-                        {
-                            "title": paper_info.get("title"),
-                            "paper_abstract": paper_info.get(
-                                "paper_abstract"
-                            ),
-                            "pdf_front_pages": initial_pdf_text,
-                        },
+                        {"pdf_front_pages": initial_pdf_text},
                         ensure_ascii=False,
                     )
                 ),
             ]
         )
-        output = (
+        return (
             result
-            if isinstance(result, KeywordGenerationResult)
-            else KeywordGenerationResult.model_validate(result)
+            if isinstance(result, PdfFrontPageEnrichmentResult)
+            else PdfFrontPageEnrichmentResult.model_validate(result)
         )
-        keywords = _normalize_keywords(output.keywords)
-        if len(keywords) < 3:
-            raise ValueError("generated fewer than three valid keywords")
-        return keywords
 
     async def __call__(
         self,
@@ -341,7 +179,6 @@ class AbstractEnrichNode:
             ai_abstract_count = 0
             source_keyword_count = 0
             extracted_keyword_count = 0
-            generated_keyword_count = 0
             missing_keyword_count = 0
             warnings: list[str] = []
 
@@ -355,31 +192,19 @@ class AbstractEnrichNode:
                 if not isinstance(paper_info, dict):
                     continue
 
-                original_abstract = _text(
+                source_abstract = _text(
                     paper_info.get("paper_abstract")
+                )
+                source_keywords = _normalize_keywords(
+                    paper_info.get("keywords")
                 )
                 local_pdf_path = _text(
                     pdf_download.get("local_pdf_path")
                 )
-
-                initial_pdf_text: str | None = None
                 page_count = 0
-                extraction_error: str | None = None
-
-                if original_abstract:
-                    abstract_source = "source"
-                    extraction_status = "not_needed"
-                    source_abstract_count += 1
-                else:
-                    abstract_source = "missing"
-                    extraction_status = "pending"
-
-                source_keywords = _normalize_keywords(
-                    paper_info.get("keywords")
-                )
-                keyword_source = "missing"
-                keyword_extraction_status = "pending"
-                keyword_error: str | None = None
+                content_error: str | None = None
+                extracted_abstract: str | None = None
+                extracted_keywords: list[str] = []
 
                 try:
                     if not local_pdf_path:
@@ -392,120 +217,71 @@ class AbstractEnrichNode:
                         )
                     )
                     front_pages_read_count += 1
-
-                    if not original_abstract:
-                        try:
-                            paper_info["paper_abstract"] = (
-                                _extract_original_abstract(
-                                    initial_pdf_text
-                                )
-                            )
-                            abstract_source = "pdf_extracted"
-                            extraction_status = "success"
-                            extracted_abstract_count += 1
-                        except Exception as exc:
-                            abstract_source = "pdf_abstract_not_found"
-                            extraction_status = "failed"
-                            extraction_error = str(exc)
-                            missing_abstract_count += 1
-
-                except Exception as exc:
-                    extraction_error = str(exc)
-
-                    if not original_abstract:
-                        abstract_source = "metadata_fallback"
-                        extraction_status = "failed"
-                        missing_abstract_count += 1
-                    else:
-                        extraction_status = "front_pages_read_failed"
-
-                if source_keywords:
-                    paper_info["keywords"] = _keywords_text(source_keywords)
-                    keyword_source = "source_metadata"
-                    keyword_extraction_status = "not_needed"
-                    source_keyword_count += 1
-                elif initial_pdf_text:
-                    extracted_keywords = _extract_original_keywords(
+                    enrichment = await self._enrich_from_pdf_front_pages(
                         initial_pdf_text
                     )
-                    if extracted_keywords:
-                        paper_info["keywords"] = _keywords_text(
-                            extracted_keywords
-                        )
-                        keyword_source = "pdf_extracted"
-                        keyword_extraction_status = "success"
-                        extracted_keyword_count += 1
-                    else:
-                        keyword_extraction_status = "not_found"
-                        keyword_error = (
-                            "keywords section not found in PDF front pages"
-                        )
-
-                if keyword_source == "missing":
-                    try:
-                        generated_keywords = await self._generate_keywords(
-                            paper_info=paper_info,
-                            initial_pdf_text=initial_pdf_text,
-                        )
-                        paper_info["keywords"] = _keywords_text(
-                            generated_keywords
-                        )
-                        keyword_source = "generated_from_paper"
-                        keyword_extraction_status = "generated"
-                        keyword_error = None
-                        generated_keyword_count += 1
-                    except Exception as exc:
-                        paper_info["keywords"] = None
-                        keyword_extraction_status = "failed"
-                        keyword_error = str(exc)
-                        missing_keyword_count += 1
-                        warnings.append(
-                            f"{paper_info.get('title')} 的论文关键词生成失败：{exc}"
-                        )
-
-                try:
-                    if initial_pdf_text:
-                        paper_info["ai_abstract"] = (
-                            await self._generate_ai_abstract(
-                                paper_info = paper_info,
-                                initial_pdf_text = initial_pdf_text,
-                            )
-                        )
-                        ai_summary_source = "pdf_front_pages"
-                    else:
-                        paper_info["ai_abstract"] = (
-                            await self._generate_fallback_ai_abstract(
-                                paper_info
-                            )
-                        )
-                        ai_summary_source = (
-                            "source_abstract"
-                            if paper_info.get("paper_abstract")
-                            else "metadata"
-                        )
-
+                    extracted_abstract = _text(enrichment.paper_abstract)
+                    extracted_keywords = _normalize_keywords(enrichment.keywords)
+                    ai_abstract = _text(enrichment.ai_abstract)
+                    if ai_abstract is None:
+                        raise ValueError("AI 摘要为空。")
+                    paper_info["ai_abstract"] = ai_abstract
                     ai_abstract_count += 1
-
                 except Exception as exc:
+                    content_error = str(exc)
                     paper_info["ai_abstract"] = None
-                    ai_summary_source = "failed"
                     warnings.append(
-                        f"{paper_info.get('title')} 的中文 AI 摘要生成失败："
-                        f"{exc}"
+                        f"{paper_info.get('title')} 的 PDF 内容补全失败：{exc}"
                     )
+
+                if extracted_abstract:
+                    paper_info["paper_abstract"] = extracted_abstract
+                    abstract_source = "pdf_front_pages"
+                    extraction_status = "success"
+                    extracted_abstract_count += 1
+                elif source_abstract:
+                    paper_info["paper_abstract"] = source_abstract
+                    abstract_source = "source_metadata"
+                    extraction_status = "fallback"
+                    source_abstract_count += 1
+                else:
+                    paper_info["paper_abstract"] = None
+                    abstract_source = "missing"
+                    extraction_status = "failed" if content_error else "not_found"
+                    missing_abstract_count += 1
+
+                if extracted_keywords:
+                    paper_info["keywords"] = _keywords_text(extracted_keywords)
+                    keyword_source = "pdf_front_pages"
+                    keyword_extraction_status = "success"
+                    extracted_keyword_count += 1
+                elif source_keywords:
+                    paper_info["keywords"] = _keywords_text(source_keywords)
+                    keyword_source = "source_metadata"
+                    keyword_extraction_status = "fallback"
+                    source_keyword_count += 1
+                else:
+                    paper_info["keywords"] = None
+                    keyword_source = "missing"
+                    keyword_extraction_status = (
+                        "failed" if content_error else "not_found"
+                    )
+                    missing_keyword_count += 1
 
                 paper["abstract_resolution"] = {
                     "source": abstract_source,
                     "extraction_status": extraction_status,
                     "pdf_pages_read": page_count,
-                    "ai_summary_source": ai_summary_source,
-                    "error": extraction_error,
+                    "ai_summary_source": (
+                        "pdf_front_pages" if content_error is None else "failed"
+                    ),
+                    "error": content_error,
                 }
                 paper["keyword_resolution"] = {
                     "source": keyword_source,
                     "extraction_status": keyword_extraction_status,
                     "pdf_pages_read": page_count,
-                    "error": keyword_error,
+                    "error": content_error,
                 }
 
             manifest["papers"] = papers
@@ -529,7 +305,6 @@ class AbstractEnrichNode:
                     "ai_abstract_count": ai_abstract_count,
                     "source_keyword_count": source_keyword_count,
                     "extracted_keyword_count": extracted_keyword_count,
-                    "generated_keyword_count": generated_keyword_count,
                     "missing_keyword_count": missing_keyword_count,
                 },
             )
@@ -561,7 +336,6 @@ class AbstractEnrichNode:
                 "ai_abstract_generated": ai_abstract_count,
                 "keywords_from_source": source_keyword_count,
                 "keywords_extracted_from_pdf": extracted_keyword_count,
-                "keywords_generated": generated_keyword_count,
                 "keywords_missing": missing_keyword_count,
             },
             "warnings": [
