@@ -23,8 +23,8 @@ CLAIMS_PROMPT = """
 根据给定的“章节提纲”，为每个章节生成详尽的待验证论点列表。
 每条论点将在后续由RAG系统从固定的任务论文集中检索全文证据。
 
-你当前不知道任务中具体有哪些论文。不要假设固定论文集一定包含某位作者、
-某篇论文、某种方法、某项发现、某个历史事件、某个争议或某项研究空白。
+输入中的 evidence_map 概括了固定论文集的逐篇抽取结果。只可据此规划待验证
+论点，不得添加 evidence_map 之外的作者、论文、方法、发现、争议或研究空白。
 
 【章节提纲】
 由输入中的 framework 提供。
@@ -251,12 +251,20 @@ class GenerateClaimsNode:
                     for claim in targets
                 ]
             else:
-                framework_payload = await self.artifact_store.read_json_uri(
-                    state["framework_artifact_ref"]
+                framework_payload, studies_payload = await asyncio.gather(
+                    self.artifact_store.read_json_uri(
+                        state["framework_artifact_ref"]
+                    ),
+                    self.artifact_store.read_json_uri(
+                        state["study_records_artifact_ref"]
+                    ),
                 )
                 framework = ReviewFramework.model_validate(
                     framework_payload["framework"]
                 )
+                evidence_map = studies_payload["evidence_map"]
+                if not isinstance(evidence_map, list):
+                    raise ValueError("study evidence map is invalid")
 
                 result = await self.model.ainvoke(
                     [
@@ -270,6 +278,7 @@ class GenerateClaimsNode:
                                     "framework": framework.model_dump(
                                         mode = "json"
                                     ),
+                                    "evidence_map": evidence_map,
                                 },
                                 ensure_ascii = False,
                             )

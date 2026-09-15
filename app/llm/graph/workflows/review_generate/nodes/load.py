@@ -19,6 +19,8 @@ class CorpusPaper(BaseModel):
     authors: list[str] = Field(default_factory = list)
     year: int | None = Field(default = None, ge = 1800, le = 2100)
     doi: str | None = None
+    oss_name: str | None = None
+    pdf_url: str | None = None
 
     rag_status: RagStatus = "pending"
     chunk_count: int = Field(default = 0, ge = 0)
@@ -123,6 +125,9 @@ class LoadTaskCorpusNode:
                 {
                     "paper_id": paper_id,
                     "title": str(raw_paper.get("title") or "").strip(),
+                    "abstract": str(
+                        raw_paper.get("paper_abstract") or ""
+                    ).strip(),
                     "authors": [
                         str(author).strip()
                         for author in raw_paper.get("authors", [])
@@ -130,6 +135,12 @@ class LoadTaskCorpusNode:
                     ],
                     "published_date": raw_paper.get("published_date"),
                     "doi": raw_paper.get("doi"),
+                    "oss_name": str(
+                        raw_paper.get("oss_name") or ""
+                    ).strip() or None,
+                    "pdf_url": str(
+                        raw_paper.get("pdf_url") or ""
+                    ).strip() or None,
                     "rag_status": rag_status,
                     "chunk_count": chunk_count,
                 }
@@ -214,6 +225,6 @@ class LoadTaskCorpusNode:
 
             "warnings": warnings,
             "error": None,
-            "stage": "generating_framework",
+            "stage": "extracting_studies",
             "status": "running",
         }

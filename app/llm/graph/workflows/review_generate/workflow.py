@@ -16,6 +16,9 @@ from app.llm.graph.workflows.review_generate.nodes.finalizing_handoff import (
 from app.llm.graph.workflows.review_generate.nodes.finalize import (
     finalize_task_review_node,
 )
+from app.llm.graph.workflows.review_generate.nodes.extract_studies import (
+    ExtractStudiesNode,
+)
 from app.llm.graph.workflows.review_generate.nodes.generate_claim import (
     GenerateClaimsNode,
 )
@@ -104,6 +107,10 @@ def build_task_review_workflow(
         node("generate_framework", GenerateFrameworkNode),
     )
     builder.add_node(
+        "extract_studies",
+        node("extract_studies", ExtractStudiesNode),
+    )
+    builder.add_node(
         "generate_claims",
         node("generate_claims", GenerateClaimsNode),
     )
@@ -147,6 +154,14 @@ def build_task_review_workflow(
     )
     builder.add_conditional_edges(
         "load_task_corpus",
+        _route("extracting_studies", "extract_studies"),
+        {
+            "extract_studies": "extract_studies",
+            "finalize": "finalize_result",
+        },
+    )
+    builder.add_conditional_edges(
+        "extract_studies",
         _route("generating_framework", "generate_framework"),
         {
             "generate_framework": "generate_framework",

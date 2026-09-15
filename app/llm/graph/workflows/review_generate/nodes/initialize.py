@@ -41,6 +41,8 @@ async def initialize_review_node(
         "reflection_round": 0,
         "paper_ids_snapshot": [],
         "corpus_artifact_ref": None,
+        "study_records_artifact_ref": None,
+        "study_extraction_report_artifact_ref": None,
         "framework_artifact_ref": None,
         "framework_hash": None,
         "claims_artifact_ref": None,

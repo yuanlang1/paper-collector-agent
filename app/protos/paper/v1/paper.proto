@@ -99,6 +99,9 @@ message TaskReviewPaperItem {
   string doi = 5;
   string rag_status = 6;
   int32 chunk_count = 7;
+  string paper_abstract = 8;
+  string oss_name = 9;
+  string pdf_url = 10;
 }
 
 message GetTaskReviewPapersResponse {

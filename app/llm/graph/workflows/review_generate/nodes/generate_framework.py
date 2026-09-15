@@ -19,7 +19,7 @@ FRAMEWORK_PROMPT = """
     任务：
     根据给定的研究主题和综述类型，生成一个结构连贯、范围明确的文献综述大纲。
     这是一个文献综述大纲，不是博士研究计划、项目时间表、研究提案、数据库检索方案，也不是系统综述工作流程。
-    论文语料库已经由任务预先确定。你无法看到实际可用的论文或文本片段。因此，除非输入中已经明确给出，否则不得假设语料库中存在任何具体的作者、论文、理论、方法、模型、数据集、评价指标、应用场景、时间、历史阶段、研究发现、发展趋势、争议、矛盾、局限性或研究空白。
+    论文语料库已经由任务预先确定。输入中的 evidence_map 是从固定论文集逐篇抽取的结构化研究记录；可据此设计与已有证据覆盖相匹配的章节，但不得扩展为输入之外的事实。
     不得输出事实性主张、研究结论、引用、参考文献、论文标题，也不得暗示固定论文语料库一定包含支持所有拟定章节的证据。
     不得建议进行外部检索、查找新论文、构造数据库查询、制定纳入与排除标准、设计筛选流程、制定检索策略或执行 PRISMA 流程。
 
@@ -144,19 +144,25 @@ class GenerateFrameworkNode:
                 "status": "running",
             }
 
-        model_input = {
-            "topic": state["topic"],
-            "output_language": state["language"],
-            "review_type": state["review_type"],
-        }
-
         try:
+            studies_payload = await self.artifact_store.read_json_uri(
+                state["study_records_artifact_ref"]
+            )
+            evidence_map = studies_payload["evidence_map"]
+            if not isinstance(evidence_map, list):
+                raise ValueError("study evidence map is invalid")
+
             result = await self.model.ainvoke(
                 [
                     SystemMessage(content = FRAMEWORK_PROMPT),
                     HumanMessage(
                         content = json.dumps(
-                            model_input,
+                            {
+                                "topic": state["topic"],
+                                "output_language": state["language"],
+                                "review_type": state["review_type"],
+                                "evidence_map": evidence_map,
+                            },
                             ensure_ascii = False,
                         )
                     ),

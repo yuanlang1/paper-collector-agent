@@ -118,6 +118,13 @@ TASK_REVIEW_TIMELINE = (
         nodes=frozenset({"load_task_corpus"}),
     ),
     TimelineStep(
+        key="extract_studies",
+        label="逐篇抽取研究记录",
+        starts_at=frozenset({"extract_studies"}),
+        completes_at=frozenset({"extract_studies"}),
+        nodes=frozenset({"extract_studies"}),
+    ),
+    TimelineStep(
         key="framework",
         label="生成综述框架",
         starts_at=frozenset({"generate_framework"}),

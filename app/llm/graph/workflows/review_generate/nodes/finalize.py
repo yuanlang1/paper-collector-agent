@@ -25,12 +25,16 @@ async def finalize_task_review_node(
     stage = state["stage"]
     final_review_artifact_ref = state.get("final_review_artifact_ref")
     reflection_report_artifact_ref = state.get("reflection_report_artifact_ref")
+    study_extraction_report_artifact_ref = state.get(
+        "study_extraction_report_artifact_ref"
+    )
 
     if stage == "completed":
         available_artifacts = {
             name: artifact_ref
             for name, artifact_ref in {
                 "corpus": state.get("corpus_artifact_ref"),
+                "study_records": state.get("study_records_artifact_ref"),
                 "framework": state.get("framework_artifact_ref"),
                 "claims": state.get("claims_artifact_ref"),
                 "evidence_ledger": state.get("evidence_ledger_artifact_ref"),
@@ -68,12 +72,23 @@ async def finalize_task_review_node(
         result = {
             "status": "error",
             "summary": "学术综述未能完成。",
-            "data": {"task_id": state.get("task_id")},
-            "artifact_refs": [
-                artifact_ref
-                for artifact_ref in [reflection_report_artifact_ref]
-                if artifact_ref
-            ],
+            "data": {
+                "task_id": state.get("task_id"),
+                "study_extraction_report_artifact_ref": (
+                    study_extraction_report_artifact_ref
+                ),
+                "warnings": list(state.get("warnings", [])),
+            },
+            "artifact_refs": list(
+                dict.fromkeys(
+                    artifact_ref
+                    for artifact_ref in [
+                        study_extraction_report_artifact_ref,
+                        reflection_report_artifact_ref,
+                    ]
+                    if artifact_ref
+                )
+            ),
             "retryable": False,
             "error_code": stage,
             "error_message": state.get("error"),

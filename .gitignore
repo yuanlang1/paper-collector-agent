@@ -45,6 +45,7 @@ tests/*
 !tests/test_paper_search_oss.py
 !tests/test_rag_oss.py
 !tests/test_rag_evaluation_*.py
+!tests/test_review_extract_studies.py
 !app/models/
 !app/models/*.py
 scripts/

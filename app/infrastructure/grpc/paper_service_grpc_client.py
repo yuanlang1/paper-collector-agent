@@ -241,6 +241,9 @@ class PaperServiceGrpcClient:
                             "doi": item.doi or None,
                             "rag_status": (item.rag_status or "PENDING").strip().lower(),
                             "chunk_count": item.chunk_count,
+                            "paper_abstract": item.paper_abstract.strip(),
+                            "oss_name": item.oss_name.strip() or None,
+                            "pdf_url": item.pdf_url.strip() or None,
                         }
                         for item in response.papers
                     ],

@@ -26,6 +26,8 @@ class TaskReviewWorkflowState(TypedDict, total=False):
 
     paper_ids_snapshot: list[str]
     corpus_artifact_ref: str | None
+    study_records_artifact_ref: str | None
+    study_extraction_report_artifact_ref: str | None
 
     framework_artifact_ref: str | None
     framework_hash: str | None

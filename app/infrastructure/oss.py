@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
+from dataclasses import dataclass
+import hashlib
 import re
 from pathlib import Path
 from typing import Protocol
@@ -86,6 +88,19 @@ class OssObjectStore(Protocol):
         markdown: str,
         pdf_sha256: str,
     ) -> None: ...
+
+    async def get_markdown(
+        self,
+        *,
+        pdf_sha256: str,
+    ) -> "MarkdownObject | None": ...
+
+
+@dataclass(frozen=True, slots=True)
+class MarkdownObject:
+    content: str
+    object_name: str
+    content_sha256: str
 
 
 class AliyunOssObjectStore:
@@ -234,6 +249,51 @@ class AliyunOssObjectStore:
             markdown=markdown,
             object_name=object_name,
             sha256=sha256,
+        )
+
+    async def get_markdown(
+        self,
+        *,
+        pdf_sha256: str,
+    ) -> MarkdownObject | None:
+        if not settings.OSS_ENABLED:
+            return None
+
+        object_name = build_markdown_object_name(
+            prefix=settings.OSS_PREFIX,
+            pdf_sha256=pdf_sha256,
+        )
+        if object_name is None:
+            return None
+
+        return await asyncio.to_thread(
+            self._get_markdown_sync,
+            object_name=object_name,
+        )
+
+    def _get_markdown_sync(
+        self,
+        *,
+        object_name: str,
+    ) -> MarkdownObject:
+        client, oss = self._get_client()
+        result = client.get_object(
+            oss.GetObjectRequest(
+                bucket=settings.OSS_BUCKET,
+                key=object_name,
+            )
+        )
+        try:
+            content = result.body.read().decode("utf-8")
+        finally:
+            result.body.close()
+
+        return MarkdownObject(
+            content=content,
+            object_name=object_name,
+            content_sha256=hashlib.sha256(
+                content.encode("utf-8")
+            ).hexdigest(),
         )
 
     def _upload_markdown_sync(
