@@ -8,6 +8,11 @@ from typing import Literal
 from langchain_core.documents import Document
 from pydantic import ValidationError
 
+from app.infrastructure.oss import (
+    AliyunOssObjectStore,
+    OssObjectStore,
+    normalize_pdf_sha256,
+)
 from app.rag.data_preparation.data_preparation import DataPreparationModule
 from app.rag.file_parser.file_parser import FileParser
 from app.rag.index_construction.paper_content_index_construction import PaperContentIndexConstructionModule
@@ -23,6 +28,7 @@ class PaperRagInput:
     title: str
     abstract: str
     pdf_url: str
+    oss_name: str = ""
     year: int | None = None
 
 @dataclass(frozen = True, slots = True)
@@ -43,11 +49,13 @@ class PaperRagProcessor:
         data_preparation: DataPreparationModule,
         paper_index: PaperIndexConstructionModule,
         paper_content_index: PaperContentIndexConstructionModule,
+        oss_store: OssObjectStore | None = None,
     ) -> None:
         self.file_parser = file_parser
         self.data_preparation = data_preparation
         self.paper_index = paper_index
         self.paper_content_index = paper_content_index
+        self.oss_store = oss_store or AliyunOssObjectStore()
 
         self._index_lock = asyncio.Lock()
 
@@ -69,23 +77,37 @@ class PaperRagProcessor:
         for paper in papers:
             paper_id = paper.paper_id
 
-            if not paper.pdf_url.strip():
+            oss_name = normalize_pdf_sha256(paper.oss_name)
+            if not paper.pdf_url.strip() and oss_name is None:
                 result = PaperRagResult(
                     paper_id = paper_id,
                     status = "skipped",
-                    error = "missing PDF URL",
+                    error = "missing PDF source",
                 )
                 results_by_paper_id[paper_id] = result
                 await self._notify_paper_result(on_paper_result, result)
                 continue
             
             file_id = f"paper-{paper_id}"
+            uri = await self._source_uri(paper, oss_name)
+            if not uri:
+                result = PaperRagResult(
+                    paper_id = paper_id,
+                    status = "skipped",
+                    error = "missing readable PDF source",
+                )
+                results_by_paper_id[paper_id] = result
+                await self._notify_paper_result(on_paper_result, result)
+                continue
 
             try:
                 request = FileParseRequest(
                     file_id = file_id,
-                    uri = paper.pdf_url,
+                    uri = uri,
                     file_name = f"{file_id}.pdf",
+                    metadata = {
+                        "source": paper.pdf_url.strip() or f"oss://{oss_name}",
+                    },
                 )
             except ValidationError as error:
                 result = PaperRagResult(
@@ -177,6 +199,7 @@ class PaperRagProcessor:
                 parsed_document.document,
                 paper,
             )
+            await self._save_markdown(paper, parent_document.page_content)
             chunks = (
                 self.data_preparation.prepare_pdf_document(
                     parent_document,
@@ -210,6 +233,51 @@ class PaperRagProcessor:
                 paper_id = paper.paper_id,
                 status = "failed",
                 error = str(error),
+            )
+
+    async def _source_uri(
+        self,
+        paper: PaperRagInput,
+        oss_name: str | None,
+    ) -> str:
+        fallback = paper.pdf_url.strip()
+        if oss_name is None:
+            return fallback
+
+        try:
+            return (
+                await self.oss_store.get_pdf_temporary_url(
+                    pdf_sha256=oss_name,
+                )
+                or fallback
+            )
+        except Exception:
+            logger.warning(
+                "Unable to read PDF from OSS; using source URL: paper_id=%s",
+                paper.paper_id,
+                exc_info=True,
+            )
+            return fallback
+
+    async def _save_markdown(
+        self,
+        paper: PaperRagInput,
+        markdown: str,
+    ) -> None:
+        oss_name = normalize_pdf_sha256(paper.oss_name)
+        if oss_name is None or not markdown.strip():
+            return
+
+        try:
+            await self.oss_store.upload_markdown(
+                markdown=markdown,
+                pdf_sha256=oss_name,
+            )
+        except Exception:
+            logger.warning(
+                "Unable to save parsed Markdown to OSS: paper_id=%s",
+                paper.paper_id,
+                exc_info=True,
             )
 
     @staticmethod

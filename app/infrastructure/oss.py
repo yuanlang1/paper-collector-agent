@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 import re
 from pathlib import Path
 from typing import Protocol
@@ -9,6 +10,7 @@ from app.config import settings
 
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_PRESIGNED_URL_EXPIRES = timedelta(days=1)
 
 
 def normalize_pdf_sha256(value: object) -> str | None:
@@ -64,6 +66,12 @@ def build_markdown_object_name(
 
 
 class OssObjectStore(Protocol):
+    async def get_pdf_temporary_url(
+        self,
+        *,
+        pdf_sha256: str,
+    ) -> str | None: ...
+
     async def upload_pdf(
         self,
         *,
@@ -72,9 +80,16 @@ class OssObjectStore(Protocol):
         sha256: str,
     ) -> None: ...
 
+    async def upload_markdown(
+        self,
+        *,
+        markdown: str,
+        pdf_sha256: str,
+    ) -> None: ...
+
 
 class AliyunOssObjectStore:
-    """Uploads local PDFs to the configured Alibaba Cloud OSS bucket."""
+    """Stores RAG source files and produces temporary PDF download URLs."""
 
     def __init__(self) -> None:
         self._client = None
@@ -149,4 +164,92 @@ class AliyunOssObjectStore:
             source_path=source_path,
             object_name=object_name,
             sha256=sha256,
+        )
+
+    async def get_pdf_temporary_url(
+        self,
+        *,
+        pdf_sha256: str,
+    ) -> str | None:
+        if not settings.OSS_ENABLED:
+            return None
+
+        object_name = build_pdf_object_name(
+            prefix=settings.OSS_PREFIX,
+            pdf_sha256=pdf_sha256,
+        )
+        if object_name is None:
+            return None
+
+        return await asyncio.to_thread(
+            self._get_pdf_temporary_url_sync,
+            object_name=object_name,
+        )
+
+    def _get_pdf_temporary_url_sync(
+        self,
+        *,
+        object_name: str,
+    ) -> str:
+        client, oss = self._get_client()
+        client.head_object(
+            oss.HeadObjectRequest(
+                bucket=settings.OSS_BUCKET,
+                key=object_name,
+            )
+        )
+        result = client.presign(
+            oss.GetObjectRequest(
+                bucket=settings.OSS_BUCKET,
+                key=object_name,
+            ),
+            expires=_PRESIGNED_URL_EXPIRES,
+        )
+        if not result.url:
+            raise RuntimeError("OSS returned an empty presigned PDF URL")
+        return str(result.url)
+
+    async def upload_markdown(
+        self,
+        *,
+        markdown: str,
+        pdf_sha256: str,
+    ) -> None:
+        if not settings.OSS_ENABLED or not markdown:
+            return
+
+        sha256 = normalize_pdf_sha256(pdf_sha256)
+        if sha256 is None:
+            return
+
+        object_name = build_markdown_object_name(
+            prefix=settings.OSS_PREFIX,
+            pdf_sha256=sha256,
+        )
+        if object_name is None:
+            return
+
+        await asyncio.to_thread(
+            self._upload_markdown_sync,
+            markdown=markdown,
+            object_name=object_name,
+            sha256=sha256,
+        )
+
+    def _upload_markdown_sync(
+        self,
+        *,
+        markdown: str,
+        object_name: str,
+        sha256: str,
+    ) -> None:
+        client, oss = self._get_client()
+        client.put_object(
+            oss.PutObjectRequest(
+                bucket=settings.OSS_BUCKET,
+                key=object_name,
+                body=markdown.encode("utf-8"),
+                content_type="text/markdown; charset=utf-8",
+                metadata={"sha256": sha256},
+            )
         )

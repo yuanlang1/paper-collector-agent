@@ -5,7 +5,7 @@ import warnings
 
 from app.protos.rag.v1 import rag_pb2 as app_dot_protos_dot_rag_dot_v1_dot_rag__pb2
 
-GRPC_GENERATED_VERSION = '1.82.1'
+GRPC_GENERATED_VERSION = '1.83.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 

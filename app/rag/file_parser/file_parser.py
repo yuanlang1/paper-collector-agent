@@ -87,8 +87,6 @@ class FileParser:
         requests: list[FileParseRequest],
     ) -> BatchDocumentParseResult:
 
-        
-
         if not requests:
             return BatchDocumentParseResult(
                 total = 0,
@@ -300,7 +298,7 @@ class FileParser:
                     "file_id": request.file_id,
                     "file_name": request.file_name,
                     "file_type": file_type.value,
-                    "source": str(request.uri),
+                    "source": str(request.metadata.get("source") or request.uri),
                     "doc_type": "parent",
                     "parent_id": request.file_id,
                     "parser": "mineru",

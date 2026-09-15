@@ -123,6 +123,7 @@ class RagGrpcClient:
                             "title": paper.title,
                             "url": paper.url,
                             "paper_abstract": paper.paper_abstract,
+                            "oss_name": paper.oss_name,
                         }
                         for paper in response.papers
                     ],

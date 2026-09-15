@@ -27,6 +27,7 @@ message PaperRagInput {
   string title = 2;
   string url = 3;
   string paper_abstract = 4;
+  string oss_name = 5;
 }
 
 message ClaimTaskRagPapersResponse {

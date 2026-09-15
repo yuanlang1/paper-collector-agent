@@ -481,6 +481,7 @@ class TaskRagBatchRunner:
                     title=paper["title"],
                     abstract=paper["paper_abstract"],
                     pdf_url=paper["url"],
+                    oss_name=paper.get("oss_name", ""),
                 )
                 for paper in papers
             ]

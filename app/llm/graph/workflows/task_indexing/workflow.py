@@ -1,10 +1,18 @@
 from langgraph.graph import END, START, StateGraph
 
-from app.llm.graph.workflows.task_indexing.nodes import (
-    RunOrWaitTaskRagNode,
+from app.llm.graph.workflows.task_indexing.nodes.check_rag_status import (
     check_task_rag_status_node,
+)
+from app.llm.graph.workflows.task_indexing.nodes.finalize import (
     finalize_task_indexing_node,
+)
+from app.llm.graph.workflows.task_indexing.nodes.initialize import (
     initialize_task_indexing_node,
+)
+from app.llm.graph.workflows.task_indexing.nodes.run_or_wait import (
+    RunOrWaitTaskRagNode,
+)
+from app.llm.graph.workflows.task_indexing.nodes.verify_completion import (
     verify_task_indexing_node,
 )
 from app.llm.graph.workflows.task_indexing.state import TaskIndexingWorkflowState
