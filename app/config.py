@@ -72,6 +72,15 @@ class Settings(BaseSettings):
 
     ARTIFACT_BASE_DIR: str
 
+    OSS_ENABLED: bool = True    
+    OSS_BUCKET: str
+    OSS_REGION: str
+    OSS_ENDPOINT: str
+    OSS_PREFIX: str
+    OSS_ACCESS_KEY_ID: str
+    OSS_ACCESS_KEY_SECRET: str
+    OSS_SESSION_TOKEN: str | None = None
+
     PAPER_SEARCH_TARGET_PAPER_COUNT: int = 30
     PAPER_SEARCH_MAX_SUPPLEMENTAL_ROUNDS: int = 2
     PAPER_SEARCH_MAX_EXTRA_PAGES_PER_SOURCE: int = 2

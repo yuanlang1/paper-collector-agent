@@ -100,6 +100,7 @@ PAPER_SEARCH_TIMELINE = (
         nodes=frozenset({
             "create_task",
             "persist",
+            "save_pdfs_to_oss",
             "cleanup_downloaded_pdfs",
             "update_task_status",
             "finalize_result",

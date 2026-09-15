@@ -18,6 +18,9 @@ from app.llm.graph.workflows.paper_search.nodes.intent import IntentUnderstandin
 from app.llm.graph.workflows.paper_search.nodes.finalize import finalize_paper_search_node
 from app.llm.graph.workflows.paper_search.nodes.persist import PersistRecommendedPapersNode
 from app.llm.graph.workflows.paper_search.nodes.recommend import RecommendationNode
+from app.llm.graph.workflows.paper_search.nodes.save_oss import (
+    SavePersistedPdfsToOssNode,
+)
 from app.llm.graph.workflows.paper_search.nodes.search_review import SearchReviewBrainNode
 from app.llm.graph.workflows.paper_search.nodes.source_search import ArxivSearchNode, DblpSearchNode, GoogleScholarSearchNode
 from app.llm.graph.workflows.paper_search.nodes.supplemental_search import SupplementalSearchPlannerNode
@@ -149,6 +152,10 @@ def build_paper_search_workflow(
     builder.add_node("recommend", node("recommend", RecommendationNode()))
     builder.add_node("persist", node("persist", PersistRecommendedPapersNode()))
     builder.add_node(
+        "save_pdfs_to_oss",
+        node("save_pdfs_to_oss", SavePersistedPdfsToOssNode()),
+    )
+    builder.add_node(
         "cleanup_downloaded_pdfs",
         node(
             "cleanup_downloaded_pdfs",
@@ -269,7 +276,8 @@ def build_paper_search_workflow(
         _route("persisting_papers", "persist"),
         _route_paths("persist"),
     )
-    builder.add_edge("persist", "cleanup_downloaded_pdfs")
+    builder.add_edge("persist", "save_pdfs_to_oss")
+    builder.add_edge("save_pdfs_to_oss", "cleanup_downloaded_pdfs")
     builder.add_edge("cleanup_downloaded_pdfs", "update_task_status")
     builder.add_edge("update_task_status", "finalize_result")
     builder.add_edge("finalize_result", END)

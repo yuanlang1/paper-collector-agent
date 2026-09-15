@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import asyncio
-import json
 from collections.abc import Awaitable, Callable, Mapping
-from pathlib import Path
 from typing import Any
 
+from app.config import settings
 from app.infrastructure.grpc.paper_service_grpc_client import (
     paper_service_grpc_client,
 )
@@ -15,6 +13,7 @@ from app.infrastructure.grpc.task_service_grpc_client import (
 from app.infrastructure.grpc.venue_service_grpc_client import (
     venue_service_grpc_client,
 )
+from app.infrastructure.oss import normalize_pdf_sha256
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.paper_search.nodes.paper_cache import (
     PaperCacheStore,
@@ -94,6 +93,7 @@ class PersistRecommendedPapersNode:
             ),
             "paper_cache_status": "not_started",
             "task_paper_save_status": "pending",
+            "oss_name": None,
             "error": None,
         }
 
@@ -226,6 +226,21 @@ class PersistRecommendedPapersNode:
 
         return cache_hits, saved_count, failed_count
 
+    @staticmethod
+    def _planned_pdf_sha256(paper: dict[str, Any]) -> str | None:
+        if not settings.OSS_ENABLED:
+            return None
+
+        pdf_download = paper.get("pdf_download")
+        if not isinstance(pdf_download, dict):
+            return None
+        if pdf_download.get("status") != "success":
+            return None
+        if not isinstance(pdf_download.get("local_pdf_path"), str):
+            return None
+
+        return normalize_pdf_sha256(pdf_download.get("sha256"))
+
     async def __call__(self, state: Mapping[str, Any]) -> dict[str, Any]:
         try:
             run_id = state.get("run_id")
@@ -242,17 +257,7 @@ class PersistRecommendedPapersNode:
             ):
                 raise ValueError("missing recommendation manifest artifact")
 
-            base_dir = self.artifact_store.base_dir.resolve()
-            manifest_path = (
-                base_dir / artifact_uri.removeprefix("artifact://")
-            ).resolve()
-            manifest_path.relative_to(base_dir)
-
-            def read_manifest() -> dict[str, Any]:
-                with manifest_path.open("r", encoding="utf-8") as file:
-                    return json.load(file)
-
-            manifest = await asyncio.to_thread(read_manifest)
+            manifest = await self.artifact_store.read_json_uri(artifact_uri)
             papers = manifest.get("papers")
             if not isinstance(papers, list):
                 raise ValueError("recommendation manifest papers must be a list")
@@ -316,6 +321,10 @@ class PersistRecommendedPapersNode:
                 info["published_date"] = info.get("published_date") or info.get(
                     "publish_date"
                 )
+                pdf_sha256 = self._planned_pdf_sha256(entry["paper"])
+                if pdf_sha256:
+                    info["oss_name"] = pdf_sha256
+                    entry["outcome"]["oss_name"] = pdf_sha256
                 new_requests.append(
                     {"client_key": entry["client_key"], "paper_info": info}
                 )

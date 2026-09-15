@@ -41,6 +41,7 @@ tests/
 !tests/
 tests/*
 !tests/test_pdf_page_aware_chunking.py
+!tests/test_paper_search_oss.py
 !tests/test_rag_evaluation_*.py
 !app/models/
 !app/models/*.py
