@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -10,12 +9,14 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 from app.llm.artifacts.store import LocalArtifactStore
+from app.llm.graph.workflows.review_generate.citations import (
+    citation_anchor_ids,
+    unsupported_synthesis_anchor_ids,
+)
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.graph.workflows.review_generate.nodes.generate_framework import ReviewFramework
 from app.llm.model_factory import create_validated_structured_chat_model
 
-
-REF_PATTERN = re.compile(r"\[\[REF_(\d+)\]\]")
 
 ASSEMBLE_REVIEW_PROMPT = """
     你是一位学术综述编辑。
@@ -30,6 +31,15 @@ ASSEMBLE_REVIEW_PROMPT = """
     5. 如果结论中的具体判断需要引用，请保留正文中已有的 [[REF_id]] 锚点。
     6. 使用指定输出语言。
     7. 仅返回结构化输出，不添加解释。
+""".strip()
+
+REPAIR_SYNTHESIS_PROMPT = """
+你是一位学术综述编辑。仅修订给定的摘要和结论，正文不可修改。
+
+规则：
+1. 摘要和结论只能使用 allowed_anchor_ids 中的引用锚点，或不使用引用。
+2. 删除或收缩无法由正文支持的表述；不得增加新事实、新论文、新锚点或新结论。
+3. 仅返回 abstract 和 conclusion 的结构化输出。
 """.strip()
 
 
@@ -120,7 +130,7 @@ class AssembleReviewNode:
         )
 
         if sections:
-            result = await self.model.ainvoke(
+            synthesis = await self._synthesize(
                 [
                     SystemMessage(content = ASSEMBLE_REVIEW_PROMPT),
                     HumanMessage(
@@ -145,11 +155,45 @@ class AssembleReviewNode:
                 ]
             )
 
-            synthesis = (
-                result
-                if isinstance(result, ReviewSynthesis)
-                else ReviewSynthesis.model_validate(result)
+            unsupported_anchor_ids = unsupported_synthesis_anchor_ids(
+                body_markdown = body_markdown,
+                abstract = synthesis.abstract,
+                conclusion = synthesis.conclusion,
             )
+            if unsupported_anchor_ids:
+                synthesis = await self._synthesize(
+                    [
+                        SystemMessage(content = REPAIR_SYNTHESIS_PROMPT),
+                        HumanMessage(
+                            content = json.dumps(
+                                {
+                                    "output_language": state["language"],
+                                    "allowed_anchor_ids": sorted(
+                                        citation_anchor_ids(body_markdown)
+                                    ),
+                                    "unsupported_anchor_ids": sorted(
+                                        unsupported_anchor_ids
+                                    ),
+                                    "review_body": body_markdown,
+                                    "previous_synthesis": synthesis.model_dump(
+                                        mode = "json"
+                                    ),
+                                },
+                                ensure_ascii = False,
+                            )
+                        ),
+                    ]
+                )
+                unsupported_anchor_ids = unsupported_synthesis_anchor_ids(
+                    body_markdown = body_markdown,
+                    abstract = synthesis.abstract,
+                    conclusion = synthesis.conclusion,
+                )
+                if unsupported_anchor_ids:
+                    return failed(
+                        "review synthesis cites papers outside the evidence-backed body: "
+                        + ", ".join(sorted(unsupported_anchor_ids))
+                    )
         else:
             synthesis = ReviewSynthesis(
                 abstract = "",
@@ -159,17 +203,14 @@ class AssembleReviewNode:
         review_text = "\n\n".join(
             part
             for part in [
+                synthesis.abstract.strip(),
                 body_markdown,
                 synthesis.conclusion.strip(),
             ]
             if part
         )
 
-        citation_paper_ids = list(
-            dict.fromkeys(
-                REF_PATTERN.findall(review_text)
-            )
-        )
+        citation_paper_ids = citation_anchor_ids(review_text)
 
         papers_by_id = {
             str(paper["paper_id"]): paper
@@ -231,4 +272,15 @@ class AssembleReviewNode:
             "status": "running",
             "error": None,
         }
+
+    async def _synthesize(
+        self,
+        messages: list[SystemMessage | HumanMessage],
+    ) -> ReviewSynthesis:
+        result = await self.model.ainvoke(messages)
+        return (
+            result
+            if isinstance(result, ReviewSynthesis)
+            else ReviewSynthesis.model_validate(result)
+        )
 

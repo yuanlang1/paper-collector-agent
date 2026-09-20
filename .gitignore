@@ -46,9 +46,14 @@ tests/*
 !tests/test_rag_oss.py
 !tests/test_rag_evaluation_*.py
 !tests/test_review_extract_studies.py
+!tests/test_review_citations.py
+!tests/test_export_test_videos.py
 !app/models/
 !app/models/*.py
 scripts/
+!scripts/
+scripts/*
+!scripts/export_test_videos.py
 .codex
 .pytest_cache
 .agents

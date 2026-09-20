@@ -1,92 +1,97 @@
+import asyncio
 import json
 import tempfile
 import unittest
 
 from langchain_core.documents import Document
+from langchain_core.messages import AIMessage, ToolMessage
 
-from app.infrastructure.oss import MarkdownObject
-from app.infrastructure.grpc.paper_service_grpc_client import (
-    PaperServiceGrpcClient,
-)
+from app.infrastructure.grpc.paper_service_grpc_client import PaperServiceGrpcClient
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.nodes.extract_studies import (
+    ArticleProfile,
     EVIDENCE_MAP_MAX_CHARS,
     ExtractStudiesNode,
 )
 from app.llm.graph.workflows.review_generate.nodes.finalize import (
     finalize_task_review_node,
 )
-from app.llm.graph.workflows.review_generate.nodes.load import (
-    LoadTaskCorpusNode,
-)
+from app.llm.graph.workflows.review_generate.nodes.load import LoadTaskCorpusNode
 from app.protos.paper.v1 import paper_pb2
 
 
-SHA256 = "a" * 64
-FULLTEXT = """# Methods
-This randomized trial enrolled 40 adults.
-
-# Results
-The intervention reduced symptoms.
-
-# Limitations
-The sample was small.
-"""
-
-
-class _OssStore:
-    def __init__(self, markdown: str | None) -> None:
-        self.markdown = markdown
-
-    async def get_markdown(self, *, pdf_sha256: str):
-        if self.markdown is None:
-            return None
-        return MarkdownObject(
-            content=self.markdown,
-            object_name=f"papers/md/{pdf_sha256}.md",
-            content_sha256="b" * 64,
-        )
+def _document(
+    chunk_id: str,
+    index: int,
+    page: int,
+    section_path: str,
+    text: str,
+) -> Document:
+    return Document(
+        page_content=text,
+        metadata={
+            "paper_id": "1",
+            "chunk_id": chunk_id,
+            "chunk_index": index,
+            "page_numbers": [page],
+            "section_path": section_path,
+        },
+    )
 
 
 class _CorpusReader:
-    async def read(self, paper_ids):
-        return [
-            Document(
-                page_content=FULLTEXT,
-                metadata={"chunk_id": "chunk-1"},
-            )
-        ]
+    def __init__(self, documents: list[Document]) -> None:
+        self.documents = documents
+
+    async def read(self, paper_ids: list[str]) -> list[Document]:
+        self.paper_ids = paper_ids
+        return self.documents
+
+
+class _Retrieval:
+    def __init__(self, responses: dict[str, list[Document]]) -> None:
+        self.responses = responses
+        self.calls: list[tuple[str, int, list[str]]] = []
+
+    async def search(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        paper_ids: list[str],
+    ) -> list[Document]:
+        self.calls.append((query, top_k, paper_ids))
+        return self.responses.get(query, [])
 
 
 class _Model:
-    async def ainvoke(self, _messages):
-        return {
-            "design": {
-                "summary": "randomized trial",
-                "evidence_quotes": ["This randomized trial enrolled 40 adults."],
-            },
-            "sample": {
-                "summary": "40 adults",
-                "evidence_quotes": ["This randomized trial enrolled 40 adults."],
-            },
-            "methods": {
-                "summary": "not_reported",
-                "evidence_quotes": [],
-            },
-            "results": {
-                "summary": "reduced symptoms",
-                "evidence_quotes": ["The intervention reduced symptoms."],
-            },
-            "limitations": {
-                "summary": "small sample",
-                "evidence_quotes": ["The sample was small."],
-            },
-        }
+    def __init__(self, responses: list[AIMessage]) -> None:
+        self.responses = responses
+        self.messages = []
+        self.tools = []
+
+    def bind_tools(self, tools):
+        self.tools = tools
+        return self
+
+    async def ainvoke(self, messages):
+        self.messages.append(messages)
+        return self.responses.pop(0)
 
 
 class _FailingModel:
+    def bind_tools(self, _tools):
+        return self
+
     async def ainvoke(self, _messages):
         raise RuntimeError("model unavailable")
+
+
+def _tool_call(name: str, arguments: dict, call_id: str) -> AIMessage:
+    return AIMessage(
+        content="",
+        tool_calls=[{"name": name, "args": arguments, "id": call_id}],
+    )
 
 
 class _PaperClient:
@@ -102,8 +107,6 @@ class _PaperClient:
                         "title": "Paper",
                         "authors": [],
                         "paper_abstract": "Abstract",
-                        "oss_name": SHA256,
-                        "pdf_url": "https://example.test/paper.pdf",
                         "rag_status": "ready",
                         "chunk_count": 1,
                     }
@@ -126,8 +129,6 @@ class _ReviewPapersStub:
                     paper_id=1,
                     title="Paper",
                     paper_abstract=" Abstract ",
-                    oss_name=SHA256,
-                    pdf_url="https://example.test/paper.pdf",
                     rag_status="READY",
                     chunk_count=1,
                 )
@@ -144,16 +145,50 @@ class _PaperServiceClient(PaperServiceGrpcClient):
 
 
 class ExtractStudiesNodeTests(unittest.IsolatedAsyncioTestCase):
-    async def test_review_papers_rpc_maps_fulltext_sources(self) -> None:
+    documents = [
+        _document("chunk-1", 0, 1, "Abstract", "The study addresses issue A."),
+        _document("chunk-2", 1, 2, "Methods", "We use method B."),
+        _document("chunk-3", 2, 3, "Introduction", "Background."),
+        _document("chunk-4", 3, 4, "Discussion", "Finding C is discussed."),
+    ]
+
+    @staticmethod
+    def _state(corpus_artifact_ref: str) -> dict:
+        return {
+            "stage": "extracting_studies",
+            "run_id": "review-test",
+            "task_id": 1,
+            "topic": "Topic",
+            "language": "en",
+            "paper_ids_snapshot": ["1"],
+            "corpus_artifact_ref": corpus_artifact_ref,
+            "warnings": [],
+        }
+
+    async def _corpus_artifact(
+        self,
+        store: LocalArtifactStore,
+        papers: list[dict] | None = None,
+    ):
+        return await store.write_json(
+            run_id="review-test",
+            step_key="load_task_corpus",
+            source="test",
+            kind="corpus",
+            payload={
+                "papers": papers or [{"paper_id": 1, "title": "Paper"}],
+            },
+        )
+
+    async def test_review_papers_rpc_maps_response(self) -> None:
         response = await _PaperServiceClient(_ReviewPapersStub()).get_task_review_papers(1)
 
         self.assertTrue(response["ok"])
         paper = response["result"]["papers"][0]
         self.assertEqual(paper["paper_abstract"], "Abstract")
-        self.assertEqual(paper["oss_name"], SHA256)
-        self.assertEqual(paper["pdf_url"], "https://example.test/paper.pdf")
+        self.assertEqual(paper["rag_status"], "ready")
 
-    async def test_load_corpus_preserves_fulltext_sources(self) -> None:
+    async def test_load_corpus_preserves_paper_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = LocalArtifactStore(base_dir=directory)
             update = await LoadTaskCorpusNode(
@@ -169,83 +204,212 @@ class ExtractStudiesNodeTests(unittest.IsolatedAsyncioTestCase):
             )
 
             payload = await store.read_json_uri(update["corpus_artifact_ref"])
-            paper = payload["papers"][0]
             self.assertEqual(update["stage"], "extracting_studies")
-            self.assertEqual(paper["abstract"], "Abstract")
-            self.assertEqual(paper["oss_name"], SHA256)
-            self.assertEqual(paper["pdf_url"], "https://example.test/paper.pdf")
+            self.assertEqual(payload["papers"][0]["abstract"], "Abstract")
 
-    async def _run(self, markdown: str | None) -> dict:
+    async def test_profile_loop_uses_opening_pages_then_current_paper_rag(self) -> None:
+        model = _Model(
+            [
+                _tool_call(
+                    "search_current_paper",
+                    {"query": "discussion finding C"},
+                    "search-1",
+                ),
+                _tool_call(
+                    "submit_article_profile",
+                    {
+                        "core_problem": {
+                            "summary": "Addresses issue A.",
+                            "source_chunk_ids": ["chunk-1"],
+                        },
+                        "methods": {
+                            "summary": "Uses method B.",
+                            "source_chunk_ids": ["chunk-2"],
+                        },
+                        "main_discussion": {
+                            "summary": "Discusses finding C.",
+                            "source_chunk_ids": ["chunk-4"],
+                        },
+                    },
+                    "submit-1",
+                ),
+            ]
+        )
+        retrieval = _Retrieval(
+            {
+                "discussion finding C": [self.documents[3]],
+            }
+        )
+
         with tempfile.TemporaryDirectory() as directory:
             store = LocalArtifactStore(base_dir=directory)
-            corpus = await store.write_json(
-                run_id="review-test",
-                step_key="load_task_corpus",
-                source="test",
-                kind="corpus",
-                payload={
-                    "papers": [
-                        {
-                            "paper_id": 1,
-                            "title": "Paper",
-                            "oss_name": SHA256,
-                            "rag_status": "ready",
-                            "chunk_count": 1,
-                        }
+            corpus = await self._corpus_artifact(store)
+            update = await ExtractStudiesNode(
+                artifact_store=store,
+                model=model,
+                corpus_reader=_CorpusReader(self.documents),
+                content_retrieval=retrieval,
+                max_rounds=2,
+            )(self._state(corpus.artifact_uri))
+
+            payload = await store.read_json_uri(update["study_records_artifact_ref"])
+
+        self.assertEqual(update["stage"], "generating_framework")
+        self.assertEqual(payload["studies"][0]["core_problem"], "Addresses issue A.")
+        self.assertEqual(payload["studies"][0]["methods"], "Uses method B.")
+        self.assertEqual(payload["studies"][0]["main_discussion"], "Discusses finding C.")
+        self.assertEqual(
+            [call[2] for call in retrieval.calls],
+            [["1"]],
+        )
+        first_prompt = model.messages[0][1].content
+        self.assertIn("chunk-1", first_prompt)
+        self.assertIn("chunk-3", first_prompt)
+        self.assertNotIn("chunk-4", first_prompt)
+        self.assertTrue(
+            any(isinstance(message, ToolMessage) for message in model.messages[1])
+        )
+
+    async def test_profile_can_submit_not_reported_fields_without_search(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = LocalArtifactStore(base_dir=directory)
+            corpus = await self._corpus_artifact(store)
+            update = await ExtractStudiesNode(
+                artifact_store=store,
+                model=_Model(
+                    [
+                        _tool_call(
+                            "submit_article_profile",
+                            {
+                                field: {
+                                    "summary": "not_reported",
+                                    "source_chunk_ids": [],
+                                }
+                                for field in (
+                                    "core_problem",
+                                    "methods",
+                                    "main_discussion",
+                                )
+                            },
+                            "submit-1",
+                        )
                     ]
-                },
+                ),
+                corpus_reader=_CorpusReader(self.documents),
+                content_retrieval=_Retrieval({}),
+            )(self._state(corpus.artifact_uri))
+            payload = await store.read_json_uri(update["study_records_artifact_ref"])
+
+        study = payload["studies"][0]
+        self.assertEqual(study["core_problem"], "not_reported")
+        self.assertEqual(study["methods"], "not_reported")
+        self.assertEqual(study["main_discussion"], "not_reported")
+
+    async def test_profile_rejects_unseen_chunk_references(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = LocalArtifactStore(base_dir=directory)
+            corpus = await self._corpus_artifact(store)
+            update = await ExtractStudiesNode(
+                artifact_store=store,
+                model=_Model(
+                    [
+                        _tool_call(
+                            "submit_article_profile",
+                            {
+                                "core_problem": {
+                                    "summary": "Addresses issue A.",
+                                    "source_chunk_ids": ["unknown-chunk"],
+                                },
+                                "methods": {
+                                    "summary": "not_reported",
+                                    "source_chunk_ids": [],
+                                },
+                                "main_discussion": {
+                                    "summary": "not_reported",
+                                    "source_chunk_ids": [],
+                                },
+                            },
+                            "submit-1",
+                        )
+                    ]
+                ),
+                corpus_reader=_CorpusReader(self.documents),
+                content_retrieval=_Retrieval({}),
+            )(self._state(corpus.artifact_uri))
+
+            report = await store.read_json_uri(
+                update["study_extraction_report_artifact_ref"]
             )
+
+        self.assertEqual(update["stage"], "failed")
+        self.assertIn("unseen chunks", report["failures"][0]["error"])
+
+    async def test_profiles_run_with_bounded_paper_concurrency(self) -> None:
+        active = 0
+        peak = 0
+
+        async def extract_profile(*, paper, **_kwargs):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            try:
+                await asyncio.sleep(0.01)
+                paper_id = str(paper["paper_id"])
+                return ArticleProfile(
+                    core_problem=f"problem {paper_id}",
+                    methods=f"methods {paper_id}",
+                    main_discussion=f"discussion {paper_id}",
+                ), []
+            finally:
+                active -= 1
+
+        papers = [
+            {"paper_id": paper_id, "title": f"Paper {paper_id}"}
+            for paper_id in range(1, 5)
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            store = LocalArtifactStore(base_dir=directory)
+            corpus = await self._corpus_artifact(store, papers)
             node = ExtractStudiesNode(
                 artifact_store=store,
-                model=_Model(),
-                oss_store=_OssStore(markdown),
-                corpus_reader=_CorpusReader(),
+                model=_Model([]),
+                max_concurrent_papers=2,
             )
-
+            node._extract_profile = extract_profile
             update = await node(
                 {
-                    "stage": "extracting_studies",
-                    "run_id": "review-test",
-                    "task_id": 1,
-                    "topic": "Topic",
-                    "language": "English",
-                    "paper_ids_snapshot": ["1"],
-                    "corpus_artifact_ref": corpus.artifact_uri,
-                    "warnings": [],
+                    **self._state(corpus.artifact_uri),
+                    "paper_ids_snapshot": [str(paper_id) for paper_id in range(1, 5)],
                 }
             )
-            self.assertEqual(update["stage"], "generating_framework")
-            return await store.read_json_uri(update["study_records_artifact_ref"])
+            payload = await store.read_json_uri(update["study_records_artifact_ref"])
 
-    async def test_prefers_oss_markdown(self) -> None:
-        payload = await self._run(FULLTEXT)
+        self.assertEqual(peak, 2)
+        self.assertEqual(
+            [study["paper_id"] for study in payload["studies"]],
+            ["1", "2", "3", "4"],
+        )
 
-        study = payload["studies"][0]
-        self.assertEqual(study["source"]["kind"], "oss_markdown")
-        self.assertEqual(study["results"]["summary"], "reduced symptoms")
+    def test_opening_documents_use_first_three_actual_page_numbers(self) -> None:
+        documents = [
+            _document("chunk-a", 0, 5, "A", "A"),
+            _document("chunk-b", 1, 7, "B", "B"),
+            _document("chunk-c", 2, 9, "C", "C"),
+            _document("chunk-d", 3, 11, "D", "D"),
+        ]
 
-    async def test_falls_back_to_qdrant_chunks(self) -> None:
-        payload = await self._run(None)
+        opening = ExtractStudiesNode._opening_documents(documents)
 
-        study = payload["studies"][0]
-        self.assertEqual(study["source"]["kind"], "qdrant_chunk_fallback")
-        self.assertEqual(study["source"]["chunk_ids"], ["chunk-1"])
+        self.assertEqual([item.metadata["chunk_id"] for item in opening], ["chunk-a", "chunk-b", "chunk-c"])
 
     def test_evidence_map_is_bounded_and_keeps_paper_ids(self) -> None:
         records = [
             {
                 "paper_id": str(paper_id),
                 "title": "Paper",
-                **{
-                    field_name: {"summary": "x" * 1200}
-                    for field_name in (
-                        "design",
-                        "sample",
-                        "methods",
-                        "results",
-                        "limitations",
-                    )
-                },
+                "core_problem": "x" * 1200,
+                "methods": "x" * 1200,
+                "main_discussion": "x" * 1200,
             }
             for paper_id in range(1, 51)
         ]
@@ -261,41 +425,16 @@ class ExtractStudiesNodeTests(unittest.IsolatedAsyncioTestCase):
             [str(paper_id) for paper_id in range(1, 51)],
         )
 
-    async def test_failure_blocks_review_and_returns_report(self) -> None:
+    async def test_model_failure_blocks_review_and_returns_report(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = LocalArtifactStore(base_dir=directory)
-            corpus = await store.write_json(
-                run_id="review-test",
-                step_key="load_task_corpus",
-                source="test",
-                kind="corpus",
-                payload={
-                    "papers": [
-                        {
-                            "paper_id": 1,
-                            "title": "Paper",
-                            "oss_name": SHA256,
-                        }
-                    ]
-                },
-            )
+            corpus = await self._corpus_artifact(store)
             update = await ExtractStudiesNode(
                 artifact_store=store,
                 model=_FailingModel(),
-                oss_store=_OssStore(FULLTEXT),
-                corpus_reader=_CorpusReader(),
-            )(
-                {
-                    "stage": "extracting_studies",
-                    "run_id": "review-test",
-                    "task_id": 1,
-                    "topic": "Topic",
-                    "language": "English",
-                    "paper_ids_snapshot": ["1"],
-                    "corpus_artifact_ref": corpus.artifact_uri,
-                    "warnings": [],
-                }
-            )
+                corpus_reader=_CorpusReader(self.documents),
+                content_retrieval=_Retrieval({}),
+            )(self._state(corpus.artifact_uri))
 
             self.assertEqual(update["stage"], "failed")
             report_ref = update["study_extraction_report_artifact_ref"]
@@ -306,19 +445,11 @@ class ExtractStudiesNodeTests(unittest.IsolatedAsyncioTestCase):
             result = await finalize_task_review_node(
                 {
                     **update,
-                    "active_tool_call": {
-                        "id": "call-1",
-                        "name": "task_review",
-                    },
+                    "active_tool_call": {"id": "call-1", "name": "task_review"},
                     "task_id": 1,
                 }
             )
-            action = result["last_action_result"]
-            self.assertIn(report_ref, action["artifact_refs"])
-            self.assertEqual(
-                action["data"]["study_extraction_report_artifact_ref"],
-                report_ref,
-            )
+            self.assertIn(report_ref, result["last_action_result"]["artifact_refs"])
 
 
 if __name__ == "__main__":

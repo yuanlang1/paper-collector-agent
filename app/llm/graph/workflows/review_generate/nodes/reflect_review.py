@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from collections.abc import Mapping
 from typing import Any, Literal
 
@@ -10,11 +9,13 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, model_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
+from app.llm.graph.workflows.review_generate.citations import (
+    citation_anchor_ids,
+    unsupported_synthesis_anchor_ids,
+)
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.model_factory import create_validated_structured_chat_model
 
-
-REF_PATTERN = re.compile(r"\[\[REF_([^\]]+)\]\]")
 
 REFLECT_REVIEW_PROMPT = """
     你是一位严格的学术综述审稿人。
@@ -304,7 +305,7 @@ class ReflectReviewNode:
             ]
         )
 
-        anchors = REF_PATTERN.findall(text)
+        anchors = citation_anchor_ids(text)
         known_paper_ids = {
             str(paper["paper_id"])
             for paper in corpus_payload["papers"]
@@ -323,6 +324,18 @@ class ReflectReviewNode:
 
         if not anchors:
             issues.append("review has no citation anchors")
+
+        for paper_id in sorted(
+            unsupported_synthesis_anchor_ids(
+                body_markdown = review_draft.get("body_markdown", ""),
+                abstract = review_draft.get("abstract", ""),
+                conclusion = review_draft.get("conclusion", ""),
+            )
+        ):
+            issues.append(
+                "synthesis cites a paper outside the evidence-backed body: "
+                f"REF_{paper_id}"
+            )
 
         for paper_id in anchors:
             if not paper_id.isdigit():
