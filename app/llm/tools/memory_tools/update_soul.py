@@ -5,7 +5,8 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.llm.tools.memory_tools.common import require_database
-from app.llm.tools.registry import Tool, ToolExecutionContext
+from app.llm.tools.base import BaseTool, as_tool
+from app.llm.tools.registry import ToolExecutionContext
 from app.memory.preferences import UserPreferenceService
 
 
@@ -46,10 +47,11 @@ async def update_soul_handler(
     }
 
 
-UPDATE_SOUL_TOOL = Tool(
+UPDATE_SOUL_TOOL = BaseTool(
     name="update_soul",
     description="保存当前用户明确提出的长期交互偏好；不会修改共享的 Agent 固定准则。",
     input_schema=UpdateSoulArgs.model_json_schema(),
-    fn=update_soul_handler,
+    fn=as_tool(update_soul_handler),
     requires_confirmation=True,
+    params_model=UpdateSoulArgs,
 )

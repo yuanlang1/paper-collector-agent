@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-22T01:46:30Z",
-  "updated_at": "2026-09-22T03:59:40Z",
+  "updated_at": "2026-09-22T13:06:28Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -17319,9 +17319,9 @@
       "normalized_sha256": "6fdf557be7f37542910272e9e3357ca6f5478c24f9adbcdef0579f01fc75dc58"
     },
     "aoci.code.txt": {
-      "sha256": "c988a2eb0a7cba6c324b5525e0f97114773ec21975e27dfafd72572d21fe3632",
-      "size": 50313,
-      "normalized_sha256": "c988a2eb0a7cba6c324b5525e0f97114773ec21975e27dfafd72572d21fe3632"
+      "sha256": "3c1bd252195bcb6aaedbca811ae50c5144b0d9c1519a37dd2b49cc9eab52a40c",
+      "size": 54121,
+      "normalized_sha256": "3c1bd252195bcb6aaedbca811ae50c5144b0d9c1519a37dd2b49cc9eab52a40c"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -17510,10 +17510,9 @@
       "normalized_sha256": "09a92fa87c21d73b8b6cf1096d8118dc8226f36fff0c664e2831156bca0ee35a"
     },
     "app/llm/graph/main/nodes/tool.py": {
-      "role": "index",
-      "sha256": "11da27ba91299b49bc94d56f2ad51dace84006ea4201320cf793131c73a0e8f7",
-      "size": 3578,
-      "normalized_sha256": "11da27ba91299b49bc94d56f2ad51dace84006ea4201320cf793131c73a0e8f7"
+      "sha256": "df6293b5313434f02c70ff7191332b112263e1739212ebf1af507603ee9ed5b5",
+      "size": 3048,
+      "normalized_sha256": "df6293b5313434f02c70ff7191332b112263e1739212ebf1af507603ee9ed5b5"
     },
     "app/llm/graph/main/schemas.py": {
       "role": "index",
@@ -17564,10 +17563,9 @@
       "normalized_sha256": "eeebcb6a7011b61d75160d17b7b95b6b51e98664e17556eb27bd428535bf99f3"
     },
     "app/llm/graph/workflows/paper_search/nodes/crossref_enrich.py": {
-      "role": "index",
-      "sha256": "987828b762a01cc48b4010aff5d6e213967e9a906d8d278e949a7b04d028600e",
-      "size": 10887,
-      "normalized_sha256": "987828b762a01cc48b4010aff5d6e213967e9a906d8d278e949a7b04d028600e"
+      "sha256": "44e30cae6b4b8ca1dda587a13165a95f1665e4b548979fc6cfad8cbe46dc49c7",
+      "size": 10634,
+      "normalized_sha256": "44e30cae6b4b8ca1dda587a13165a95f1665e4b548979fc6cfad8cbe46dc49c7"
     },
     "app/llm/graph/workflows/paper_search/nodes/dowload_pdf.py": {
       "role": "index",
@@ -17576,10 +17574,9 @@
       "normalized_sha256": "30c0613334b259e9b9e40cfc934eaa5c241be693b3c8f96a1ff035703a0fdb64"
     },
     "app/llm/graph/workflows/paper_search/nodes/enrich.py": {
-      "role": "index",
-      "sha256": "1a22adaa39bce2133c285d94165b4de43c9a6a2865687e5b263573bfa39b0067",
-      "size": 11756,
-      "normalized_sha256": "bc3c4078385f072487c1cfa07582c488473ea7d37d972c4bee9ae23f525535cb"
+      "sha256": "f249bfbf90b6d5db5138791dca01d500759f53e847ca9ec38096f96f4777438d",
+      "size": 11754,
+      "normalized_sha256": "3c6d5385383443954b21ff7a0e713adf80126ed36dd79c05f4b879c9b5dd49bd"
     },
     "app/llm/graph/workflows/paper_search/nodes/filter.py": {
       "role": "index",
@@ -17642,10 +17639,9 @@
       "normalized_sha256": "d59d41bdd5288fad0c3aca4af238fb5c80b3c3d2f3369a6c26180f3756f50f4e"
     },
     "app/llm/graph/workflows/paper_search/nodes/search.py": {
-      "role": "index",
-      "sha256": "39bb3547becc4e059822a1bc2e625d3cdae27fa067735c3938538029c112025e",
-      "size": 7493,
-      "normalized_sha256": "5836c1b89540a264bf171cc7a0a3acefd683ad8173099e4fa57b64d569dd79da"
+      "sha256": "510dab48a35be9c27b0717020ea6d57bb9b72a76a24d8cf8088f10d57c47a0f9",
+      "size": 7488,
+      "normalized_sha256": "a46c2d863bbaf3a5655bcd3df35436bc333fc2d164617fec4af9c2ec572149eb"
     },
     "app/llm/graph/workflows/paper_search/nodes/search_review.py": {
       "role": "index",
@@ -17946,14 +17942,19 @@
       "normalized_sha256": "8dd84c650d39440058ffd0bcd69daf3078ad9e4292021d54eb24a5e1ba955eca"
     },
     "app/llm/tools/artifact_tools/read_artifact.py": {
-      "sha256": "452a2763fc43eb966d46d2965f8e3777b9ef8d62e86da70ef27530e0131f1bd0",
-      "size": 3420,
-      "normalized_sha256": "452a2763fc43eb966d46d2965f8e3777b9ef8d62e86da70ef27530e0131f1bd0"
+      "sha256": "f2e76b643652851e22b9c794afc3a9f125a0d4e2bb7feae0b70301b8d92ca865",
+      "size": 3119,
+      "normalized_sha256": "f2e76b643652851e22b9c794afc3a9f125a0d4e2bb7feae0b70301b8d92ca865"
+    },
+    "app/llm/tools/base.py": {
+      "sha256": "e26e4585b128e55d8d151a11efc95405fe628fcca792e811554b6b0fb0f8a379",
+      "size": 1213,
+      "normalized_sha256": "e26e4585b128e55d8d151a11efc95405fe628fcca792e811554b6b0fb0f8a379"
     },
     "app/llm/tools/file_tools/download_file.py": {
-      "sha256": "8be9b913ed433825bb659d71ced1c6aa1738a9a29c9d2326e45c542bb8c55c12",
-      "size": 13771,
-      "normalized_sha256": "0748cabe284d5e092eb80403ae812c938a26f7e5f2d7bdda5699d3845a1d6069"
+      "sha256": "ec1d9a048bb4aefd8ef2ef73b2558d7d1f29bd68562ac251f5192f396d58a931",
+      "size": 13378,
+      "normalized_sha256": "7a6b5137054cf2efba8af4484c2b76a43a49f2663a546417c826ff18dc2776de"
     },
     "app/llm/tools/memory_tools/__init__.py": {
       "sha256": "29999a1eb0b795f67ad6cb10ae49fea80bb214423e95bd24d7a449d027911198",
@@ -17966,39 +17967,39 @@
       "normalized_sha256": "1b72708ed918f8c4a05cdd2cbdc2c806877ddc3820275a243f89d6722d0c5444"
     },
     "app/llm/tools/memory_tools/create_skill.py": {
-      "sha256": "73acb2dcaf8472e1d926cd316d35ea3e64d033de6512d612b1815a7c288cfdc7",
-      "size": 3225,
-      "normalized_sha256": "73acb2dcaf8472e1d926cd316d35ea3e64d033de6512d612b1815a7c288cfdc7"
+      "sha256": "0910f84dbf87b49ab5ec0d6e2600d5909905d4de0bf042179e22899a0d1df5be",
+      "size": 3315,
+      "normalized_sha256": "0910f84dbf87b49ab5ec0d6e2600d5909905d4de0bf042179e22899a0d1df5be"
     },
     "app/llm/tools/memory_tools/manage_memory.py": {
-      "sha256": "0c7683aca5df0b6777ac57692fb74421f5d2cd055d9dd33d9364a6f9ce974019",
-      "size": 3315,
-      "normalized_sha256": "0c7683aca5df0b6777ac57692fb74421f5d2cd055d9dd33d9364a6f9ce974019"
+      "sha256": "d93bc5353d83bf43250babfe026c4f1e6fe1028903074a9739201ea8a9af21f8",
+      "size": 3406,
+      "normalized_sha256": "d93bc5353d83bf43250babfe026c4f1e6fe1028903074a9739201ea8a9af21f8"
     },
     "app/llm/tools/memory_tools/save_note.py": {
-      "sha256": "67d38ee87555678fc76b02cd93059324b9979b1f4655130a75514304aa9de345",
-      "size": 1804,
-      "normalized_sha256": "67d38ee87555678fc76b02cd93059324b9979b1f4655130a75514304aa9de345"
+      "sha256": "9c9cfd220ec4a0c45dc58cd97c9db8b5b48881fa781acf017aa6da7d95606ddd",
+      "size": 1891,
+      "normalized_sha256": "9c9cfd220ec4a0c45dc58cd97c9db8b5b48881fa781acf017aa6da7d95606ddd"
     },
     "app/llm/tools/memory_tools/update_soul.py": {
-      "sha256": "25c78de3f39982d8fa70567d5aff875945b54d4ce65f524e509dbdf8a0f88288",
-      "size": 1669,
-      "normalized_sha256": "25c78de3f39982d8fa70567d5aff875945b54d4ce65f524e509dbdf8a0f88288"
+      "sha256": "7f2a6f7744199fa628b2d6154204b123ae7587345d500c28eb901103d60e6610",
+      "size": 1758,
+      "normalized_sha256": "7f2a6f7744199fa628b2d6154204b123ae7587345d500c28eb901103d60e6610"
     },
     "app/llm/tools/registry.py": {
-      "sha256": "0eda227cde28fb42c2cd1d77365cfe7083a2f2743753a5ceea626337a99b8408",
-      "size": 4313,
-      "normalized_sha256": "0eda227cde28fb42c2cd1d77365cfe7083a2f2743753a5ceea626337a99b8408"
+      "sha256": "b43dfd28d98376d9536c16c06eb4a37aa24b447a54d22e347b9e74b27622c903",
+      "size": 4989,
+      "normalized_sha256": "b43dfd28d98376d9536c16c06eb4a37aa24b447a54d22e347b9e74b27622c903"
     },
     "app/llm/tools/search_tools/arxiv/search_arxiv.py": {
-      "sha256": "2fa82173d46a0e8c8a391f6a7c3353b0e0ac645cf21360c705be6320d54d6d28",
-      "size": 19004,
-      "normalized_sha256": "353503ee57f56ddbb58525e8b5dcb09b6e6ac5dd201480385a07555fe113c61c"
+      "sha256": "d41bad8cb835c95ea566a9ed3b0c31f914f3de14825c555709981794616333fa",
+      "size": 18719,
+      "normalized_sha256": "4cfd48ba6a7c522504a677d0b1518f014fdbc25ba88212aff0e4053c8b08e8f0"
     },
     "app/llm/tools/search_tools/arxiv/supplement.py": {
-      "sha256": "970dc0859d1c6249324bff4b3195c12d0b347999c0e4b35c806c9969d577bbb4",
-      "size": 11408,
-      "normalized_sha256": "ca2bd590e41dbb1fb567c94ff5821dea56a0c8f63cba690e0bb12b97fd16bc3e"
+      "sha256": "41eeefd822af6453e1e518f5c7a7c87fecd3d50d161ff365b47eb413d6ce5b63",
+      "size": 11497,
+      "normalized_sha256": "533fc9e2ca0274af240df62c545f2a0835259725fa7208401bf88a0dc9265e78"
     },
     "app/llm/tools/search_tools/common.py": {
       "sha256": "8e900c003faddda363ac98d19feb919800c2cb06cdf74c1c8df71b05314b03f9",
@@ -18006,34 +18007,34 @@
       "normalized_sha256": "df0ae22c51e4ec9a2321276c6be6880f1c866bc81b0850dbdb9bd2b63623ee00"
     },
     "app/llm/tools/search_tools/crossref/search_crossref.py": {
-      "sha256": "9b89aef8bb0a0cb93cc918a127d738cd48a8d662379b73dcee8620e3abf2d289",
-      "size": 12885,
-      "normalized_sha256": "9b89aef8bb0a0cb93cc918a127d738cd48a8d662379b73dcee8620e3abf2d289"
+      "sha256": "7b08281e462d5d280d09df1732d2188f43fa465d76370b1297fc20fedbb0b64c",
+      "size": 12848,
+      "normalized_sha256": "7b08281e462d5d280d09df1732d2188f43fa465d76370b1297fc20fedbb0b64c"
     },
     "app/llm/tools/search_tools/dblp/search_dblp.py": {
-      "sha256": "cfa43356ca83faf538271b7a54252d79a68488b6abab7da6a14c4684501a6824",
-      "size": 16145,
-      "normalized_sha256": "ef70b7c24bd0b533a48d51941b279b80e95863ab73ddc2f8cc4351ad70892cd9"
+      "sha256": "95328dfb0a54c35b3a3e43190135c50b5f96059a3145af1797deb8781693d3d0",
+      "size": 15833,
+      "normalized_sha256": "c760c99594a45d45a8b2fea9fca91020c9402a8ba71f8f6b9f2941e3e477d5de"
     },
     "app/llm/tools/search_tools/google_scholar/search_google_scholar.py": {
-      "sha256": "5bf55a45523935c45af054143a86a9b4a8d03dcbd008b927ebe616a85788565b",
-      "size": 16755,
-      "normalized_sha256": "95f11bf4f804bf4f4e475c0be137fd0b880ecaa984a5e77d99975cd4bcb7fb5c"
+      "sha256": "b98fc3d2f5ec0c3975513fce72782f8c3fca864b2858456eb2ee89751f7e876f",
+      "size": 16534,
+      "normalized_sha256": "04ee61955d934164e55e327f8a135afe4aeb591ee93d5b49d493d7837e019265"
     },
     "app/llm/tools/task_tools/search_task/rag_status.py": {
-      "sha256": "9cbcf9756535e9efcb373a55bbd9d780d80fad1701c2301b6d307bbb8ff98d1d",
-      "size": 996,
-      "normalized_sha256": "ca0994a85a8bcda9793e5386d169fef73b47ad4e70eb0b89ae1eae79df5c1a85"
+      "sha256": "3f6f86c98e1bc4e7a5ea5eab49e9ac5d73e61f47a00c5bd923449688fb0b1536",
+      "size": 1224,
+      "normalized_sha256": "67926dd2fa6a563d628a9c81bb299f743fb7f2c1e9a553e56536053ad82d3b19"
     },
     "app/llm/tools/task_tools/search_task/search_task_create.py": {
-      "sha256": "13dceb1f9b1255d4dada6600b4e6a20a27139cdddfc06afaf9657086f1847bc7",
-      "size": 1646,
-      "normalized_sha256": "336e57024d2feecdfa043e10f0d0917db9f6861ab5249868f19fb2c99d4b9c31"
+      "sha256": "77e99e06622fe6e033996646584a91d4c58fe0cb50e6d8f81b6b52baf8c420db",
+      "size": 1870,
+      "normalized_sha256": "f83673b1a371612d541204f48b3dae13b8fc03fad6e6dd7004b543000a5ae7dd"
     },
     "app/llm/tools/venue_tools/easy_scholar.py": {
-      "sha256": "6b28ebdf3cccab556cf1167c244200ed5c3f6a708c3c1a3fffa6e873d3a18b88",
-      "size": 9093,
-      "normalized_sha256": "a3ca213ff720aee350e95cee0088e2f47fb24e77322e75784514e905a3853e1f"
+      "sha256": "152b723a97b80d6804c37130ce416ec5e1c249bc0018ede2a3b2f409ce9699c4",
+      "size": 5965,
+      "normalized_sha256": "45e72b20400a2af2c07a519e700b76932e84e6dc67d3ed6f1060be6264d1035a"
     },
     "app/llm/tools/web_tools/__init__.py": {
       "sha256": "8ad6ffa0af8ad641165a8a949bb0271b55f5ef8b8d829db56bb11fb42a1b946b",
@@ -18041,9 +18042,9 @@
       "normalized_sha256": "8ad6ffa0af8ad641165a8a949bb0271b55f5ef8b8d829db56bb11fb42a1b946b"
     },
     "app/llm/tools/web_tools/search_web.py": {
-      "sha256": "5c60692ab33ef38da4bb842d867defd37ba4528448d59525a18b570eb76c1336",
-      "size": 9738,
-      "normalized_sha256": "5c60692ab33ef38da4bb842d867defd37ba4528448d59525a18b570eb76c1336"
+      "sha256": "37a9f03ca71f17ecaead74ad7351b4c04c1d9b29c981e90cc74d73d0359c449d",
+      "size": 9393,
+      "normalized_sha256": "37a9f03ca71f17ecaead74ad7351b4c04c1d9b29c981e90cc74d73d0359c449d"
     },
     "app/main.py": {
       "sha256": "b209516b53f6de946ddc32a39df86a85189d8b9d38a6365e25330d3dfe261f21",
@@ -18528,9 +18529,9 @@
     },
     "tests/test_artifact_access.py": {
       "role": "observe",
-      "sha256": "4801f05770c83b7daadd53bead1b861632de7fbddad1ab77ee64cd8550ab2102",
-      "size": 6121,
-      "normalized_sha256": "4801f05770c83b7daadd53bead1b861632de7fbddad1ab77ee64cd8550ab2102"
+      "sha256": "a0466ebb44371ad6ce8827083feb7b56c1d7b1bd83aad3dd01267ab7e0041493",
+      "size": 6072,
+      "normalized_sha256": "a0466ebb44371ad6ce8827083feb7b56c1d7b1bd83aad3dd01267ab7e0041493"
     },
     "tests/test_conversation_deletion.py": {
       "role": "observe",
@@ -18552,9 +18553,9 @@
     },
     "tests/test_memory_tools.py": {
       "role": "observe",
-      "sha256": "7fa24b4d20848ff6c95ea388332d5ebfd9f45958605107a923173559fb8f3fc2",
-      "size": 7600,
-      "normalized_sha256": "7fa24b4d20848ff6c95ea388332d5ebfd9f45958605107a923173559fb8f3fc2"
+      "sha256": "e2e4693e1b0f296d25d2f9e0abcbbe327f534c17534be54dad3b3e8d38a58d25",
+      "size": 9236,
+      "normalized_sha256": "e2e4693e1b0f296d25d2f9e0abcbbe327f534c17534be54dad3b3e8d38a58d25"
     },
     "tests/test_notify.py": {
       "role": "observe",
@@ -18624,15 +18625,15 @@
     },
     "tests/test_search_dblp.py": {
       "role": "observe",
-      "sha256": "663492c40f88bcd5b13c18f9ab9b0860702e4945909f764abd1ecc75d6986fb7",
-      "size": 4220,
-      "normalized_sha256": "663492c40f88bcd5b13c18f9ab9b0860702e4945909f764abd1ecc75d6986fb7"
+      "sha256": "c790223918f0e3716d321e38e3a29e245434d70b199631d92682a52ac6927cfa",
+      "size": 4009,
+      "normalized_sha256": "c790223918f0e3716d321e38e3a29e245434d70b199631d92682a52ac6927cfa"
     },
     "tests/test_search_web.py": {
       "role": "observe",
-      "sha256": "bc5a3218204b8ec87ea3ffa59ae8e595fbda77a4a9af5ef223616627d38ff0aa",
-      "size": 4911,
-      "normalized_sha256": "bc5a3218204b8ec87ea3ffa59ae8e595fbda77a4a9af5ef223616627d38ff0aa"
+      "sha256": "41670cc93b422670bf717062fd6a76fcaffc43dba2ab7fe595aa496c7ab72e15",
+      "size": 4904,
+      "normalized_sha256": "41670cc93b422670bf717062fd6a76fcaffc43dba2ab7fe595aa496c7ab72e15"
     },
     "tests/test_subagent_streaming.py": {
       "role": "observe",

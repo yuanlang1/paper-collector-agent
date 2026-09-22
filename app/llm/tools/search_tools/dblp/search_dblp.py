@@ -9,7 +9,8 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import settings
-from app.llm.tools.registry import Tool, ToolExecutionContext
+from app.llm.tools.base import BaseTool, ToolResult
+from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.common import RETRYABLE_STATUS_CODES, clean_text, elapsed_ms, ensure_list, parse_year
 
 DBLP_API_URL = settings.DBLP_API_URL
@@ -299,7 +300,7 @@ def _parse_dblp_result(
     }
 
 
-async def dblp_search_handler(
+async def dblp_search_service(
     params: Dict[str, Any],
     context: ToolExecutionContext,
 ) -> Dict[str, Any]:
@@ -316,28 +317,8 @@ async def dblp_search_handler(
         retryable: bool,
         status_code: int | None = None,
         content_type: str | None = None,
-    ) -> dict[str, Any]:
-        metadata: dict[str, Any] = {
-            "duration_ms": elapsed_ms(started_at),
-        }
-        if status_code is not None:
-            metadata["status_code"] = status_code
-        if content_type:
-            metadata["content_type"] = content_type
-
-        return {
-            "ok": False,
-            "source": "dblp",
-            "query": query,
-            "returned_count": 0,
-            "papers": [],
-            "error": {
-                "code": code,
-                "message": message,
-                "retryable": retryable,
-            },
-            "metadata": metadata,
-        }
+    ) -> None:
+        raise RuntimeError(message)
 
     try:
         if not query:
@@ -514,7 +495,16 @@ async def dblp_search_handler(
         )
 
 
-DBLP_SEARCH_TOOL = Tool(
+async def dblp_search_handler(
+    params: Dict[str, Any],
+    context: ToolExecutionContext,
+) -> ToolResult:
+    return ToolResult(
+        content=str(await dblp_search_service(params, context))
+    )
+
+
+DBLP_SEARCH_TOOL = BaseTool(
     name="dblp_search",
     description=(
         "从 DBLP 少量检索计算机领域出版物并直接返回论文元数据。"
@@ -526,4 +516,5 @@ DBLP_SEARCH_TOOL = Tool(
     input_schema=DblpSearchArgs.model_json_schema(),
     fn=dblp_search_handler,
     requires_confirmation=False,
+    params_model=DblpSearchArgs,
 )

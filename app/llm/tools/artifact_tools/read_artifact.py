@@ -5,13 +5,13 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.llm.artifacts.access import (
-    ArtifactAccessError,
     MAX_CONTEXT_LINES,
     MAX_JSON_ITEMS,
     MAX_SEARCH_MATCHES,
     MAX_TEXT_LINES,
 )
-from app.llm.tools.registry import Tool, ToolExecutionContext
+from app.llm.tools.base import BaseTool, as_tool
+from app.llm.tools.registry import ToolExecutionContext
 
 
 class ReadArtifactArgs(BaseModel):
@@ -59,40 +59,30 @@ async def read_artifact_handler(
 ) -> dict[str, Any]:
     args = ReadArtifactArgs.model_validate(params)
     if context.artifact_access is None:
-        return {
-            "ok": False,
-            "error": "ARTIFACT_ACCESS_UNAVAILABLE",
-            "message": "artifact 读取服务尚未初始化。",
-        }
-    try:
-        data = await context.artifact_access.read(
-            artifact_uri=args.artifact_uri,
-            user_id=context.user_id,
-            mode=args.mode,
-            start_line=args.start_line,
-            max_lines=args.max_lines,
-            json_pointer=args.json_pointer,
-            offset=args.offset,
-            limit=args.limit,
-            query=args.query,
-            context_lines=args.context_lines,
-            max_matches=args.max_matches,
-        )
-    except ArtifactAccessError:
-        return {
-            "ok": False,
-            "error": "ARTIFACT_NOT_FOUND_OR_FORBIDDEN",
-            "message": "artifact 不存在或无访问权限。",
-        }
+        raise RuntimeError("artifact 读取服务尚未初始化。")
+    data = await context.artifact_access.read(
+        artifact_uri=args.artifact_uri,
+        user_id=context.user_id,
+        mode=args.mode,
+        start_line=args.start_line,
+        max_lines=args.max_lines,
+        json_pointer=args.json_pointer,
+        offset=args.offset,
+        limit=args.limit,
+        query=args.query,
+        context_lines=args.context_lines,
+        max_matches=args.max_matches,
+    )
     return {"ok": True, "data": data, "artifact_refs": [args.artifact_uri]}
 
 
-READ_ARTIFACT_TOOL = Tool(
+READ_ARTIFACT_TOOL = BaseTool(
     name="read_artifact",
     description=(
         "按需读取当前用户可访问的 artifact:// JSON 文件。"
         "仅使用真实工作流结果中的 URI；可查看摘要、行范围、JSON Pointer 或关键词匹配。"
     ),
     input_schema=ReadArtifactArgs.model_json_schema(),
-    fn=read_artifact_handler,
+    fn=as_tool(read_artifact_handler),
+    params_model=ReadArtifactArgs,
 )

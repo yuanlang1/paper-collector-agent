@@ -1,20 +1,21 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
+import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.llm.artifacts.access import ArtifactAccessService
 from app.llm.streaming.notify import NOOP_NOTIFIER, Notifier
+from app.llm.tools.base import BaseTool, ToolResult
 
 
 @dataclass(frozen=True)
 class ToolExecutionContext:
-    """Request-scoped resources and identity supplied to a tool call."""
-
     db: Session | None
     user_id: str = "0"
     conversation_id: str = ""
@@ -30,38 +31,15 @@ class ToolExecutionContext:
         self._notify(kind, payload)
 
 
-ToolHandler = Callable[
-    [dict[str, Any], ToolExecutionContext],
-    Awaitable[dict[str, Any]],
-]
-ConfirmationPolicy = bool | Callable[[dict[str, Any]], bool]
-
-
-@dataclass(frozen=True)
-class Tool:
-    name: str
-    description: str
-    input_schema: dict[str, Any]
-    fn: ToolHandler
-    requires_confirmation: ConfirmationPolicy = False
-
-    def to_api(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "description": self.description,
-            "input_schema": self.input_schema,
-        }
-
-
 class ToolRegistry:
     def __init__(self, db: Session | None = None) -> None:
-        self._tools: dict[str, Tool] = {}
+        self._tools: dict[str, BaseTool] = {}
         self._db = db
 
-    def register(self, tool: Tool) -> None:
+    def register(self, tool: BaseTool) -> None:
         self._tools[tool.name] = tool
 
-    def get(self, name: str) -> Tool | None:
+    def get(self, name: str) -> BaseTool | None:
         return self._tools.get(name)
 
     def schemas(self) -> list[dict[str, Any]]:
@@ -73,29 +51,69 @@ class ToolRegistry:
         args: dict[str, Any],
         *,
         context: ToolExecutionContext | None = None,
-    ) -> dict[str, Any]:
-        tool = self.get(name)
-        if tool is None:
-            return {"ok": False, "error": "UNKNOWN_TOOL"}
-
-        params = {
-            key: value
-            for key, value in args.items()
-            if value is not None and value != "" and value != []
-        }
+        timeout: float = 20,
+    ) -> ToolResult:
+        bus = context or ToolExecutionContext(db=self._db)
+        bus.notify(
+            "tool_started",
+            {"message": "工具开始执行。", "progress": 0, "data": {}},
+        )
         try:
-            result = await tool.fn(
-                params,
-                context or ToolExecutionContext(db=self._db),
+            tool = self.get(name)
+            if tool is None:
+                raise LookupError(f"未知工具：{name}")
+            if tool.params_model is not None:
+                try:
+                    tool.params_model.model_validate(dict(args))
+                except ValidationError as exc:
+                    return self._fail(
+                        bus,
+                        error_message=str(exc),
+                        error_name=type(exc).__name__,
+                    )
+
+            result = await asyncio.wait_for(tool.fn(args, bus), timeout)
+
+            bus.notify(
+            "tool_completed",
+            {
+                "message": result.content,
+                "progress": 100,
+                "data": {},
+            },
+        )
+        except asyncio.TimeoutError:
+            return self._fail(
+                bus,
+                error_message=f"工具执行超时（{timeout:g}s）。",
+                error_name="timeout",
             )
         except Exception as exc:
-            return {
-                "ok": False,
-                "error": type(exc).__name__,
-                "message": str(exc),
-            }
+            return self._fail(
+                bus,
+                error_message=str(exc),
+                error_name=type(exc).__name__,
+            )
 
-        return result if isinstance(result, dict) else {"result": result}
+        return result
+
+    def _fail(
+        self,
+        context: ToolExecutionContext,
+        *,
+        error_message: str,
+        error_name: str,
+    ) -> ToolResult:
+        result = ToolResult(
+            content=error_message,
+            is_error=True,
+            error_type=error_name,
+        )
+        context.notify(
+            "tool_failed",
+            {"message": result.content, "progress": None, "data": {}},
+        )
+        return result
 
 
 def build_tool_registry(db: Session | None = None) -> ToolRegistry:

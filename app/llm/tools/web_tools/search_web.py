@@ -10,7 +10,8 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.config import settings
-from app.llm.tools.registry import Tool, ToolExecutionContext
+from app.llm.tools.base import BaseTool, as_tool
+from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.common import (
     RETRYABLE_STATUS_CODES,
     clean_text,
@@ -163,23 +164,8 @@ def _failure(
     message: str,
     retryable: bool,
     status_code: int | None = None,
-) -> dict[str, Any]:
-    metadata: dict[str, Any] = {"duration_ms": elapsed_ms(started_at)}
-    if status_code is not None:
-        metadata["status_code"] = status_code
-    return {
-        "ok": False,
-        "source": "firecrawl",
-        "query": args.query,
-        "returned_count": 0,
-        "results": [],
-        "error": {
-            "code": code,
-            "message": message,
-            "retryable": retryable,
-        },
-        "metadata": metadata,
-    }
+) -> None:
+    raise RuntimeError(message)
 
 
 async def search_web_handler(
@@ -297,7 +283,7 @@ async def search_web_handler(
         )
 
 
-SEARCH_WEB_TOOL = Tool(
+SEARCH_WEB_TOOL = BaseTool(
     name="search_web",
     description=(
         "通过 Firecrawl 搜索实时网页、官网文档或新闻。"
@@ -305,6 +291,7 @@ SEARCH_WEB_TOOL = Tool(
         "完整论文检索仍应使用 paper_search_agent。"
     ),
     input_schema=SearchWebArgs.model_json_schema(),
-    fn=search_web_handler,
+    fn=as_tool(search_web_handler),
     requires_confirmation=False,
+    params_model=SearchWebArgs,
 )

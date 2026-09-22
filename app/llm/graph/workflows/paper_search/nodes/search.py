@@ -11,16 +11,16 @@ from app.llm.artifacts.paper_artifacts import (
     save_paper_search_artifact,
 )
 from app.llm.tools.search_tools.arxiv.search_arxiv import (
-    arxiv_search_handler,
+    arxiv_search_service,
 )
 from app.llm.tools.search_tools.dblp.search_dblp import (
-    dblp_search_handler,
+    dblp_search_service,
 )
 from app.llm.tools.search_tools.crossref.search_crossref import (
-    crossref_search_handler,
+    crossref_search_service,
 )
 from app.llm.tools.search_tools.google_scholar.search_google_scholar import (
-    google_scholar_search_handler,
+    google_scholar_search_service,
 )
 
 
@@ -38,10 +38,10 @@ SearchHandler = Callable[
 ]
 
 SEARCH_HANDLERS: dict[str, SearchHandler] = {
-    "arXiv": arxiv_search_handler,
-    "DBLP": dblp_search_handler,
-    "Crossref": crossref_search_handler,
-    "Google Scholar": google_scholar_search_handler,
+    "arXiv": arxiv_search_service,
+    "DBLP": dblp_search_service,
+    "Crossref": crossref_search_service,
+    "Google Scholar": google_scholar_search_service,
 }
 
 

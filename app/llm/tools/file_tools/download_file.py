@@ -14,7 +14,8 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.tools.registry import Tool, ToolExecutionContext
+from app.llm.tools.base import BaseTool, as_tool
+from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.common import (
     RETRYABLE_STATUS_CODES,
     elapsed_ms,
@@ -92,27 +93,8 @@ def _failure(
     message: str,
     retryable: bool = False,
     status_code: int | None = None,
-) -> dict[str, Any]:
-    metadata: dict[str, Any] = {
-        "duration_ms": elapsed_ms(started_at),
-    }
-
-    if status_code is not None:
-        metadata["status_code"] = status_code
-
-    return {
-        "ok": False,
-        "url": args.url,
-        "save_dir": args.save_dir,
-        "file_name": args.file_name,
-        "data": None,
-        "error": {
-            "code": code,
-            "message": message,
-            "retryable": retryable,
-        },
-        "metadata": metadata,
-    }
+) -> None:
+    raise RuntimeError(message)
 
 
 def _target_path(
@@ -445,7 +427,7 @@ async def download_file_handler(
         )
 
 
-DOWNLOAD_FILE_TOOL = Tool(
+DOWNLOAD_FILE_TOOL = BaseTool(
     name="download_file",
     description=(
         "根据 HTTP 或 HTTPS 下载链接下载文件。"
@@ -453,6 +435,7 @@ DOWNLOAD_FILE_TOOL = Tool(
         "默认仅下载并校验 PDF，单个文件最大 50 MB。"
     ),
     input_schema=DownloadFileArgs.model_json_schema(),
-    fn=download_file_handler,
+    fn=as_tool(download_file_handler),
     requires_confirmation=True,
+    params_model=DownloadFileArgs,
 )

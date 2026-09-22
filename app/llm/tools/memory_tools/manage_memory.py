@@ -5,7 +5,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.llm.tools.memory_tools.common import fact_data, require_database
-from app.llm.tools.registry import Tool, ToolExecutionContext
+from app.llm.tools.base import BaseTool, as_tool
+from app.llm.tools.registry import ToolExecutionContext
 from app.memory.semantic.service import FactService
 from app.rag.index_construction.memory_index_sync import (
     get_memory_index_synchronizer,
@@ -87,10 +88,11 @@ async def manage_memory_handler(
     }
 
 
-MANAGE_MEMORY_TOOL = Tool(
+MANAGE_MEMORY_TOOL = BaseTool(
     name="manage_memory",
     description="查询、更新或删除当前用户的长期笔记。更新和删除前必须获得用户确认。",
     input_schema=ManageMemoryArgs.model_json_schema(),
-    fn=manage_memory_handler,
+    fn=as_tool(manage_memory_handler),
     requires_confirmation=lambda args: args.get("action") in {"update", "delete"},
+    params_model=ManageMemoryArgs,
 )

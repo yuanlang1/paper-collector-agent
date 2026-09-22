@@ -6,8 +6,9 @@ from typing import Any, Dict, Literal
 
 from pydantic import BaseModel, Field
 
-from app.llm.tools.registry import Tool, ToolExecutionContext
-from app.llm.tools.search_tools.arxiv.search_arxiv import arxiv_search_handler
+from app.llm.tools.base import BaseTool, as_tool
+from app.llm.tools.registry import ToolExecutionContext
+from app.llm.tools.search_tools.arxiv.search_arxiv import arxiv_search_service
 
 
 class ArxivSupplementArgs(BaseModel):
@@ -175,7 +176,7 @@ async def _search_arxiv_by_doi(
         return []
 
     # 优先尝试高级查询
-    result = await arxiv_search_handler(
+    result = await arxiv_search_service(
         {
             "query": normalized_doi,
             "search_type": "topic",
@@ -191,7 +192,7 @@ async def _search_arxiv_by_doi(
         return result["papers"]
 
     # 兜底：把 DOI 当普通关键词搜
-    fallback = await arxiv_search_handler(
+    fallback = await arxiv_search_service(
         {
             "query": normalized_doi,
             "search_type": "topic",
@@ -221,7 +222,7 @@ async def _search_arxiv_by_title(
         return []
 
     # 先标题字段精确/短语搜索
-    result = await arxiv_search_handler(
+    result = await arxiv_search_service(
         {
             "query": title,
             "search_type": "title",
@@ -237,7 +238,7 @@ async def _search_arxiv_by_title(
         return result["papers"]
 
     # 兜底：全字段搜索
-    fallback = await arxiv_search_handler(
+    fallback = await arxiv_search_service(
         {
             "query": title,
             "search_type": "topic",
@@ -400,7 +401,7 @@ async def arxiv_supplement_handler(
     }
 
 
-ARXIV_SUPPLEMENT_TOOL = Tool(
+ARXIV_SUPPLEMENT_TOOL = BaseTool(
     name="arxiv_supplement",
     description=(
         "当 DBLP 或 Google Scholar 检索结果中的论文缺少 summary、pdf_url、"
@@ -408,5 +409,6 @@ ARXIV_SUPPLEMENT_TOOL = Tool(
         "该工具不负责初始论文检索，只负责对已有 papers 做字段增强。"
     ),
     input_schema=ArxivSupplementArgs.model_json_schema(),
-    fn=arxiv_supplement_handler,
+    fn=as_tool(arxiv_supplement_handler),
+    params_model=ArxivSupplementArgs,
 )

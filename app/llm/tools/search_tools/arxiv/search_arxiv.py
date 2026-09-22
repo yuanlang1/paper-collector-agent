@@ -10,7 +10,8 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import settings
-from app.llm.tools.registry import Tool, ToolExecutionContext
+from app.llm.tools.base import BaseTool, ToolResult
+from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.common import RETRYABLE_STATUS_CODES, clean_text, elapsed_ms
 
 ARXIV_API_URL = settings.ARXIV_API_URL
@@ -427,7 +428,7 @@ async def _fetch_arxiv_page(
     raise RuntimeError("arXiv request failed")
 
 
-async def arxiv_search_handler(
+async def arxiv_search_service(
     params: Dict[str, Any],
     context: ToolExecutionContext,
 ) -> Dict[str, Any]:
@@ -443,27 +444,8 @@ async def arxiv_search_handler(
         message: str,
         retryable: bool,
         status_code: int | None = None,
-    ) -> dict[str, Any]:
-        metadata: dict[str, Any] = {
-            "duration_ms": elapsed_ms(started_at),
-        }
-        if status_code is not None:
-            metadata["status_code"] = status_code
-
-        return {
-            "ok": False,
-            "source": "arxiv",
-            "query": args.query,
-            "arxiv_ids": args.arxiv_ids,
-            "returned_count": 0,
-            "papers": [],
-            "error": {
-                "code": code,
-                "message": message,
-                "retryable": retryable,
-            },
-            "metadata": metadata,
-        }
+    ) -> None:
+        raise RuntimeError(message)
 
     try:
         papers: list[dict[str, Any]] = []
@@ -627,7 +609,16 @@ async def arxiv_search_handler(
         )
 
 
-ARXIV_SEARCH_TOOL = Tool(
+async def arxiv_search_handler(
+    params: Dict[str, Any],
+    context: ToolExecutionContext,
+) -> ToolResult:
+    return ToolResult(
+        content=str(await arxiv_search_service(params, context))
+    )
+
+
+ARXIV_SEARCH_TOOL = BaseTool(
     name="arxiv_search",
     description=(
         "从 arXiv 少量检索论文并直接返回论文信息。"
@@ -638,4 +629,5 @@ ARXIV_SEARCH_TOOL = Tool(
     input_schema=ArxivSearchArgs.model_json_schema(),
     fn=arxiv_search_handler,
     requires_confirmation=False,
+    params_model=ArxivSearchArgs,
 )

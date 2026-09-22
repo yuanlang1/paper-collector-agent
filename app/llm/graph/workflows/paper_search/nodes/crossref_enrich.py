@@ -10,7 +10,7 @@ from typing import Any
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.paper_search_schemas import PaperTypeCode
 from app.llm.tools.search_tools.crossref.search_crossref import (
-    crossref_search_handler,
+    crossref_search_service,
 )
 
 
@@ -128,14 +128,6 @@ def _response_papers(response: Mapping[str, Any]) -> list[dict[str, Any]]:
     return [paper for paper in papers if isinstance(paper, dict)] if isinstance(papers, list) else []
 
 
-def _is_doi_not_found(response: Mapping[str, Any]) -> bool:
-    error = response.get("error")
-    return (
-        isinstance(error, Mapping)
-        and error.get("code") == "CROSSREF_NOT_FOUND"
-    )
-
-
 def _append_venue_candidate(
     paper: dict[str, Any],
     venue: str | None,
@@ -162,7 +154,7 @@ class CrossrefMetadataEnrichmentNode:
         crossref_search: CrossrefSearch | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.crossref_search = crossref_search or crossref_search_handler
+        self.crossref_search = crossref_search or crossref_search_service
 
     async def _search(
         self,
@@ -171,10 +163,10 @@ class CrossrefMetadataEnrichmentNode:
         doi = _normalize_doi(paper_info.get("doi"))
         if doi:
             response = await self.crossref_search({"doi": doi}, None)
-            if not _is_doi_not_found(response):
-                papers = _response_papers(response)
+            papers = _response_papers(response)
+            if papers:
                 return (
-                    papers[0] if papers else None,
+                    papers[0],
                     "doi",
                 )
 

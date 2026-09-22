@@ -10,7 +10,8 @@ from app.llm.graph.workflows.paper_search_schemas import (
     PromptUnderstandingArgs,
     SearchTagArgs,
 )
-from app.llm.tools.registry import Tool, ToolExecutionContext
+from app.llm.tools.base import BaseTool, as_tool
+from app.llm.tools.registry import ToolExecutionContext
 
 
 class AddQueryTaskArgs(BaseModel):
@@ -33,10 +34,13 @@ async def add_query_task_handler(
         exclude_none=False,
     )
 
-    return await task_service_grpc_client.add_query_task(payload)
+    result = await task_service_grpc_client.add_query_task(payload)
+    if not result.get("ok"):
+        raise RuntimeError(str(result.get("error") or "创建检索任务失败。"))
+    return result
 
 
-ADD_QUERY_TASK_TOOL = Tool(
+ADD_QUERY_TASK_TOOL = BaseTool(
     name="add_query_task",
     description=(
         "创建并保存论文查询任务。"
@@ -48,6 +52,7 @@ ADD_QUERY_TASK_TOOL = Tool(
         "不得调用该工具。"
     ),
     input_schema=AddQueryTaskArgs.model_json_schema(),
-    fn=add_query_task_handler,
+    fn=as_tool(add_query_task_handler),
     requires_confirmation=True,
+    params_model=AddQueryTaskArgs,
 )

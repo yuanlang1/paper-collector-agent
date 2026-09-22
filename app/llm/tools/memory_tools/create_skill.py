@@ -7,7 +7,8 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.config import settings
-from app.llm.tools.registry import Tool, ToolExecutionContext
+from app.llm.tools.base import BaseTool, as_tool
+from app.llm.tools.registry import ToolExecutionContext
 from app.memory.procedural.loader import (
     Skill,
     render_skill_document,
@@ -93,10 +94,11 @@ async def create_skill_handler(
     }
 
 
-CREATE_SKILL_TOOL = Tool(
+CREATE_SKILL_TOOL = BaseTool(
     name="create_skill",
     description="为当前用户创建可复用的本地工作流 Skill。仅在用户明确要求沉淀或创建可复用流程时使用。",
     input_schema=CreateSkillArgs.model_json_schema(),
-    fn=create_skill_handler,
+    fn=as_tool(create_skill_handler),
     requires_confirmation=True,
+    params_model=CreateSkillArgs,
 )

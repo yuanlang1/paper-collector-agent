@@ -9,9 +9,9 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import settings
-from app.llm.tools.registry import Tool, ToolExecutionContext
+from app.llm.tools.base import BaseTool, as_tool
+from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.common import (
-    RETRYABLE_STATUS_CODES,
     elapsed_ms,
 )
 
@@ -176,139 +176,46 @@ async def easy_scholar_venue_handler(
     started_at = time.perf_counter()
 
     if not settings.EASY_SCHOLAR_SECRET_KEY:
-        return {
-            "ok": False,
-            "source": "easy_scholar",
-            "publication_name": args.publication_name,
-            "data": None,
-            "error": {
-                "code": "CONFIGURATION_ERROR",
-                "message": "EasyScholar 密钥未配置。",
-                "retryable": False,
+        raise RuntimeError("EasyScholar 密钥未配置。")
+
+    await _wait_for_rate_limit()
+
+    async with httpx.AsyncClient(
+        timeout=settings.EASY_SCHOLAR_TIMEOUT_SECONDS,
+    ) as client:
+        response = await client.get(
+            EASY_SCHOLAR_API_URL,
+            params={
+                "secretKey": settings.EASY_SCHOLAR_SECRET_KEY,
+                "publicationName": args.publication_name,
             },
-            "metadata": {
-                "duration_ms": elapsed_ms(started_at),
-            },
-        }
+        )
 
-    try:
-        await _wait_for_rate_limit()
+    response.raise_for_status()
+    payload = response.json()
 
-        async with httpx.AsyncClient(
-            timeout=settings.EASY_SCHOLAR_TIMEOUT_SECONDS,
-        ) as client:
-            response = await client.get(
-                EASY_SCHOLAR_API_URL,
-                params={
-                    "secretKey": settings.EASY_SCHOLAR_SECRET_KEY,
-                    "publicationName": args.publication_name,
-                },
-            )
+    if payload.get("code") != 200:
+        raise RuntimeError(str(payload.get("msg") or "查询失败"))
 
-        response.raise_for_status()
-        payload = response.json()
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        raise RuntimeError("未找到该期刊的等级信息。")
 
-        if payload.get("code") != 200:
-            return {
-                "ok": False,
-                "source": "easy_scholar",
-                "publication_name": args.publication_name,
-                "data": None,
-                "error": {
-                    "code": "UPSTREAM_BUSINESS_ERROR",
-                    "message": str(payload.get("msg") or "查询失败"),
-                    "retryable": False,
-                },
-                "metadata": {
-                    "duration_ms": elapsed_ms(started_at),
-                    "upstream_code": payload.get("code"),
-                },
-            }
+    return {
+        "ok": True,
+        "source": "easy_scholar",
+        "publication_name": args.publication_name,
+        "data": _to_result(
+            publication_name=args.publication_name,
+            data=data,
+        ),
+        "error": None,
+        "metadata": {
+            "duration_ms": elapsed_ms(started_at),
+        },
+    }
 
-        data = payload.get("data")
-        if not isinstance(data, Mapping):
-            return {
-                "ok": False,
-                "source": "easy_scholar",
-                "publication_name": args.publication_name,
-                "data": None,
-                "error": {
-                    "code": "UPSTREAM_EMPTY_RESULT",
-                    "message": "未找到该期刊的等级信息。",
-                    "retryable": False,
-                },
-                "metadata": {
-                    "duration_ms": elapsed_ms(started_at),
-                },
-            }
-
-        return {
-            "ok": True,
-            "source": "easy_scholar",
-            "publication_name": args.publication_name,
-            "data": _to_result(
-                publication_name=args.publication_name,
-                data=data,
-            ),
-            "error": None,
-            "metadata": {
-                "duration_ms": elapsed_ms(started_at),
-            },
-        }
-
-    except httpx.HTTPStatusError as exc:
-        return {
-            "ok": False,
-            "source": "easy_scholar",
-            "publication_name": args.publication_name,
-            "data": None,
-            "error": {
-                "code": "UPSTREAM_HTTP_ERROR",
-                "message": f"EasyScholar 返回 HTTP {exc.response.status_code}",
-                "retryable": (
-                    exc.response.status_code in RETRYABLE_STATUS_CODES
-                ),
-            },
-            "metadata": {
-                "duration_ms": elapsed_ms(started_at),
-                "status_code": exc.response.status_code,
-            },
-        }
-
-    except httpx.RequestError:
-        return {
-            "ok": False,
-            "source": "easy_scholar",
-            "publication_name": args.publication_name,
-            "data": None,
-            "error": {
-                "code": "UPSTREAM_REQUEST_ERROR",
-                "message": "无法连接 EasyScholar。",
-                "retryable": True,
-            },
-            "metadata": {
-                "duration_ms": elapsed_ms(started_at),
-            },
-        }
-
-    except ValueError as exc:
-        return {
-            "ok": False,
-            "source": "easy_scholar",
-            "publication_name": args.publication_name,
-            "data": None,
-            "error": {
-                "code": "UPSTREAM_PARSE_ERROR",
-                "message": str(exc),
-                "retryable": False,
-            },
-            "metadata": {
-                "duration_ms": elapsed_ms(started_at),
-            },
-        }
-
-
-EASY_SCHOLAR_VENUE_TOOL = Tool(
+EASY_SCHOLAR_VENUE_TOOL = BaseTool(
     name="get_venue_info",
     description=(
         "查询单个学术期刊的等级信息。可返回 JCR 分区、CCF、"
@@ -316,6 +223,7 @@ EASY_SCHOLAR_VENUE_TOOL = Tool(
         "仅用于期刊等级查询，不用于检索论文。"
     ),
     input_schema=EasyScholarVenueArgs.model_json_schema(),
-    fn=easy_scholar_venue_handler,
+    fn=as_tool(easy_scholar_venue_handler),
     requires_confirmation=False,
+    params_model=EasyScholarVenueArgs,
 )

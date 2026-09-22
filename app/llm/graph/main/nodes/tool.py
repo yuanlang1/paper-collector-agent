@@ -26,7 +26,6 @@ def build_action_result_update(
     error_code: str | None = None,
     error_message: str | None = None,
 ) -> dict[str, Any]:
-    """Build the shared state update for a completed tool or subagent call."""
     action_id = str(call["id"])
     action_name = str(call["name"])
     result = {
@@ -71,7 +70,6 @@ async def tool_node(
         action_id=str(call["id"]),
         tool_name=str(call["name"]),
     )
-    notify("tool_started", {"message": "工具开始执行。", "progress": 0, "data": {}})
     db = SessionLocal()
     try:
         result = await tool_registry.execute(
@@ -89,22 +87,11 @@ async def tool_node(
     finally:
         db.close()
 
-    artifact_refs = result.get("artifact_refs")
-    ok = result.get("ok", True)
-    notify(
-        "tool_completed" if ok else "tool_failed",
-        {
-            "message": "工具执行完成。" if ok else str(result.get("message") or "工具执行失败。"),
-            "progress": 100 if ok else None,
-            "data": {"artifact_refs": artifact_refs if isinstance(artifact_refs, list) else []},
-        },
-    )
     return build_action_result_update(
         call=call,
-        status="success" if ok else "error",
-        summary="tool completed" if ok else "tool failed",
-        data=result,
-        artifact_refs=artifact_refs if isinstance(artifact_refs, list) else [],
-        error_code=result.get("error"),
-        error_message=result.get("message"),
+        status="error" if result.is_error else "success",
+        summary="tool failed" if result.is_error else "tool completed",
+        data={"content": result.content},
+        error_code=result.error_type,
+        error_message=result.content if result.is_error else None,
     )

@@ -11,7 +11,8 @@ from urllib.parse import quote
 import httpx
 
 from app.config import settings
-from app.llm.tools.registry import Tool, ToolExecutionContext
+from app.llm.tools.base import BaseTool, ToolResult
+from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.common import (
     RETRYABLE_STATUS_CODES,
     clean_text,
@@ -291,7 +292,7 @@ def _query_label(args: CrossrefSearchArgs) -> str:
     )
 
 
-async def crossref_search_handler(
+async def crossref_search_service(
     params: Dict[str, Any],
     context: ToolExecutionContext,
 ) -> Dict[str, Any]:
@@ -307,26 +308,8 @@ async def crossref_search_handler(
         message: str,
         retryable: bool,
         status_code: int | None = None,
-    ) -> dict[str, Any]:
-        metadata: dict[str, Any] = {
-            "duration_ms": elapsed_ms(started_at),
-        }
-        if status_code is not None:
-            metadata["status_code"] = status_code
-
-        return {
-            "ok": False,
-            "source": "crossref",
-            "query": query,
-            "returned_count": 0,
-            "papers": [],
-            "error": {
-                "code": code,
-                "message": message,
-                "retryable": retryable,
-            },
-            "metadata": metadata,
-        }
+    ) -> None:
+        raise RuntimeError(message)
 
     try:
         headers = {
@@ -391,12 +374,18 @@ async def crossref_search_handler(
 
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404 and args.doi:
-            return failure(
-                code="CROSSREF_NOT_FOUND",
-                message="Crossref 未找到该 DOI。",
-                retryable=False,
-                status_code=404,
-            )
+            return {
+                "ok": True,
+                "source": "crossref",
+                "query": query,
+                "returned_count": 0,
+                "papers": [],
+                "error": None,
+                "metadata": {
+                    "total_results": 0,
+                    "duration_ms": elapsed_ms(started_at),
+                },
+            }
 
         return failure(
             code="UPSTREAM_HTTP_ERROR",
@@ -434,7 +423,16 @@ async def crossref_search_handler(
         )
 
 
-CROSSREF_SEARCH_TOOL = Tool(
+async def crossref_search_handler(
+    params: Dict[str, Any],
+    context: ToolExecutionContext,
+) -> ToolResult:
+    return ToolResult(
+        content=str(await crossref_search_service(params, context))
+    )
+
+
+CROSSREF_SEARCH_TOOL = BaseTool(
     name="crossref_search",
     description=(
         "通过 Crossref 查询论文元数据。支持 DOI 精确查询，或按标题、"
@@ -444,4 +442,5 @@ CROSSREF_SEARCH_TOOL = Tool(
     input_schema=CrossrefSearchArgs.model_json_schema(),
     fn=crossref_search_handler,
     requires_confirmation=False,
+    params_model=CrossrefSearchArgs,
 )

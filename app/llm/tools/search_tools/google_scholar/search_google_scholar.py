@@ -9,7 +9,8 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import settings
-from app.llm.tools.registry import Tool, ToolExecutionContext
+from app.llm.tools.base import BaseTool, ToolResult
+from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.common import RETRYABLE_STATUS_CODES, clean_text, elapsed_ms
 
 SERPAPI_SEARCH_URL = settings.SERPAPI_SEARCH_URL
@@ -292,7 +293,7 @@ def _validate_serpapi_result(
         )
 
 
-async def google_scholar_search_handler(
+async def google_scholar_search_service(
     params: dict[str, Any],
     context: ToolExecutionContext,
 ) -> dict[str, Any]:
@@ -308,27 +309,8 @@ async def google_scholar_search_handler(
         message: str,
         retryable: bool,
         status_code: int | None = None,
-    ) -> dict[str, Any]:
-        metadata: dict[str, Any] = {
-            "duration_ms": elapsed_ms(started_at),
-        }
-
-        if status_code is not None:
-            metadata["status_code"] = status_code
-
-        return {
-            "ok": False,
-            "source": "google_scholar",
-            "query": query,
-            "returned_count": 0,
-            "papers": [],
-            "error": {
-                "code": code,
-                "message": message,
-                "retryable": retryable,
-            },
-            "metadata": metadata,
-        }
+    ) -> None:
+        raise RuntimeError(message)
 
     try:
         if not query:
@@ -523,7 +505,16 @@ async def google_scholar_search_handler(
         )
 
 
-GOOGLE_SCHOLAR_SEARCH_TOOL = Tool(
+async def google_scholar_search_handler(
+    params: dict[str, Any],
+    context: ToolExecutionContext,
+) -> ToolResult:
+    return ToolResult(
+        content=str(await google_scholar_search_service(params, context))
+    )
+
+
+GOOGLE_SCHOLAR_SEARCH_TOOL = BaseTool(
     name="google_scholar_search",
     description=(
         "通过 SerpApi 的 Google Scholar 接口少量检索学术论文。"
@@ -535,4 +526,5 @@ GOOGLE_SCHOLAR_SEARCH_TOOL = Tool(
     input_schema=GoogleScholarSearchArgs.model_json_schema(),
     fn=google_scholar_search_handler,
     requires_confirmation=False,
+    params_model=GoogleScholarSearchArgs,
 )

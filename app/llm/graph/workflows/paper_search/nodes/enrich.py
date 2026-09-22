@@ -10,11 +10,11 @@ from typing import Any
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.tools.search_tools.arxiv.search_arxiv import (
     ArxivSearchArgs,
-    arxiv_search_handler,
+    arxiv_search_service,
 )
 from app.llm.tools.search_tools.dblp.search_dblp import (
     DblpSearchArgs,
-    dblp_search_handler,
+    dblp_search_service,
 )
 
 
@@ -140,7 +140,7 @@ class PaperEnrichmentNode:
             )
         )
 
-        result = await arxiv_search_handler(
+        result = await arxiv_search_service(
             args.model_dump(mode="json"),
             None,
         )
@@ -200,7 +200,7 @@ class PaperEnrichmentNode:
             total_limit=5,
         )
 
-        result = await dblp_search_handler(
+        result = await dblp_search_service(
             args.model_dump(mode="json"),
             None,
         )

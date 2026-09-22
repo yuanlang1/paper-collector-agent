@@ -5,7 +5,8 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.llm.tools.memory_tools.common import fact_data, require_database
-from app.llm.tools.registry import Tool, ToolExecutionContext
+from app.llm.tools.base import BaseTool, as_tool
+from app.llm.tools.registry import ToolExecutionContext
 from app.memory.semantic.service import FactService
 from app.rag.index_construction.memory_index_sync import (
     get_memory_index_synchronizer,
@@ -49,10 +50,11 @@ async def save_note_handler(
     }
 
 
-SAVE_NOTE_TOOL = Tool(
+SAVE_NOTE_TOOL = BaseTool(
     name="save_note",
     description="将用户明确要求记住的信息保存为长期笔记。仅在用户明确要求保存、记住或记录时使用。",
     input_schema=SaveNoteArgs.model_json_schema(),
-    fn=save_note_handler,
+    fn=as_tool(save_note_handler),
     requires_confirmation=True,
+    params_model=SaveNoteArgs,
 )
