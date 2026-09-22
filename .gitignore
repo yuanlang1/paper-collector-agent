@@ -47,6 +47,7 @@ tests/*
 !tests/test_rag_evaluation_*.py
 !tests/test_review_extract_studies.py
 !tests/test_review_citations.py
+!tests/test_review_refactor.py
 !tests/test_export_test_videos.py
 !app/models/
 !app/models/*.py
@@ -59,6 +60,10 @@ scripts/*
 .agents
 .mermaid-npm-cache
 .mermaid-renderer
+# AOCI host integration configs contain machine-bound absolute paths
+.mcp.json
+.claude/settings.json
+opencode.json
 docs/
 evals
 evals/rag/drafts/

@@ -4,52 +4,30 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
-from app.infrastructure.grpc.paper_service_grpc_client import (
-    PaperServiceGrpcClient,
-)
-from app.llm.graph.workflows.review_generate.nodes.assemble_review import (
-    AssembleReviewNode,
-)
-from app.llm.graph.workflows.review_generate.nodes.finalizing_handoff import (
-    FinalizingHandoffNode,
-)
-from app.llm.graph.workflows.review_generate.nodes.finalize import (
-    finalize_task_review_node,
-)
-from app.llm.graph.workflows.review_generate.nodes.extract_studies import (
-    ExtractStudiesNode,
-)
-from app.llm.graph.workflows.review_generate.nodes.generate_claim import (
-    GenerateClaimsNode,
-)
-from app.llm.graph.workflows.review_generate.nodes.generate_framework import (
-    GenerateFrameworkNode,
-)
-from app.llm.graph.workflows.review_generate.nodes.initialize import (
-    initialize_review_node,
-)
-from app.llm.graph.workflows.review_generate.nodes.load import (
-    LoadTaskCorpusNode,
-)
-from app.llm.graph.workflows.review_generate.nodes.persist_review import (
-    PersistReviewNode,
-)
-from app.llm.graph.workflows.review_generate.nodes.reflect_review import (
-    ReflectReviewNode,
-)
-from app.llm.graph.workflows.review_generate.nodes.render_section import (
-    RenderSectionsNode,
-)
-from app.llm.graph.workflows.review_generate.nodes.retrieve_evidence import (
-    RetrieveEvidenceNode,
-)
-from app.llm.graph.workflows.review_generate.state import (
-    TaskReviewWorkflowState,
-)
+from app.infrastructure.grpc.paper_service_grpc_client import PaperServiceGrpcClient
+from app.llm.graph.workflows.review_generate.nodes.assemble_review import AssembleReviewNode
+from app.llm.graph.workflows.review_generate.nodes.finalizing_handoff import FinalizingHandoffNode
+from app.llm.graph.workflows.review_generate.nodes.finalize import finalize_task_review_node
+from app.llm.graph.workflows.review_generate.nodes.extract_studies import ExtractStudiesNode
+from app.llm.graph.workflows.review_generate.nodes.generate_claim import GenerateClaimsNode
+from app.llm.graph.workflows.review_generate.nodes.generate_framework import GenerateFrameworkNode
+from app.llm.graph.workflows.review_generate.nodes.initialize import initialize_review_node
+from app.llm.graph.workflows.review_generate.nodes.load import LoadTaskCorpusNode
+from app.llm.graph.workflows.review_generate.nodes.persist_review import PersistReviewNode
+from app.llm.graph.workflows.review_generate.nodes.reflect_review import ReflectReviewNode
+from app.llm.graph.workflows.review_generate.nodes.render_section import RenderSectionsNode
+from app.llm.graph.workflows.review_generate.nodes.retrieve_evidence import RetrieveEvidenceNode
+from app.llm.graph.workflows.review_generate.state import TaskReviewWorkflowState
 from app.llm.streaming.timeline import (
     TASK_REVIEW_TIMELINE,
     instrument_timeline_node,
 )
+
+
+from app.llm.graph.workflows.review_generate.nodes.resolve_review_focus import (
+    ResolveReviewFocusNode,
+)
+from app.llm.graph.workflows.review_generate.nodes.verify_claims import VerifyClaimsNode
 
 
 def _route(expected_stage: str, target: str):
@@ -61,14 +39,14 @@ def _route(expected_stage: str, target: str):
     return route
 
 
-def _route_after_reflection(
-    state: TaskReviewWorkflowState,
-) -> str:
+def _route_after_reflection(state: TaskReviewWorkflowState,) -> str:
     return {
         "finalizing_handoff": "finalizing_handoff",
         "generating_claims": "generate_claims",
         "retrieving_evidence": "retrieve_evidence",
         "rendering_sections": "render_sections",
+        "generating_framework": "generate_framework",
+        "assembling_review": "assemble_review",
     }.get(state.get("stage"), "finalize")
 
 
@@ -94,125 +72,107 @@ def build_task_review_workflow(
         )
 
     builder = StateGraph(TaskReviewWorkflowState)
+    builder.add_node("resolve_review_focus", node("resolve_review_focus", ResolveReviewFocusNode))
+    builder.add_node("verify_claims", node("verify_claims", VerifyClaimsNode))
     builder.add_node("initialize", node("initialize", lambda: initialize_review_node))
     builder.add_node(
         "load_task_corpus",
-        node(
-            "load_task_corpus",
-            lambda: LoadTaskCorpusNode(client=paper_client),
-        ),
+        node("load_task_corpus", lambda: LoadTaskCorpusNode(client=paper_client),),
     )
     builder.add_node(
-        "generate_framework",
-        node("generate_framework", GenerateFrameworkNode),
+        "generate_framework", node("generate_framework", GenerateFrameworkNode),
     )
     builder.add_node(
-        "extract_studies",
-        node("extract_studies", ExtractStudiesNode),
+        "extract_studies", node("extract_studies", ExtractStudiesNode),
     )
     builder.add_node(
-        "generate_claims",
-        node("generate_claims", GenerateClaimsNode),
+        "generate_claims", node("generate_claims", GenerateClaimsNode),
     )
     builder.add_node(
-        "retrieve_evidence",
-        node("retrieve_evidence", RetrieveEvidenceNode),
+        "retrieve_evidence", node("retrieve_evidence", RetrieveEvidenceNode),
     )
     builder.add_node(
-        "render_sections",
-        node("render_sections", RenderSectionsNode),
+        "render_sections", node("render_sections", RenderSectionsNode),
     )
     builder.add_node(
-        "assemble_review",
-        node("assemble_review", AssembleReviewNode),
+        "assemble_review", node("assemble_review", AssembleReviewNode),
     )
     builder.add_node(
-        "reflect_review",
-        node("reflect_review", ReflectReviewNode),
+        "reflect_review", node("reflect_review", ReflectReviewNode),
     )
     builder.add_node(
-        "finalizing_handoff",
-        node("finalizing_handoff", FinalizingHandoffNode),
+        "finalizing_handoff", node("finalizing_handoff", FinalizingHandoffNode),
     )
     builder.add_node(
-        "persist_review",
-        node("persist_review", PersistReviewNode),
+        "persist_review", node("persist_review", PersistReviewNode),
     )
     builder.add_node(
-        "finalize_result",
-        node("finalize_result", lambda: finalize_task_review_node),
+        "finalize_result", node("finalize_result", lambda: finalize_task_review_node),
     )
 
     builder.add_edge(START, "initialize")
     builder.add_conditional_edges(
         "initialize",
         _route("loading_corpus", "load_task_corpus"),
-        {
-            "load_task_corpus": "load_task_corpus",
-            "finalize": "finalize_result",
-        },
+        {"load_task_corpus": "load_task_corpus", "finalize": "finalize_result",},
     )
     builder.add_conditional_edges(
         "load_task_corpus",
         _route("extracting_studies", "extract_studies"),
-        {
-            "extract_studies": "extract_studies",
-            "finalize": "finalize_result",
-        },
+        {"extract_studies": "extract_studies", "finalize": "finalize_result",},
     )
     builder.add_conditional_edges(
         "extract_studies",
-        _route("generating_framework", "generate_framework"),
-        {
-            "generate_framework": "generate_framework",
-            "finalize": "finalize_result",
-        },
+        _route("resolving_review_focus", "resolve_review_focus"),
+        {"resolve_review_focus": "resolve_review_focus", "finalize": "finalize_result"},
     )
     builder.add_conditional_edges(
-        "generate_framework",
+        "resolve_review_focus",
         _route("generating_claims", "generate_claims"),
-        {
-            "generate_claims": "generate_claims",
-            "finalize": "finalize_result",
-        },
+        {"generate_claims": "generate_claims", "finalize": "finalize_result",},
     )
     builder.add_conditional_edges(
         "generate_claims",
         _route("retrieving_evidence", "retrieve_evidence"),
+        {"retrieve_evidence": "retrieve_evidence", "finalize": "finalize_result",},
+    )
+    builder.add_conditional_edges(
+        "retrieve_evidence",
+        _route("verifying_claims", "verify_claims"),
+        {"verify_claims": "verify_claims", "finalize": "finalize_result"},
+    )
+    builder.add_conditional_edges(
+        "verify_claims",
+        _route_after_reflection,
         {
+            "generate_framework": "generate_framework",
+            "generate_claims": "generate_claims",
             "retrieve_evidence": "retrieve_evidence",
             "finalize": "finalize_result",
         },
     )
     builder.add_conditional_edges(
-        "retrieve_evidence",
+        "generate_framework",
         _route("rendering_sections", "render_sections"),
-        {
-            "render_sections": "render_sections",
-            "finalize": "finalize_result",
-        },
+        {"render_sections": "render_sections", "finalize": "finalize_result"},
     )
     builder.add_conditional_edges(
         "render_sections",
         _route("assembling_review", "assemble_review"),
-        {
-            "assemble_review": "assemble_review",
-            "finalize": "finalize_result",
-        },
+        {"assemble_review": "assemble_review", "finalize": "finalize_result",},
     )
     builder.add_conditional_edges(
         "assemble_review",
         _route("reflecting_review", "reflect_review"),
-        {
-            "reflect_review": "reflect_review",
-            "finalize": "finalize_result",
-        },
+        {"reflect_review": "reflect_review", "finalize": "finalize_result",},
     )
     builder.add_conditional_edges(
         "reflect_review",
         _route_after_reflection,
         {
             "finalizing_handoff": "finalizing_handoff",
+            "generate_framework": "generate_framework",
+            "assemble_review": "assemble_review",
             "generate_claims": "generate_claims",
             "retrieve_evidence": "retrieve_evidence",
             "render_sections": "render_sections",
@@ -223,4 +183,4 @@ def build_task_review_workflow(
     builder.add_edge("persist_review", "finalize_result")
     builder.add_edge("finalize_result", END)
 
-    return builder.compile(checkpointer=checkpointer)
+    return builder.compile(checkpointer=checkpointer).with_config(recursion_limit=128)

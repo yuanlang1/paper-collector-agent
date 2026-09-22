@@ -40,7 +40,8 @@ def build_task_review_runtime() -> SubAgentRuntime:
         spec=SubAgentSpec(
             name="task_review_agent",
             description=(
-                "基于已完成 RAG 的检索任务论文集生成学术综述，不扩展论文集。"
+                "基于已完成 RAG 的固定任务论文集生成结构化学术综合，不扩展论文集。"
+                "systematic/scoping 仅指定组织方式，不代表执行了正式系统综述检索与筛选协议。"
             ),
             input_model=TaskReviewDelegation,
             requires_confirmation=True,

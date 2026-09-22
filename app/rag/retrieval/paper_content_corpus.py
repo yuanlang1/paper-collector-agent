@@ -9,9 +9,7 @@ from qdrant_client import AsyncQdrantClient, models
 
 from app.config import settings
 from app.rag.index_construction.base import get_qdrant_client
-from app.rag.retrieval.paper_content_retrieval import (
-    paper_content_document_from_payload,
-)
+from app.rag.retrieval.paper_content_retrieval import paper_content_document_from_payload
 
 
 class PaperContentCorpusReader:
@@ -30,12 +28,7 @@ class PaperContentCorpusReader:
             return []
 
         query_filter = models.Filter(
-            must=[
-                models.FieldCondition(
-                    key="paper_id",
-                    match=models.MatchAny(any=normalized_ids),
-                )
-            ]
+            must=[models.FieldCondition(key="paper_id", match=models.MatchAny(any=normalized_ids),)]
         )
         offset = None
         documents: list[Document] = []
@@ -49,8 +42,7 @@ class PaperContentCorpusReader:
                 with_vectors=False,
             )
             documents.extend(
-                paper_content_document_from_payload(record.payload or {})
-                for record in records
+                paper_content_document_from_payload(record.payload or {}) for record in records
             )
             if offset is None:
                 break
@@ -66,9 +58,7 @@ class PaperContentCorpusReader:
     @staticmethod
     def page_aware_documents(documents: list[Document]) -> list[Document]:
         return [
-            document
-            for document in documents
-            if PaperContentCorpusReader.is_page_aware(document)
+            document for document in documents if PaperContentCorpusReader.is_page_aware(document)
         ]
 
     @staticmethod
@@ -94,26 +84,18 @@ class PaperContentCorpusReader:
         digest = hashlib.sha256()
         for document in sorted(
             documents,
-            key=lambda item: (
-                str(item.metadata["paper_id"]),
-                int(item.metadata["chunk_index"]),
-            ),
+            key=lambda item: (str(item.metadata["paper_id"]), int(item.metadata["chunk_index"]),),
         ):
             value: dict[str, Any] = {
                 "paper_id": str(document.metadata["paper_id"]),
                 "chunk_id": str(document.metadata["chunk_id"]),
-                "content_sha256": hashlib.sha256(
-                    document.page_content.encode("utf-8")
-                ).hexdigest(),
+                "content_sha256": hashlib.sha256(document.page_content.encode("utf-8")).hexdigest(),
                 "page_numbers": document.metadata.get("page_numbers", []),
                 "source_spans": document.metadata.get("source_spans", []),
             }
             digest.update(
                 json.dumps(
-                    value,
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
+                    value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
                 ).encode("utf-8")
             )
         return digest.hexdigest()

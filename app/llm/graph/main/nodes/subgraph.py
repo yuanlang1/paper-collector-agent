@@ -82,6 +82,8 @@ class SubAgentNode:
                 "notify_scope": scope,
             },
         }
+        if runtime.stream.workflow == "task_review":
+            child_config["recursion_limit"] = 128
         notify(
             "subagent_started",
             {

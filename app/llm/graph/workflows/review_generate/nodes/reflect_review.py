@@ -1,301 +1,169 @@
-from __future__ import annotations
+from typing import Any
 
-import asyncio
-import json
-from collections.abc import Mapping
-from typing import Any, Literal
-
-from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
+from app.llm.model_factory import create_validated_structured_chat_model
 from app.llm.graph.workflows.review_generate.citations import (
     citation_anchor_ids,
     unsupported_synthesis_anchor_ids,
 )
+from app.llm.graph.workflows.review_generate.contracts import (
+    RevisionItem,
+    batches,
+    invoke,
+    save,
+    text_windows,
+)
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
-from app.llm.model_factory import create_validated_structured_chat_model
+from app.llm.graph.workflows.review_generate.revisions import schedule_revision
 
 
-REFLECT_REVIEW_PROMPT = """
-    你是一位严格的学术综述审稿人。
+SECTION_REFLECTION_PROMPT = (
+    "检查真实正文中每个事实，不能只信 used_claim_ids。核对原文适用范围、引用绑定、"
+    "数值、比较条件、反证和新增扩大论断。claims 是此章节完整的已核验论点列表，"
+    "超出该列表的具体事实必须修订或重新核验。本次只看到部分证据窗口，"
+    "不能仅因本窗口缺证据判为无依据；需要完整核验时提出 claim 或 retrieval 修订。"
+    "修订明确问题、修改要求与验收条件，章节修改使用当前 section_id。"
+)
 
-    请评估当前综述是否达到可交付标准，并在不合格时给出最小修订范围。
+REVIEW_REFLECTION_PROMPT = (
+    "审核真实 body_markdown 中的新增事实、研究问题覆盖、章节结构、重复和矛盾，"
+    "与完整已核验论点列表比较，检查摘要结论是否扩大正文结论。"
+    "正文是分批输入，不因其他批次内容缺席判定遗漏。摘要结论修改目标为 synthesis/review；"
+    "结构修改为 framework/review。硬检查问题必须解决。不允许虚构系统综述执行过程。"
+)
 
-    你只能依据输入中的 Framework、综述草稿、系统硬约束检查结果、
-    Claim 列表和证据概览作出判断。
-
-    规则：
-    1. 不得建议外部检索、Auto Search、扩大任务论文集合。
-    2. 不得引入新论文、新事实、新作者、新引用或未提供的研究结论。
-    3. system_hard_issues 非空时，satisfied 必须为 false。
-    4. 存在 critical 或 major 问题时，satisfied 必须为 false。
-    5. 需要更多任务内正文证据时，将 Claim ID 放入 retrieve_claim_ids。
-    6. Claim 本身过宽、过强或不应保留时，将其 ID 放入 revise_claim_ids。
-    7. 需要修改论述、引用绑定、章节连贯性时，将章节 ID 放入 render_section_ids。
-    8. 只选择实际需要修订的目标，不要重写无关章节。
-    9. 仅返回结构化输出，且必须包含所有字段。即使没有问题，也要返回空数组；
-       每个 issue 必须包含 severity、category 和 description。
-
-    输出格式：
-    {
-      "satisfied": false,
-      "summary": "简要说明是否达到交付标准",
-      "issues": [
-        {
-          "severity": "major",
-          "category": "claim_evidence_mismatch",
-          "description": "问题说明"
-        }
-      ],
-      "retrieve_claim_ids": [],
-      "revise_claim_ids": ["claim_001"],
-      "render_section_ids": ["section_id"]
-    }
-""".strip()
 
 class ReflectionIssue(BaseModel):
-    severity: Literal["critical", "major", "minor"]
-    category: str = "uncategorized"
+    severity: str
+    category: str
     description: str
 
 
 class ReflectionResult(BaseModel):
     satisfied: bool
     summary: str = ""
-    issues: list[ReflectionIssue] = Field(default_factory = list)
+    issues: list[ReflectionIssue] = Field(default_factory=list)
+    revisions: list[RevisionItem] = Field(default_factory=list)
 
-    retrieve_claim_ids: list[str] = Field(default_factory = list)
-    revise_claim_ids: list[str] = Field(default_factory = list)
-    render_section_ids: list[str] = Field(default_factory = list)
-
-    @model_validator(mode="after")
-    def provide_summary_when_missing(self) -> "ReflectionResult":
-        if self.summary.strip():
-            return self
-
-        if self.issues:
-            self.summary = "；".join(
-                issue.description
-                for issue in self.issues
-            )
-        else:
-            self.summary = (
-                "Review passed." if self.satisfied else "Review requires revision."
-            )
-        return self
 
 class ReflectReviewNode:
-    def __init__(
-        self,
-        *,
-        artifact_store: LocalArtifactStore | None = None,
-        model: Any | None = None,
-    ) -> None:
+    def __init__(self, *, artifact_store=None, model=None):
         self.artifact_store = artifact_store or LocalArtifactStore()
         self.model = model or create_validated_structured_chat_model(
-            ReflectionResult,
-            temperature = 0,
+            ReflectionResult, temperature=0
         )
 
-    async def __call__(
-        self,
-        state: Mapping[str, Any],
-    ) -> dict[str, Any]:
+    async def __call__(self, state):
         try:
-            (
-                framework_payload,
-                claims_payload,
-                evidence_payload,
-                corpus_payload,
-                review_draft,
-            ) = await asyncio.gather(
-                self.artifact_store.read_json_uri(
-                    state["framework_artifact_ref"]
-                ),
-                self.artifact_store.read_json_uri(
-                    state["claims_artifact_ref"]
-                ),
-                self.artifact_store.read_json_uri(
-                    state["evidence_ledger_artifact_ref"]
-                ),
-                self.artifact_store.read_json_uri(
-                    state["corpus_artifact_ref"]
-                ),
-                self.artifact_store.read_json_uri(
-                    state["review_draft_artifact_ref"]
-                ),
-            )
-
-            hard_issues = self._check_hard_constraints(
-                review_draft = review_draft,
-                corpus_payload = corpus_payload,
-            )
-
-            result = await self.model.ainvoke(
-                [
-                    SystemMessage(content = REFLECT_REVIEW_PROMPT),
-                    HumanMessage(
-                        content = json.dumps(
-                            {
-                                "topic": state["topic"],
-                                "language": state["language"],
-                                "review_type": state["review_type"],
-                                "framework": framework_payload["framework"],
-                                "review_draft": review_draft,
-                                "system_hard_issues": hard_issues,
-                                "claims": self._flatten_claims(
-                                    claims_payload
-                                ),
-                                "evidence": self._evidence_overview(
-                                    evidence_payload
-                                ),
-                            },
-                            ensure_ascii = False,
-                        )
-                    ),
-                ]
-            )
-
-            reflection = (
-                result
-                if isinstance(result, ReflectionResult)
-                else ReflectionResult.model_validate(result)
-            )
-        except Exception as exc:
-            return failed(f"review reflection failed: {exc}")
-
-        claim_ids = {
-            claim["claim_id"]
-            for claim in self._flatten_claims(claims_payload)
-        }
-        section_ids = {
-            section["section_id"]
-            for section in framework_payload["framework"]["sections"]
-        }
-
-        retrieve_claim_ids = self._valid_ids(
-            reflection.retrieve_claim_ids,
-            claim_ids,
-        )
-        revise_claim_ids = self._valid_ids(
-            reflection.revise_claim_ids,
-            claim_ids,
-        )
-        render_section_ids = self._valid_ids(
-            reflection.render_section_ids,
-            section_ids,
-        )
-
-        blocking_issues = [
-            issue
-            for issue in reflection.issues
-            if issue.severity in {"critical", "major"}
-        ]
-        satisfied = (
-            reflection.satisfied
-            and not hard_issues
-            and not blocking_issues
-        )
-
-        current_round = state["reflection_round"]
-        next_round = current_round + 1
-
-        reflection_report = {
-            "task_id": state["task_id"],
-            "reflection_round": current_round,
-            "satisfied": satisfied,
-            "summary": reflection.summary,
-            "hard_issues": hard_issues,
-            "issues": [
-                issue.model_dump(mode = "json")
-                for issue in reflection.issues
-            ],
-            "revision_targets": {
-                "retrieve_claim_ids": retrieve_claim_ids,
-                "revise_claim_ids": revise_claim_ids,
-                "render_section_ids": render_section_ids,
-            },
-        }
-
-        artifact = await self.artifact_store.write_json(
-            run_id = state["run_id"],
-            step_key = f"reflect_review_{current_round}",
-            source = "task_review",
-            kind = "task_review_reflection_report_json",
-            count = len(hard_issues) + len(reflection.issues),
-            payload = reflection_report,
-        )
-
-        if satisfied:
-            return {
-                "reflection_report_artifact_ref": artifact.artifact_uri,
-                "revision_plan_artifact_ref": None,
-                "stage": "finalizing_handoff",
-                "status": "running",
-                "error": None,
+            draft = await self.artifact_store.read_json_uri(state["review_draft_artifact_ref"])
+            corpus = await self.artifact_store.read_json_uri(state["corpus_artifact_ref"])
+            claims = (await self.artifact_store.read_json_uri(state["claims_artifact_ref"]))[
+                "claims"
+            ]
+            verification = (
+                await self.artifact_store.read_json_uri(state["claim_verification_artifact_ref"])
+            )["claims"]
+            ledger = {
+                item["claim_id"]: item
+                for item in (
+                    await self.artifact_store.read_json_uri(state["evidence_ledger_artifact_ref"])
+                )["claims"]
             }
-
-        revision_plan = {
-            "task_id": state["task_id"],
-            "reflection_round": next_round,
-            "retrieve_claim_ids": retrieve_claim_ids,
-            "revise_claim_ids": revise_claim_ids,
-            "render_section_ids": render_section_ids,
-        }
-
-        revision_artifact = await self.artifact_store.write_json(
-            run_id = state["run_id"],
-            step_key = f"revision_plan_{next_round}",
-            source = "task_review",
-            kind = "task_review_revision_plan_json",
-            count = (
-                len(retrieve_claim_ids)
-                + len(revise_claim_ids)
-                + len(render_section_ids)
-            ),
-            payload = revision_plan,
-        )
-
-        if next_round >= state["max_reflection_rounds"]:
-            return failed(
-                "review did not satisfy reflection criteria",
-                reflection_round=next_round,
-                reflection_report_artifact_ref=artifact.artifact_uri,
-                revision_plan_artifact_ref=revision_artifact.artifact_uri,
+            framework = (await self.artifact_store.read_json_uri(state["framework_artifact_ref"]))[
+                "framework"
+            ]
+            reports = []
+            for section in draft["sections"]:
+                section_claims = [
+                    claim for claim in claims if claim["claim_id"] in section["used_claim_ids"]
+                ]
+                checks = [
+                    item for item in verification if item["claim_id"] in section["used_claim_ids"]
+                ]
+                # Bound raw-text windows and overlap them for boundary-spanning issues.
+                records = []
+                for check in checks:
+                    for evidence in ledger[check["claim_id"]]["chunk_snippets"]:
+                        for window in text_windows(evidence["text"]):
+                            records.append(
+                                {
+                                    "claim_id": check["claim_id"],
+                                    "verdict": check["status"],
+                                    **evidence,
+                                    **window,
+                                }
+                            )
+                for window in text_windows(section["text"]):
+                    for group in list(batches(records, budget=12000)) or [[]]:
+                        reports.append(
+                            await invoke(
+                                self.model,
+                                ReflectionResult,
+                                SECTION_REFLECTION_PROMPT,
+                                {
+                                    "section_id": section["section_id"],
+                                    "actual_text": window,
+                                    "claims": section_claims,
+                                    "original_evidence": group,
+                                    "previous_revisions": state.get("revision_items", []),
+                                },
+                            )
+                        )
+            hard_issues = self._check_hard_constraints(review_draft=draft, corpus_payload=corpus)
+            for group in batches(list(text_windows(draft["body_markdown"])), budget=24000):
+                reports.append(
+                    await invoke(
+                        self.model,
+                        ReflectionResult,
+                        REVIEW_REFLECTION_PROMPT,
+                        {
+                            "focus": state["review_focus"],
+                            "framework": framework,
+                            "body_sections": group,
+                            "verified_claims": [
+                                claim for claim in claims if not claim["withdrawn_reason"]
+                            ],
+                            "abstract": draft["abstract"],
+                            "conclusion": draft["conclusion"],
+                            "system_hard_issues": hard_issues,
+                            "previous_revisions": state.get("revision_items", []),
+                        },
+                    )
+                )
+            satisfied = not hard_issues and all(
+                report["satisfied"]
+                and not any(
+                    issue["severity"] in {"critical", "major"} for issue in report["issues"]
+                )
+                for report in reports
             )
-
-        if revise_claim_ids:
-            next_stage = "generating_claims"
-        elif retrieve_claim_ids:
-            next_stage = "retrieving_evidence"
-        elif render_section_ids:
-            next_stage = "rendering_sections"
-        else:
-            return failed(
-                "reflection produced no executable revision target",
-                reflection_round=next_round,
-                reflection_report_artifact_ref=artifact.artifact_uri,
-                revision_plan_artifact_ref=revision_artifact.artifact_uri,
+            items = [item for report in reports for item in report["revisions"]]
+            ref = await save(
+                self.artifact_store,
+                state,
+                "reflection_report",
+                {"satisfied": satisfied, "hard_issues": hard_issues, "reports": reports},
             )
-
-        return {
-            "reflection_round": next_round,
-            "reflection_report_artifact_ref": artifact.artifact_uri,
-            "revision_plan_artifact_ref": revision_artifact.artifact_uri,
-            "retrieve_claim_ids": retrieve_claim_ids,
-            "revise_claim_ids": revise_claim_ids,
-            "render_section_ids": render_section_ids,
-            "stage": next_stage,
-            "status": "running",
-            "error": None,
-        }
+            update = {"reflection_report_artifact_ref": ref}
+            if satisfied and not items:
+                return {**update, "stage": "finalizing_handoff", "status": "running"}
+            result = await schedule_revision(
+                self.artifact_store,
+                {**state, **update},
+                items,
+                claim_ids=[claim["claim_id"] for claim in claims],
+                section_ids=[section["section_id"] for section in framework["sections"]],
+            )
+            return {**update, **result}
+        except Exception as exc:
+            return failed(
+                f"review reflection failed: {exc}", error_code="REFLECTION_FAILED", retryable=True
+            )
 
     def _check_hard_constraints(
-        self,
-        *,
-        review_draft: dict[str, Any],
-        corpus_payload: dict[str, Any],
+        self, *, review_draft: dict[str, Any], corpus_payload: dict[str, Any],
     ) -> list[str]:
         text = "\n".join(
             [
@@ -306,10 +174,7 @@ class ReflectReviewNode:
         )
 
         anchors = citation_anchor_ids(text)
-        known_paper_ids = {
-            str(paper["paper_id"])
-            for paper in corpus_payload["papers"]
-        }
+        known_paper_ids = {str(paper["paper_id"]) for paper in corpus_payload["papers"]}
 
         issues = []
 
@@ -327,14 +192,13 @@ class ReflectReviewNode:
 
         for paper_id in sorted(
             unsupported_synthesis_anchor_ids(
-                body_markdown = review_draft.get("body_markdown", ""),
-                abstract = review_draft.get("abstract", ""),
-                conclusion = review_draft.get("conclusion", ""),
+                body_markdown=review_draft.get("body_markdown", ""),
+                abstract=review_draft.get("abstract", ""),
+                conclusion=review_draft.get("conclusion", ""),
             )
         ):
             issues.append(
-                "synthesis cites a paper outside the evidence-backed body: "
-                f"REF_{paper_id}"
+                "synthesis cites a paper outside the evidence-backed body: " f"REF_{paper_id}"
             )
 
         for paper_id in anchors:
@@ -344,47 +208,3 @@ class ReflectReviewNode:
                 issues.append(f"citation is outside task corpus: REF_{paper_id}")
 
         return list(dict.fromkeys(issues))
-
-    def _flatten_claims(
-        self,
-        claims_payload: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        return [
-            claim
-            for section in claims_payload["claims"]["sections"]
-            for claim in section["claims"]
-        ]
-
-    def _evidence_overview(
-        self,
-        evidence_payload: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        return [
-            {
-                "claim_id": item["claim_id"],
-                "section_id": item["section_id"],
-                "status": item["status"],
-                "chunk_count": len(item["chunk_snippets"]),
-                "paper_ids": list(
-                    dict.fromkeys(
-                        snippet["paper_id"]
-                        for snippet in item["chunk_snippets"]
-                    )
-                ),
-            }
-            for item in evidence_payload["claims"]
-        ]
-
-    def _valid_ids(
-        self,
-        values: list[str],
-        allowed: set[str],
-    ) -> list[str]:
-        return list(
-            dict.fromkeys(
-                value
-                for value in values
-                if value in allowed
-            )
-        )
-

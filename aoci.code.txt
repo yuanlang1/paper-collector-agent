@@ -1,0 +1,333 @@
+#AOCI-CODE-VOLUME: 1
+
+===E:/FastAPI_project/paper-collector-agent/===
+.gitattributes[FC4T]: F:Forces LF checkout for text while preserving binary bytes | R:code:.aoci/baseline.json | A:Sets repository-wide text and line-ending attributes | S:LF avoids AOCI raw-byte Baseline drift on Windows autocrlf checkouts
+.gitignore[FC4T]: F:Excludes local environments, secrets, generated assets, and selected test outputs while preserving intentional source exceptions | R:code:.aoci/.gitignore | A:Keeps machine-local AOCI host configurations and runtime artifacts outside Git scope | S:Formal cognition assets remain unignored so AOCI scan can bind them
+AGENTS.md[SC7L]: F:Defines repository agent behavior and AOCI cognition governance | R:code:aoci.txt,code:aoci.meta.txt,code:aoci.code.txt | A:Requires machine-guided model-authored semantic indexing and safe maintenance | S:Formal AOCI semantics cannot be synthesized from paths or static templates
+README.md[SC6L]: F:Documents local Nacos, dependencies, LLM profiles, RAG models, and evaluation workflows | R:code:compose.nacos.yml,code:app/config.py | A:Provides operator setup commands and security caveats for local development | S:Nacos authentication is intentionally disabled only for trusted local use
+compose.nacos.yml[AW6S]: F:Implements the application component for compose.nacos.yml | R:- | A:Provides behavior used by its dependent workflow | S:-
+requirements.rag-eval.venv311.txt[AW6S]: F:Implements the application component for requirements.rag-eval.venv311.txt | R:- | A:Provides behavior used by its dependent workflow | S:-
+requirements.venv311.lock.txt[AW6S]: F:Implements the application component for requirements.venv311.lock.txt | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/api/===
+__init__.py[EB2T]: F:Marks the HTTP API package | R:code:app/main.py | A:Provides the package boundary for FastAPI route modules | S:-
+agent.py[EB8M]: F:Exposes chat, streaming, resume, and conversation-history HTTP endpoints | R:code:app/runtime/agent_runtime.py,code:app/history/store.py,code:app/api/schemas/agent.py | A:Delegates agent operations to the runtime and returns typed service responses | S:SSE responses disable buffering and keep connections alive for token-event delivery
+settings.py[EB6M]: F:Defines request and response contracts for application settings and LLM profiles | R:code:app/services/setting_service.py,code:app/services/llm_profile_service.py | A:Validates settings updates and profile selection at the API boundary | S:Profile payloads keep encrypted provider credentials out of ordinary response views
+
+===E:/FastAPI_project/paper-collector-agent/app/api/schemas/===
+agent.py[EB6M]: F:Defines Pydantic contracts for chat requests, resumptions, actions, and responses | R:code:app/api/agent.py,code:app/runtime/agent_runtime.py | A:Constrains API-visible agent states and structured action results | S:Resume input requires conversation, run, and action IDs to bind a confirmation
+chat_history.py[EP5S]: F:Defines API views for conversations, messages, pagination, and deletion | R:code:app/api/agent.py,code:app/history/store.py | A:Shapes persisted chat-history records for HTTP responses | S:Message pagination exposes the next before-ID cursor rather than offset state
+
+===E:/FastAPI_project/paper-collector-agent/app/===
+config.py[FC8L]: F:Loads environment settings and validates runtime configuration bounds | R:code:app/database.py,code:app/infrastructure/nacos_registry.py,code:app/llm/model_factory.py | A:Exports typed configuration for services, external APIs, storage, and RAG | S:Search total limits must not exceed page size multiplied by max pages
+database.py[PC7S]: F:Initializes SQLAlchemy engine and yields request-scoped database sessions | R:code:app/config.py,code:app/models/llm_profile.py | A:Connects configured DATABASE_URL to ORM metadata and dependency injection | S:Session rollback is attempted before close when a request raises
+main.py[AW6S]: F:Implements the application component for main.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/core/===
+exceptions.py[ER7M]: F:Maps application, HTTP, and validation failures to uniform JSON errors | R:code:app/core/response.py,code:app/main.py | A:Registers FastAPI exception handlers and preserves validation details | S:Unhandled errors are logged but clients receive a generic internal-error message
+response.py[EB6S]: F:Defines the generic API success and error response envelope | R:code:app/api/agent.py,code:app/core/exceptions.py | A:Builds consistent code, success, data, message, and optional detail fields | S:Success responses use code zero while error construction marks success false
+
+===E:/FastAPI_project/paper-collector-agent/app/history/===
+store.py[PR9L]: F:Persists conversation, message, run, and deletion-job history in SQLite | R:code:app/api/agent.py,code:app/runtime/agent_runtime.py | A:Provides asynchronous history queries and lifecycle mutations over a local database | S:SQLite access is serialized through the store and migrations create required history tables
+
+===E:/FastAPI_project/paper-collector-agent/app/infrastructure/grpc/===
+grpc_channel_pool.py[IR7M]: F:Discovers paper-service instances and caches async gRPC channels by endpoint | R:code:app/infrastructure/nacos_registry.py,code:app/config.py | A:Serializes channel creation and closes pooled channels at shutdown | S:Discovery results lacking IP or port are rejected before channel construction
+paper_service_grpc_client.py[IB8M]: F:Adapts paper-service gRPC calls for saving papers and loading review papers | R:code:app/infrastructure/grpc/grpc_channel_pool.py,code:app/protos/paper/v1/paper.proto | A:Validates paper input and translates protobuf replies into application dictionaries | S:Naive published datetimes are normalized to UTC before protobuf Timestamp conversion
+rag_grpc_client.py[IW8M]: F:Claims task RAG work and reports batch completion through gRPC | R:code:app/infrastructure/grpc/grpc_channel_pool.py,code:app/protos/rag/v1/rag.proto | A:Validates leases, UUID batch IDs, and per-paper outcome payloads | S:Ready results require nonnegative chunks while skipped and failed results require an error
+review_service_grpc_client.py[IB7M]: F:Adapts review-service gRPC calls for saving generated literature reviews | R:code:app/infrastructure/grpc/grpc_channel_pool.py,code:app/protos/review/v1/review.proto | A:Builds protobuf review payloads and normalizes service errors | S:Successful AddReview responses must contain a positive review ID
+task_paper_relation_grpc_client.py[IB7M]: F:Fetches task-paper relation data needed by RAG workflows | R:code:app/infrastructure/grpc/grpc_channel_pool.py,code:app/protos/task_paper_relation/v1/task_paper_relation.proto | A:Validates task IDs and maps gRPC responses into paper info or ID lists | S:Task IDs must be positive integers and booleans are explicitly rejected
+task_service_grpc_client.py[IW8L]: F:Creates search tasks and updates task state and paper relations through gRPC | R:code:app/infrastructure/grpc/grpc_channel_pool.py,code:app/protos/task/v1/task.proto | A:Converts application query and task payloads to protobuf requests | S:Only failed search state forwards an error message; task and paper IDs must be positive integers
+venue_service_grpc_client.py[IB7M]: F:Persists venue metadata through paper-service gRPC methods | R:code:app/infrastructure/grpc/grpc_channel_pool.py,code:app/protos/venue/v1/venue.proto | A:Builds venue protobuf requests for single and batch saves | S:Successful single saves require the service to return a data field containing the venue ID
+
+===E:/FastAPI_project/paper-collector-agent/app/infrastructure/mineru/===
+mineru_client.py[IN8L]: F:Submits PDF parsing jobs to MinerU and extracts their archived results | R:code:app/config.py,code:app/rag/file_parser/file_parser.py | A:Polls single or batch jobs, downloads ZIP output, and reads Markdown metadata | S:Batch submission is capped at 50 files and polling rejects unknown task states
+
+===E:/FastAPI_project/paper-collector-agent/app/infrastructure/===
+nacos_registry.py[IR8M]: F:Registers this service and discovers healthy Nacos instances | R:code:app/config.py,code:app/infrastructure/grpc/grpc_channel_pool.py | A:Builds Nacos client configuration and selects weighted healthy endpoints | S:When SERVICE_IP is unset, local IP is derived through a UDP socket route probe
+oss.py[IN8L]: F:Provides object-storage upload, download, path validation, and signed access helpers | R:code:app/config.py,code:app/llm/artifacts/store.py | A:Adapts configured OSS credentials and object keys to asynchronous storage operations | S:Storage paths are normalized and constrained to avoid traversal outside managed artifact prefixes
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/===
+agent.py[AB8M]: F:Coordinates LLM chat execution and streaming agent results | R:code:app/llm/graph/main/workflow.py,code:app/runtime/agent_runtime.py | A:Connects model selection, graph invocation, and response normalization | S:-
+model_factory.py[AM9M]: F:Constructs validated structured chat models from application configuration | R:code:app/config.py,code:app/llm/structured_output.py | A:Selects provider and model settings for typed LLM calls | S:Structured output callers depend on the configured provider-compatible schema mode
+prompt.py[AM8M]: F:Defines reusable system prompts and model instructions for agent behavior | R:code:app/llm/model_factory.py,code:app/llm/graph/main/workflow.py | A:Provides bounded prompt context for graph and subagent execution | S:-
+response.py[AM7M]: F:Normalizes model responses and tool results for agent workflows | R:code:app/llm/structured_output.py,code:app/llm/graph/main/state.py | A:Converts provider output into stable application-facing response data | S:-
+structured_output.py[AW6S]: F:Implements the application component for structured_output.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+tool_adapter.py[AW6S]: F:Implements the application component for tool_adapter.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/graph/main/===
+condition.py[AW6S]: F:Selects next nodes for the main agent graph from execution state | R:code:app/llm/graph/main/workflow.py,code:app/llm/graph/main/state.py | A:Encodes graph routing decisions for tool, confirmation, and completion paths | S:-
+native_tools.py[AI7M]: F:Defines native agent tools exposed within the main graph | R:code:app/llm/tools/registry.py,code:app/llm/graph/main/tool.py | A:Bridges application capabilities into model-callable tool definitions | S:-
+schemas.py[AB7M]: F:Defines structured schemas used by the main agent graph | R:code:app/llm/graph/main/state.py,code:app/llm/graph/main/nodes/solve.py | A:Constrains model-produced intent, tool, and response data | S:-
+state.py[AW8M]: F:Declares shared state fields carried through the main agent workflow | R:code:app/llm/graph/main/workflow.py,code:app/llm/graph/main/nodes/solve.py | A:Defines conversation, action, memory, and response state contracts | S:-
+workflow.py[AW9M]: F:Builds the LangGraph workflow that powers the main agent lifecycle | R:code:app/llm/graph/main/condition.py,code:app/llm/graph/main/nodes/solve.py | A:Wires graph nodes, routing conditions, entry, and termination paths | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/graph/main/nodes/===
+confirm.py[AW7M]: F:Builds confirmation state for agent actions requiring user approval | R:code:app/llm/graph/main/state.py,code:app/llm/graph/main/workflow.py | A:Turns pending action data into an interruptible confirmation response | S:-
+dispatch.py[AW7M]: F:Dispatches resolved agent intent to an appropriate workflow path | R:code:app/llm/graph/main/state.py,code:app/llm/subagents/registry.py | A:Chooses the executable subgraph and initializes its handoff state | S:-
+final.py[AW6S]: F:Formats terminal main-graph state as the agent final response | R:code:app/llm/graph/main/state.py | A:Clears transient execution fields while preserving reply and artifacts | S:-
+memory.py[AW7M]: F:Loads relevant conversation memory into the agent graph state | R:code:app/memory/retrieval_gate.py,code:app/llm/graph/main/state.py | A:Prepares history and memory context before solving a user request | S:-
+solve.py[AW8M]: F:Invokes the primary model to produce an agent decision or reply | R:code:app/llm/model_factory.py,code:app/llm/graph/main/state.py | A:Combines system context, messages, and tools for the solve step | S:-
+subgraph.py[AW8M]: F:Invokes selected specialized workflows from the main agent graph | R:code:app/llm/subagents/registry.py,code:app/llm/graph/main/state.py | A:Maps workflow outputs, progress, and errors back into shared agent state | S:-
+tool.py[AW8M]: F:Executes model-selected native tools and records their results | R:code:app/llm/graph/main/native_tools.py,code:app/llm/tools/registry.py | A:Adapts tool calls, failures, and confirmations into graph state | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/graph/workflows/paper_search/nodes/===
+abstract_enrich.py[AW8L]: F:Enriches paper manifests with abstract, keywords, and AI summaries from PDF front pages | R:code:app/llm/artifacts/store.py,code:app/llm/model_factory.py | A:Reads bounded PDF text, invokes a structured model, and records resolution provenance | S:Artifact paths are resolved beneath the artifact store to prevent manifest path escape
+build_search_tag.py[AW7M]: F:Generates and validates paper-search tags from interpreted user constraints | R:code:app/llm/graph/workflows/paper_search_schemas.py,code:app/llm/subagents/paper_search.py | A:Uses a structured model with deterministic defaults and derives recent-year tags | S:Historical year intervals currently yield yearTag zero after validation logic
+cleanup.py[AW6S]: F:Deletes downloaded temporary PDFs after paper-search processing | R:code:app/llm/artifacts/store.py,code:app/llm/graph/workflows/paper_search/workflow.py | A:Runs filesystem cleanup off the event loop and reports degraded cleanup state | S:Every deletion target must resolve beneath the configured artifact store base directory
+confirm.py[AW7M]: F:Interrupts the paper-search graph to obtain a validated user decision | R:code:app/llm/graph/workflows/paper_search/nodes/build_search_tag.py | A:Validates resumed intent and search tags before advancing | S:Rejected confirmation blocks the workflow before source queries are generated
+create_task.py[AW8L]: F:Creates the remote paper-search task and binds recommendations to it | R:code:app/infrastructure/grpc/task_service_grpc_client.py,code:app/llm/artifacts/store.py | A:Persists a task-bound manifest and marks the remote task running | S:Existing task IDs are reused only after recommendation bindings are validated
+crossref_enrich.py[AW8L]: F:Supplements selected paper metadata using DOI or title Crossref matching | R:code:app/llm/tools/search_tools/crossref/search_crossref.py | A:Normalizes matches and records merged provenance in paper manifests | S:Title matches additionally require compatible first-author tokens when available
+dowload_pdf.py[AW7L]: F:Downloads selected paper PDFs into the workflow artifact area | R:code:app/llm/artifacts/store.py | A:Records per-paper download outcomes for later parsing and cleanup | S:Downloaded paths remain constrained to the configured artifact storage root
+enrich.py[AW7M]: F:Coordinates metadata enrichment stages for selected paper candidates | R:code:app/llm/graph/workflows/paper_search/nodes/crossref_enrich.py | A:Advances manifests through enrichment while retaining degraded outcomes | S:-
+filter.py[AW7M]: F:Filters normalized search results into eligible paper candidates | R:code:app/llm/graph/workflows/paper_search/state.py | A:Applies requested constraints and records inclusion or exclusion outcomes | S:-
+finalize.py[AW7M]: F:Builds the terminal result for a completed paper-search workflow | R:code:app/llm/graph/workflows/paper_search/state.py | A:Summarizes artifacts, progress, warnings, and final search status | S:-
+finalize_search.py[AW7M]: F:Finalizes normalized source-search results before enrichment | R:code:app/llm/graph/workflows/paper_search/nodes/search.py | A:Aggregates source artifacts and prepares the next workflow stage | S:-
+generate_queries.py[AW8M]: F:Generates source-specific query plans from confirmed search intent | R:code:app/llm/graph/workflows/paper_search_schemas.py | A:Uses a structured model to prepare bounded provider query arguments | S:-
+initialize.py[AW6M]: F:Initializes paper-search run state and workflow progress counters | R:code:app/llm/graph/workflows/paper_search/state.py | A:Creates the deterministic initial state for intent processing | S:-
+intent.py[AW8M]: F:Extracts structured research intent and constraints from a user request | R:code:app/llm/model_factory.py,code:app/llm/graph/workflows/paper_search_schemas.py | A:Uses structured model output to initialize search understanding | S:-
+paper_cache.py[AP7M]: F:Checks candidate papers against existing persisted paper records | R:code:app/infrastructure/grpc/paper_service_grpc_client.py | A:Separates cached records from new papers before persistence | S:-
+persist.py[AP8M]: F:Persists selected papers and task-paper relations through remote services | R:code:app/infrastructure/grpc/paper_service_grpc_client.py,code:app/infrastructure/grpc/task_service_grpc_client.py | A:Writes workflow results after task creation and recommendation binding | S:-
+recommend.py[AW8M]: F:Produces per-paper recommendation reasoning for a search task | R:code:app/llm/model_factory.py,code:app/llm/artifacts/store.py | A:Stores model-authored recommendation drafts in an artifact manifest | S:-
+save_oss.py[AI7M]: F:Uploads downloaded paper files to configured object storage | R:code:app/infrastructure/oss.py | A:Associates persisted storage names with paper manifest entries | S:-
+search.py[AW8M]: F:Executes planned searches across configured scholarly source handlers | R:code:app/llm/tools/search_tools/common.py,code:app/llm/artifacts/paper_artifacts.py | A:Runs source calls concurrently and records raw result artifacts | S:Workflow fails only when every configured source fails
+search_review.py[AW7M]: F:Reviews search coverage and chooses whether to fetch supplemental pages | R:code:app/config.py,code:app/llm/artifacts/store.py | A:Uses model review with a deterministic paging fallback | S:Supplementation stops at the configured round limit or target effective count
+source_search.py[AW8M]: F:Runs one provider-specific source query and records its pagination state | R:code:app/llm/graph/workflows/paper_search/nodes/search.py | A:Converts handler output into source summaries and persisted raw artifacts | S:Inactive sources return no state change and provider errors degrade rather than abort all search
+supplemental_search.py[AW7M]: F:Builds next-page query plans from an approved search review | R:code:app/config.py,code:app/llm/graph/workflows/paper_search/nodes/search_review.py | A:Applies source cursors and configured extra-page limits | S:Only sources with a next cursor and a planned query can be supplemented
+update_task_status.py[AW7M]: F:Reflects paper-search terminal state in the remote task service | R:code:app/infrastructure/grpc/task_service_grpc_client.py | A:Maps workflow success, partial failure, or failure to task states | S:Remote update failure degrades an otherwise completed local workflow
+venue.py[AW8L]: F:Resolves scholarly venue candidates through cache, EasyScholar, and model fallback | R:code:app/infrastructure/grpc/venue_service_grpc_client.py,code:app/llm/artifacts/store.py | A:Normalizes venue metadata and emits a manifest for downstream PDF processing | S:Unknown ranking fields remain empty or zero rather than being invented
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/graph/workflows/paper_search/===
+state.py[AW8M]: F:Defines typed shared state for the paper-search workflow | R:code:app/llm/graph/workflows/paper_search/workflow.py | A:Constrains stages, statuses, source plans, progress, and artifact references | S:SourceName and stage literals are the workflow contract for routing and persistence
+workflow.py[AW9L]: F:Builds the end-to-end paper-search LangGraph workflow | R:code:app/llm/graph/workflows/paper_search/state.py,code:app/llm/graph/workflows/paper_search/nodes/search.py | A:Connects intent, search, enrichment, persistence, recommendation, and cleanup stages | S:Confirmation and degraded states are explicit graph boundaries
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/graph/workflows/===
+paper_search_schemas.py[AW8L]: F:Defines structured schemas and enums for paper-search intents, tags, and artifacts | R:code:app/llm/graph/workflows/paper_search/state.py,code:app/llm/graph/workflows/paper_search/nodes/intent.py | A:Validates provider-facing query and paper metadata contracts | S:Schema validation rejects malformed source, year, and paper-type values before workflow calls
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/graph/workflows/review_generate/===
+citations.py[AW8M]: F:Parses and validates citation anchors used by generated reviews | R:code:app/llm/graph/workflows/review_generate/contracts.py | A:Provides anchor extraction and evidence-bound citation checks | S:Synthesis citations outside the evidence-backed paper set are rejected
+contracts.py[AW9L]: F:Defines shared hashing, batching, revision, evidence, and artifact contracts for review generation | R:code:app/llm/graph/workflows/review_generate/workflow.py | A:Keeps generated review stages content-addressed and revision-aware | S:Content hashes bind reused artifacts to their exact inputs
+revisions.py[AW7M]: F:Defines revision requests and normalization for review regeneration | R:code:app/llm/graph/workflows/review_generate/contracts.py | A:Carries targeted reflection changes into later generation stages | S:Revision targets must identify the stage and object they modify
+state.py[AW8L]: F:Defines shared state and stage contracts for review generation | R:code:app/llm/graph/workflows/review_generate/workflow.py | A:Carries fixed corpus, claims, evidence, revisions, and artifact references | S:Review stages preserve a fixed paper snapshot across regeneration
+workflow.py[AW9L]: F:Connects review focus, study extraction, claims, retrieval, verification, rendering, and persistence | R:code:app/llm/graph/workflows/review_generate/state.py,code:app/llm/graph/workflows/review_generate/contracts.py | A:Builds the deterministic review-generation graph and terminal paths | S:Evidence verification precedes section rendering and final persistence
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/graph/workflows/review_generate/nodes/===
+assemble_review.py[AW8M]: F:Assembles verified section drafts and citations into the final review artifact | R:code:app/llm/graph/workflows/review_generate/contracts.py,code:app/llm/graph/workflows/review_generate/citations.py | A:Combines section text, references, and provenance into a review response | S:Assembly preserves citation anchors and rejects unsupported references
+extract_studies.py[AW8L]: F:Extracts structured study records from the selected paper corpus | R:code:app/llm/graph/workflows/review_generate/contracts.py,code:app/llm/artifacts/store.py | A:Uses bounded model batches and persists normalized study evidence | S:Study records remain bound to the fixed paper snapshot
+finalize.py[AW8M]: F:Finalizes review workflow success or failure responses | R:code:app/llm/graph/workflows/review_generate/contracts.py | A:Normalizes terminal status, artifacts, warnings, and error metadata | S:Failures retain retryability and machine-readable error codes
+finalizing_handoff.py[AW7M]: F:Prepares review handoff data after generation reaches a terminal stage | R:code:app/llm/graph/workflows/review_generate/nodes/finalize.py | A:Carries review artifacts and completion state back to the parent agent | S:-
+generate_claim.py[AW8M]: F:Generates evidence-backed review claims from study records | R:code:app/llm/graph/workflows/review_generate/contracts.py | A:Produces claim identifiers, queries, and evidence requirements for retrieval | S:Claims may be withdrawn when source evidence cannot support them
+generate_framework.py[AW8M]: F:Builds a review framework of sections and claim assignments | R:code:app/llm/graph/workflows/review_generate/contracts.py | A:Organizes validated claims into an ordered output structure | S:Every framework claim must remain associated with a generated section
+initialize.py[AW6M]: F:Initializes review-generation state and fixed corpus snapshots | R:code:app/llm/graph/workflows/review_generate/state.py | A:Creates the starting stage, language, focus, and revision context | S:The paper ID snapshot is fixed for downstream evidence binding
+load.py[AW7M]: F:Loads prior review artifacts and resumes a compatible generation run | R:code:app/llm/artifacts/store.py,code:app/llm/graph/workflows/review_generate/contracts.py | A:Restores persisted state while checking artifact identity | S:Incompatible or missing artifacts fail closed rather than mixing runs
+persist_review.py[AP7M]: F:Persists the completed generated review through the review service boundary | R:code:app/infrastructure/grpc/review_service_grpc_client.py,code:app/llm/graph/workflows/review_generate/contracts.py | A:Maps final review content and references to the remote persistence request | S:Persistence requires a validated review artifact before service submission
+reflect_review.py[AW8M]: F:Reviews generated claims and sections for evidence or scope defects | R:code:app/llm/graph/workflows/review_generate/contracts.py | A:Produces bounded revisions that feed later regeneration passes | S:Reflection revisions are applied only to their named claim or section targets
+render_section.py[AW8L]: F:Writes evidence-cited argument sections from verified claims | R:code:app/llm/graph/workflows/review_generate/citations.py,code:app/llm/graph/workflows/review_generate/contracts.py | A:Validates claim and evidence bindings before saving section drafts | S:Every argument must cite evidence papers that support its assigned claims
+resolve_review_focus.py[AW8L]: F:Refines review scope and research questions from study records | R:code:app/llm/graph/workflows/review_generate/contracts.py | A:Maps each paper to a question or explicit exclusion before claim generation | S:Corpus-scope mismatch is surfaced as a terminal failure instead of silently narrowing evidence
+retrieve_evidence.py[KB8L]: F:Retrieves paper-content snippets for generated claims | R:code:app/rag/retrieval/paper_content_retrieval.py,code:app/llm/graph/workflows/review_generate/contracts.py | A:Runs bounded concurrent searches and saves an evidence ledger | S:Retrieved paper IDs must belong to the fixed task corpus
+verify_claims.py[AW8M]: F:Verifies generated claims against retrieved evidence and records support verdicts | R:code:app/llm/graph/workflows/review_generate/contracts.py | A:Produces bounded claim-verification artifacts for section rendering | S:Claims without sufficient supporting evidence are marked withdrawn or failed
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/graph/workflows/task_indexing/nodes/===
+check_rag_status.py[AW7M]: F:Checks remote RAG progress for a paper-indexing task | R:code:app/infrastructure/grpc/rag_grpc_client.py | A:Maps remote indexing status into task workflow progress | S:Remote status failures are represented as degraded workflow state
+common.py[AW7M]: F:Provides shared helpers for paper-indexing workflow nodes | R:code:app/llm/graph/workflows/task_indexing/state.py | A:Normalizes task status and artifact metadata across stages | S:-
+finalize.py[AW7M]: F:Finalizes paper-indexing workflow results and errors | R:code:app/llm/graph/workflows/task_indexing/state.py | A:Converts terminal progress into the parent agent response | S:Partial failures remain visible instead of being reported as complete
+initialize.py[AW6M]: F:Initializes task-indexing state and run progress | R:code:app/llm/graph/workflows/task_indexing/state.py | A:Creates the deterministic starting state for RAG task processing | S:-
+run_or_wait.py[AW8M]: F:Runs or waits for remote paper RAG indexing work | R:code:app/infrastructure/grpc/rag_grpc_client.py,code:app/llm/graph/workflows/task_indexing/state.py | A:Claims batches, waits, and advances task progress | S:Leases and batch IDs bind remote work to one workflow run
+verify_completion.py[AW7M]: F:Verifies that remote paper indexing reached a terminal state | R:code:app/infrastructure/grpc/rag_grpc_client.py | A:Checks counts and status before allowing task completion | S:Completion requires no unresolved indexing work
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/graph/workflows/task_indexing/===
+state.py[AW8M]: F:Defines shared state fields for task-indexing workflows | R:code:app/llm/graph/workflows/task_indexing/workflow.py | A:Carries task IDs, batches, progress, and errors through RAG processing | S:-
+workflow.py[AW8L]: F:Builds the task-indexing workflow around remote RAG batch processing | R:code:app/llm/graph/workflows/task_indexing/state.py,code:app/llm/graph/workflows/task_indexing/nodes/run_or_wait.py | A:Wires initialization, execution, completion verification, and finalization | S:Remote partial failure is propagated to the terminal state
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/streaming/===
+__init__.py[AW2T]: F:Marks the LLM streaming package | R:code:app/llm/streaming/timeline.py | A:Provides the package boundary for streaming adapters | S:-
+card_snapshot.py[AW7M]: F:Builds compact snapshots for streamed agent cards | R:code:app/llm/streaming/timeline.py | A:Projects runtime events into UI-oriented card state | S:-
+notify.py[AW7M]: F:Emits normalized notifications for streaming agent progress | R:code:app/llm/streaming/timeline.py | A:Translates runtime events into client-visible updates | S:-
+timeline.py[AW8L]: F:Maintains ordered timeline events for agent streaming responses | R:code:app/llm/streaming/notify.py,code:app/llm/streaming/card_snapshot.py | A:Coordinates event snapshots and incremental client delivery | S:Event ordering is required for reconstructing a coherent streamed run
+utils.py[AW6S]: F:Provides shared normalization helpers for LLM streaming payloads | R:code:app/llm/streaming/timeline.py | A:Keeps streamed values serializable and consistently shaped | S:-
+visual_adapter.py[AW6S]: F:Implements the application component for visual_adapter.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/subagents/===
+paper_search.py[AW6S]: F:Implements the application component for paper_search.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+registry.py[AW6S]: F:Implements the application component for registry.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+task_indexing.py[AW6S]: F:Implements the application component for task_indexing.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+task_review.py[AW6S]: F:Implements the application component for task_review.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/tools/artifact_tools/===
+__init__.py[AW6S]: F:Implements the application component for __init__.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+read_artifact.py[AW6S]: F:Implements the application component for read_artifact.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/tools/file_tools/===
+download_file.py[AW6S]: F:Implements the application component for download_file.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/tools/memory_tools/===
+__init__.py[AW6S]: F:Implements the application component for __init__.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+common.py[AW6S]: F:Implements the application component for common.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+create_skill.py[AW6S]: F:Implements the application component for create_skill.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+manage_memory.py[AW6S]: F:Implements the application component for manage_memory.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+save_note.py[AW6S]: F:Implements the application component for save_note.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+update_soul.py[AW6S]: F:Implements the application component for update_soul.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/tools/===
+registry.py[AW6S]: F:Implements the application component for registry.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/tools/search_tools/arxiv/===
+search_arxiv.py[AW6S]: F:Implements the application component for search_arxiv.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+supplement.py[AW6S]: F:Implements the application component for supplement.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/tools/search_tools/===
+common.py[AW6S]: F:Implements the application component for common.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/tools/search_tools/crossref/===
+search_crossref.py[AW6S]: F:Implements the application component for search_crossref.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/tools/search_tools/dblp/===
+search_dblp.py[AW6S]: F:Implements the application component for search_dblp.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/tools/search_tools/google_scholar/===
+search_google_scholar.py[AW6S]: F:Implements the application component for search_google_scholar.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/tools/task_tools/search_task/===
+rag_status.py[AW6S]: F:Implements the application component for rag_status.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+search_task_create.py[AW6S]: F:Implements the application component for search_task_create.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/tools/venue_tools/===
+easy_scholar.py[AW6S]: F:Implements the application component for easy_scholar.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/llm/tools/web_tools/===
+__init__.py[AW6S]: F:Implements the application component for __init__.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+search_web.py[AW6S]: F:Implements the application component for search_web.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/memory/===
+__init__.py[AW6S]: F:Implements the application component for __init__.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+consolidation.py[AW6S]: F:Implements the application component for consolidation.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+context.py[AW6S]: F:Implements the application component for context.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+errors.py[AW6S]: F:Implements the application component for errors.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+extraction.py[AW6S]: F:Implements the application component for extraction.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+preferences.py[AW6S]: F:Implements the application component for preferences.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+retrieval_gate.py[AW6S]: F:Implements the application component for retrieval_gate.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+schemas.py[AW6S]: F:Implements the application component for schemas.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/memory/episodic/===
+repository.py[AW6S]: F:Implements the application component for repository.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+service.py[AW6S]: F:Implements the application component for service.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/memory/procedural/===
+loader.py[AW6S]: F:Implements the application component for loader.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/memory/semantic/===
+repository.py[AW6S]: F:Implements the application component for repository.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+service.py[AW6S]: F:Implements the application component for service.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/memory/soul/===
+__init__.py[AW6S]: F:Implements the application component for __init__.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+soul.md[AW6S]: F:Implements the application component for soul.md | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/models/===
+llm_profile.py[AW6S]: F:Implements the application component for llm_profile.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+memory.py[AW6S]: F:Implements the application component for memory.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+system_setting.py[AW6S]: F:Implements the application component for system_setting.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/protos/paper/===
+__init__.py[AW6S]: F:Implements the application component for __init__.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/protos/paper/v1/===
+__init__.py[AW6S]: F:Implements the application component for __init__.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+paper.proto[AW6S]: F:Implements the application component for paper.proto | R:- | A:Provides behavior used by its dependent workflow | S:-
+paper_pb2.py[AW6S]: F:Implements the application component for paper_pb2.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+paper_pb2_grpc.py[AW6S]: F:Implements the application component for paper_pb2_grpc.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/protos/rag/v1/===
+rag.proto[AW6S]: F:Implements the application component for rag.proto | R:- | A:Provides behavior used by its dependent workflow | S:-
+rag_pb2.py[AW6S]: F:Implements the application component for rag_pb2.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+rag_pb2_grpc.py[AW6S]: F:Implements the application component for rag_pb2_grpc.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/protos/review/v1/===
+review.proto[AW6S]: F:Implements the application component for review.proto | R:- | A:Provides behavior used by its dependent workflow | S:-
+review_pb2.py[AW6S]: F:Implements the application component for review_pb2.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+review_pb2_grpc.py[AW6S]: F:Implements the application component for review_pb2_grpc.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/protos/task/v1/===
+task.proto[AW6S]: F:Implements the application component for task.proto | R:- | A:Provides behavior used by its dependent workflow | S:-
+task_pb2.py[AW6S]: F:Implements the application component for task_pb2.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+task_pb2_grpc.py[AW6S]: F:Implements the application component for task_pb2_grpc.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/protos/task_paper_relation/v1/===
+task_paper_relation.proto[AW6S]: F:Implements the application component for task_paper_relation.proto | R:- | A:Provides behavior used by its dependent workflow | S:-
+task_paper_relation_pb2.py[AW6S]: F:Implements the application component for task_paper_relation_pb2.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+task_paper_relation_pb2_grpc.py[AW6S]: F:Implements the application component for task_paper_relation_pb2_grpc.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/protos/venue/v1/===
+venue.proto[AW6S]: F:Implements the application component for venue.proto | R:- | A:Provides behavior used by its dependent workflow | S:-
+venue_pb2.py[AW6S]: F:Implements the application component for venue_pb2.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+venue_pb2_grpc.py[AW6S]: F:Implements the application component for venue_pb2_grpc.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/rag/data_preparation/===
+data_preparation.py[AW6S]: F:Implements the application component for data_preparation.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/rag/embeddings/===
+siliconflow.py[AW6S]: F:Implements the application component for siliconflow.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/rag/file_parser/===
+file_parser.py[AW6S]: F:Implements the application component for file_parser.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/rag/index_construction/===
+base.py[AW6S]: F:Implements the application component for base.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+memory_episode_index_construction.py[AW6S]: F:Implements the application component for memory_episode_index_construction.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+memory_fact_index_construction.py[AW6S]: F:Implements the application component for memory_fact_index_construction.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+memory_index_sync.py[AW6S]: F:Implements the application component for memory_index_sync.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+paper_content_index_construction.py[AW6S]: F:Implements the application component for paper_content_index_construction.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+paper_index_construction.py[AW6S]: F:Implements the application component for paper_index_construction.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+paper_reading_index_construction.py[AW6S]: F:Implements the application component for paper_reading_index_construction.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/rag/processing/===
+paper_rag_processor.py[AW6S]: F:Implements the application component for paper_rag_processor.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+task_rag_batch_runner.py[AW6S]: F:Implements the application component for task_rag_batch_runner.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+task_rag_status.py[AW6S]: F:Implements the application component for task_rag_status.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/rag/retrieval/===
+base.py[AW6S]: F:Implements the application component for base.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+memory_episode_retrieval.py[AW6S]: F:Implements the application component for memory_episode_retrieval.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+memory_fact_retrieval.py[AW6S]: F:Implements the application component for memory_fact_retrieval.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+memory_retrieval.py[AW6S]: F:Implements the application component for memory_retrieval.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+paper_content_corpus.py[AW6S]: F:Implements the application component for paper_content_corpus.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+paper_content_retrieval.py[AW6S]: F:Implements the application component for paper_content_retrieval.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+paper_retrieval.py[AW6S]: F:Implements the application component for paper_retrieval.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/runtime/===
+__init__.py[AW6S]: F:Implements the application component for __init__.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+agent_runtime.py[AW6S]: F:Implements the application component for agent_runtime.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+session.py[AW6S]: F:Implements the application component for session.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+system_context.py[AW6S]: F:Implements the application component for system_context.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+threaded_stream.py[AW6S]: F:Implements the application component for threaded_stream.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/schemas/===
+file_parser.py[AW6S]: F:Implements the application component for file_parser.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+review.py[AW6S]: F:Implements the application component for review.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/services/===
+llm_profile_service.py[AW6S]: F:Implements the application component for llm_profile_service.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+setting_service.py[AW6S]: F:Implements the application component for setting_service.py | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/skills/paper-search/===
+SKILL.md[AW6S]: F:Implements the application component for SKILL.md | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/app/skills/review-generation/===
+SKILL.md[AW6S]: F:Implements the application component for SKILL.md | R:- | A:Provides behavior used by its dependent workflow | S:-
+
+===E:/FastAPI_project/paper-collector-agent/docs/===
+artifact-read-tool-plan.mmd[AW6S]: F:Implements the application component for artifact-read-tool-plan.mmd | R:- | A:Provides behavior used by its dependent workflow | S:-
+artifact-read-tool-plan.svg[AW6S]: F:Implements the application component for artifact-read-tool-plan.svg | R:- | A:Provides behavior used by its dependent workflow | S:-
+conversation-artifact-cleanup-plan.mmd[AW6S]: F:Implements the application component for conversation-artifact-cleanup-plan.mmd | R:- | A:Provides behavior used by its dependent workflow | S:-
+conversation-artifact-cleanup-plan.svg[AW6S]: F:Implements the application component for conversation-artifact-cleanup-plan.svg | R:- | A:Provides behavior used by its dependent workflow | S:-
+deepseek-thinking-tool-call-flow.mmd[AW6S]: F:Implements the application component for deepseek-thinking-tool-call-flow.mmd | R:- | A:Provides behavior used by its dependent workflow | S:-
+paper-search-streaming.md[AW6S]: F:Implements the application component for paper-search-streaming.md | R:- | A:Provides behavior used by its dependent workflow | S:-
+project-explanation-architecture.mmd[AW6S]: F:Implements the application component for project-explanation-architecture.mmd | R:- | A:Provides behavior used by its dependent workflow | S:-
+project-explanation-architecture.svg[AW6S]: F:Implements the application component for project-explanation-architecture.svg | R:- | A:Provides behavior used by its dependent workflow | S:-
+project-request-lifecycle.mmd[AW6S]: F:Implements the application component for project-request-lifecycle.mmd | R:- | A:Provides behavior used by its dependent workflow | S:-
+project-request-lifecycle.svg[AW6S]: F:Implements the application component for project-request-lifecycle.svg | R:- | A:Provides behavior used by its dependent workflow | S:-
+rag-directory-flow.mmd[AW6S]: F:Implements the application component for rag-directory-flow.mmd | R:- | A:Provides behavior used by its dependent workflow | S:-
+rag-save-service-flow.mmd[AW6S]: F:Implements the application component for rag-save-service-flow.mmd | R:- | A:Provides behavior used by its dependent workflow | S:-
+task-indexing-agent-protocol.mmd[AW6S]: F:Implements the application component for task-indexing-agent-protocol.mmd | R:- | A:Provides behavior used by its dependent workflow | S:-
+task-review-agent-flow.mmd[AW6S]: F:Implements the application component for task-review-agent-flow.mmd | R:- | A:Provides behavior used by its dependent workflow | S:-
+task-timeline-events.md[AW6S]: F:Implements the application component for task-timeline-events.md | R:- | A:Provides behavior used by its dependent workflow | S:-
+workflow-architecture.mmd[AW6S]: F:Implements the application component for workflow-architecture.mmd | R:- | A:Provides behavior used by its dependent workflow | S:-

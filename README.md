@@ -86,3 +86,21 @@ python -m venv .venv-rag-eval
 ```
 
 随后使用该环境执行 `python -m app.rag.evaluation run --metrics deterministic ragas`。
+
+## 综述生成流程
+
+综述采用固定任务论文集：复用逐篇阅读结果 → 明确研究问题 → 候选综合 → 原文检索与核验 → 大纲与写作 → 审核与保存。systematic/scoping 仅影响组织方式，不代表执行正式系统综述协议。
+
+- 新增配置 `PAPER_READING_COLLECTION_NAME`，默认 `paper_reading`，首次保存时按需创建。复用原有 Qdrant dense/sparse 索引，不迁移或删除正文索引。
+- 阅读在 extract_studies 的普通循环中处理，每批最多三篇，每篇成功立即保存。共享记录只含论文 ID 与 core_problem、methods、main_discussion，不保存 chunks 或工具消息。
+- 缓存按论文 ID 精确命中；命中时不读取正文，也不调用阅读模型。论文正文替换或需要按新规则重新阅读时，删除该论文的缓存记录。
+- 缓存保存失败最多尝试三次，不重新调用阅读模型；最终失败则返回失败论文信息。
+- 原文证据和核验摘录独立保存在任务 artifact。只有 supported 的当前 Claim 措辞可写入；mixed/contradicted/insufficient 进入修订。
+- 核验和全文审核共用 max_reflection_rounds - 1 次修订。失败时返回已有产物引用，不保存为审核通过的综述。
+- 部署新版前排空运行中的旧综述任务。旧 artifact 文件仍可读取，旧中间 checkpoint 不支持恢复到新版流程。综述子图递归限制独立为 128。
+
+离线回归测试（假模型、假存储）：
+
+```powershell
+.\.venv311\Scripts\python.exe -m unittest discover -s tests -p 'test_review*.py' -q
+```

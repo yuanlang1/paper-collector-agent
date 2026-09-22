@@ -114,6 +114,7 @@ class Settings(BaseSettings):
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str | None = None
     PAPER_COLLECTION_NAME: str
+    PAPER_READING_COLLECTION_NAME: str = "paper_reading"
     PAPER_CONTENT_COLLECTION_NAME: str
     MEMORY_FACT_COLLECTION_NAME: str = "memory_facts"
     MEMORY_EPISODE_COLLECTION_NAME: str = "memory_episodes"

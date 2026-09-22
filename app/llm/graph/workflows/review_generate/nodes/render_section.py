@@ -1,279 +1,168 @@
-from __future__ import annotations
-
-import asyncio
-import json
-from collections.abc import Mapping
-from typing import Any
-
-from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.graph.workflows.review_generate.nodes.finalize import failed
-from app.llm.graph.workflows.review_generate.nodes.generate_framework import (
-    ReviewFramework,
-)
 from app.llm.model_factory import create_validated_structured_chat_model
+from app.llm.graph.workflows.review_generate.citations import citation_anchor_ids
+from app.llm.graph.workflows.review_generate.contracts import (
+    batches,
+    content_hash,
+    invoke,
+    revisions_for,
+    save,
+    verified_pack,
+)
+from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 
 
-MAX_CHUNKS_PER_CLAIM = 3
+SECTION_DRAFT_PROMPT = (
+    "基于当前已核验论点和证据包写综述论证片段，使用 output_language。"
+    "以问题组织比较，不逐篇罗列，不扩展范围；保留分歧。"
+    "具体事实必须使用对应 [[REF_论文ID]] 引用。"
+    "每个片段关联输入中的 claim_ids 和 evidence_ids。重写须执行修订要求。"
+)
 
 
-RENDER_SECTION_PROMPT = """
-你是一位专业的学术综述写作者。
-
-根据给定的章节信息、待写论点和正文证据片段，撰写一节连贯的文献综述。
-
-严格规则：
-1. 只能使用输入中提供的 Claim 和正文 chunk。
-2. 任何具体事实、比较、研究发现或结论，都必须使用对应的 [[REF_id]]
-   引用锚点。
-3. 不得编造作者、年份、论文、方法、数值、结论或引用。
-4. 不得使用未提供的 [[REF_id]]。
-5. 不要逐篇论文罗列；应围绕 Claim 综合不同论文的证据，说明一致、
-   差异、互补或冲突。
-6. 对证据存在冲突的内容，应呈现为研究分歧，不能写成单一结论。
-7. 没有证据的 Claim 已被排除，不得自行补充。
-8. 不要输出章节标题；直接输出正文。
-9. 输出内容不应为了凑篇幅而重复、扩写或添加无证据内容。
-
-返回结构化输出，不要添加额外解释。
-""".strip()
+class Argument(BaseModel):
+    text: str = Field(min_length=1)
+    claim_ids: list[str] = Field(min_length=1)
+    evidence_ids: list[str] = Field(min_length=1)
 
 
 class SectionDraft(BaseModel):
-    text: str = Field(min_length = 1)
-    citation_map: dict[str, int] = Field(default_factory = dict)
-    used_claim_ids: list[str] = Field(default_factory = list)
-    omitted_claim_ids: list[str] = Field(default_factory = list)
-    summary: str = Field(min_length = 1, max_length = 500)
+    arguments: list[Argument] = Field(min_length=1)
+    summary: str = Field(min_length=1, max_length=500)
 
 
 class RenderSectionsNode:
-    def __init__(
-        self,
-        *,
-        artifact_store: LocalArtifactStore | None = None,
-        model: Any | None = None,
-    ) -> None:
+    def __init__(self, *, artifact_store=None, model=None):
         self.artifact_store = artifact_store or LocalArtifactStore()
-        
-        self.model = model or create_validated_structured_chat_model(
-            SectionDraft,
-            temperature = 0,
-        )
+        self.model = model or create_validated_structured_chat_model(SectionDraft, temperature=0)
 
-    async def __call__(
-        self,
-        state: Mapping[str, Any],
-    ) -> dict[str, Any]:
+    async def __call__(self, state):
+        refs = dict(state.get("section_draft_artifact_refs", {}))
         try:
-            (
-                framework_payload,
-                claims_payload,
-                evidence_payload,
-            ) = await asyncio.gather(
-                self.artifact_store.read_json_uri(
-                    state["framework_artifact_ref"]
-                ),
-                self.artifact_store.read_json_uri(
-                    state["claims_artifact_ref"]
-                ),
-                self.artifact_store.read_json_uri(
-                    state["evidence_ledger_artifact_ref"]
-                ),
-            )
-
-            framework = ReviewFramework.model_validate(framework_payload["framework"])
-
-            claims_by_section = {
-                section["section_id"]: section["claims"]
-                for section in claims_payload["claims"]["sections"]
+            framework = (await self.artifact_store.read_json_uri(state["framework_artifact_ref"]))[
+                "framework"
+            ]
+            claims = {
+                claim["claim_id"]: claim
+                for claim in (
+                    await self.artifact_store.read_json_uri(state["claims_artifact_ref"])
+                )["claims"]
             }
-            evidence_by_claim = {
+            verdicts = {
                 item["claim_id"]: item
-                for item in evidence_payload["claims"]
+                for item in (
+                    await self.artifact_store.read_json_uri(
+                        state["claim_verification_artifact_ref"]
+                    )
+                )["claims"]
             }
-
-            section_refs = dict(state.get("section_draft_artifact_refs", {}))
-            target_section_ids = (
-                state.get("render_section_ids")
-                or [
-                    section.section_id
-                    for section in framework.sections
-                ]
-            )
-
+            refs = {
+                key: ref
+                for key, ref in refs.items()
+                if key in {section["section_id"] for section in framework["sections"]}
+            }
             previous_summary = ""
-
-            for section in framework.sections:
-                section_id = section.section_id
-
-                if section_id not in target_section_ids:
-                    if section_id in section_refs:
-                        previous_draft = await self.artifact_store.read_json_uri(
-                            section_refs[section_id]
-                        )
-                        previous_summary = previous_draft.get(
-                            "summary",
-                            previous_summary,
-                        )
+            for section in framework["sections"]:
+                packages = [
+                    {"claim": claims[cid], "evidence": verified_pack(claims[cid], verdicts[cid])}
+                    for cid in section["claim_ids"]
+                ]
+                signature = content_hash(
+                    [section, packages, state["language"], state["review_focus"]]
+                )
+                old = None
+                old_ref = state.get("section_draft_artifact_refs", {}).get(section["section_id"])
+                if old_ref:
+                    old = await self.artifact_store.read_json_uri(old_ref)
+                revisions = revisions_for(state, "section", section["section_id"])
+                if old and old.get("input_hash") == signature and not revisions:
+                    refs[section["section_id"]] = old_ref
+                    previous_summary = old["summary"]
                     continue
-
-                claims = claims_by_section.get(section_id, [])
-                supported_claims, omitted_claim_ids = (
-                    self._build_supported_claims(
-                        claims,
-                        evidence_by_claim,
-                    )
-                )
-
-                if not supported_claims:
-                    draft_data = {
-                        "text": "",
-                        "citation_map": {},
-                        "used_claim_ids": [],
-                        "omitted_claim_ids": [
-                            claim["claim_id"]
-                            for claim in claims
-                        ],
-                        "summary": "该章节缺少可用于写作的正文证据。",
-                    }
-                else:
-                    result = await self.model.ainvoke(
-                        [
-                            SystemMessage(
-                                content = RENDER_SECTION_PROMPT,
-                            ),
-                            HumanMessage(
-                                content = json.dumps(
-                                    {
-                                        "section": {
-                                            "section_id": section_id,
-                                            "title": section.title,
-                                            "description": (
-                                                section.description
-                                            ),
-                                        },
-                                        "previous_section_summary": (
-                                            previous_summary
-                                        ),
-                                        "claims_with_evidence": (
-                                            supported_claims
-                                        ),
-                                        "omitted_claim_ids": (
-                                            omitted_claim_ids
-                                        ),
-                                    },
-                                    ensure_ascii = False,
-                                )
-                            ),
-                        ]
-                    )
-
-                    draft = (
-                        result
-                        if isinstance(result, SectionDraft)
-                        else SectionDraft.model_validate(result)
-                    )
-
-                    draft_data = draft.model_dump(mode = "json")
-                    draft_data["omitted_claim_ids"] = list(
-                        dict.fromkeys(
-                            [
-                                *omitted_claim_ids,
-                                *draft_data["omitted_claim_ids"],
-                            ]
-                        )
-                    )
-
-                artifact = await self.artifact_store.write_json(
-                    run_id = state["run_id"],
-                    step_key = f"render_section_{section_id}",
-                    source = "task_review",
-                    kind = "task_review_section_draft_json",
-                    count = len(draft_data["used_claim_ids"]),
-                    payload = {
-                        "task_id": state["task_id"],
-                        "framework_hash": state["framework_hash"],
-                        "section_id": section_id,
-                        "title": section.title,
-                        **draft_data,
-                    },
-                )
-
-                section_refs[section_id] = artifact.artifact_uri
-                previous_summary = draft_data["summary"]
-
-        except Exception as exc:
-            return failed(f"section rendering failed: {exc}")
-
-        return {
-            "section_draft_artifact_refs": section_refs,
-            "render_section_ids": [],
-            "stage": "assembling_review",
-            "status": "running",
-            "error": None,
-        }
-
-    def _build_supported_claims(
-        self,
-        claims: list[dict[str, Any]],
-        evidence_by_claim: dict[str, dict[str, Any]],
-    ) -> tuple[list[dict[str, Any]], list[str]]:
-        supported_claims = []
-        omitted_claim_ids = []
-
-        for claim in claims:
-            evidence = evidence_by_claim.get(
-                claim["claim_id"],
-                {},
-            )
-            snippets = evidence.get("chunk_snippets", [])
-
-            paper_ids = {
-                str(snippet["paper_id"])
-                for snippet in snippets
-            }
-
-            needs_multiple_papers = (
-                claim["evidence_requirement"] == "multiple_fulltext"
-            )
-
-            if not snippets or ( needs_multiple_papers and len(paper_ids) < 2):
-                omitted_claim_ids.append(claim["claim_id"])
-                continue
-
-            supported_claims.append(
-                {
-                    "claim_id": claim["claim_id"],
-                    "text": claim["text"],
-                    "claim_type": claim["claim_type"],
-                    "evidence_requirement": claim["evidence_requirement"],
-                    "evidence": [
+                arguments, summaries = [], []
+                for group in batches(packages, budget=24000):
+                    result = await invoke(
+                        self.model,
+                        SectionDraft,
+                        SECTION_DRAFT_PROMPT,
                         {
-                            "anchor": f"[[REF_{snippet['paper_id']}]]",
-                            "paper_id": snippet["paper_id"],
-                            "title": snippet.get("title", ""),
-                            "chunk_id": snippet["chunk_id"],
-                            "chunk_index": snippet.get(
-                                "chunk_index"
-                            ),
-                            "section_path": snippet.get(
-                                "section_path",
-                                "",
-                            ),
-                            "page_start": snippet.get("page_start"),
-                            "page_end": snippet.get("page_end"),
-                            "page_numbers": snippet.get("page_numbers", []),
-                            "text": snippet["text"],
-                        }
-                        for snippet in snippets[
-                            :MAX_CHUNKS_PER_CLAIM
-                        ]
-                    ],
+                            "output_language": state["language"],
+                            "focus": state["review_focus"],
+                            "framework": framework,
+                            "section": section,
+                            "claims_with_evidence": group,
+                            "old_draft": old,
+                            "revisions": revisions,
+                            "previous_section_summary": previous_summary,
+                        },
+                    )
+                    group_ids = {item["claim"]["claim_id"] for item in group}
+                    evidence = {
+                        item["evidence_id"]: item for pack in group for item in pack["evidence"]
+                    }
+                    for argument in result["arguments"]:
+                        if (
+                            not set(argument["claim_ids"]) <= group_ids
+                            or not set(argument["evidence_ids"]) <= evidence.keys()
+                        ):
+                            raise ValueError(
+                                "section argument references unknown claim or evidence"
+                            )
+                        papers = {evidence[eid]["paper_id"] for eid in argument["evidence_ids"]}
+                        anchors = set(citation_anchor_ids(argument["text"]))
+                        if not anchors or not anchors <= papers:
+                            raise ValueError("section citations are not bound to supplied evidence")
+                        for cid in argument["claim_ids"]:
+                            matching = {item["evidence_id"] for item in verdicts[cid]["evidence"]}
+                            bound = [
+                                evidence[eid] for eid in argument["evidence_ids"] if eid in matching
+                            ]
+                            support = {
+                                item["paper_id"] for item in bound if item["relation"] == "supports"
+                            }
+                            required = (
+                                2
+                                if claims[cid]["evidence_requirement"] == "multiple_fulltext"
+                                else 1
+                            )
+                            if len(support & anchors) < required:
+                                raise ValueError("argument omitted required claim sources")
+                    used = {
+                        cid for argument in result["arguments"] for cid in argument["claim_ids"]
+                    }
+                    if used != group_ids:
+                        raise ValueError("section draft omitted verified claims")
+                    arguments.extend(result["arguments"])
+                    summaries.append(result["summary"])
+                draft = {
+                    "section_id": section["section_id"],
+                    "title": section["title"],
+                    "framework_hash": state["framework_hash"],
+                    "input_hash": signature,
+                    "claim_hashes": {
+                        cid: claims[cid]["claim_hash"] for cid in section["claim_ids"]
+                    },
+                    "arguments": arguments,
+                    "text": "\n\n".join(item["text"] for item in arguments),
+                    "summary": " ".join(summaries),
+                    "used_claim_ids": section["claim_ids"],
+                    "omitted_claim_ids": [],
                 }
+                refs[section["section_id"]] = await save(
+                    self.artifact_store, state, "section_draft", draft
+                )
+                previous_summary = draft["summary"]
+            return {
+                "section_draft_artifact_refs": refs,
+                "stage": "assembling_review",
+                "status": "running",
+            }
+        except Exception as exc:
+            return failed(
+                f"section rendering failed: {exc}",
+                section_draft_artifact_refs=refs,
+                error_code="RENDER_FAILED",
+                retryable=True,
             )
-
-        return supported_claims, omitted_claim_ids
-

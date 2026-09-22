@@ -16,6 +16,7 @@ from app.llm.graph.workflows.review_generate.citations import (
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.graph.workflows.review_generate.nodes.generate_framework import ReviewFramework
 from app.llm.model_factory import create_validated_structured_chat_model
+from app.llm.graph.workflows.review_generate.contracts import revisions_for
 
 
 ASSEMBLE_REVIEW_PROMPT = """
@@ -50,36 +51,25 @@ class ReviewSynthesis(BaseModel):
 
 class AssembleReviewNode:
     def __init__(
-        self,
-        *,
-        artifact_store: LocalArtifactStore | None = None,
-        model: Any | None = None,
+        self, *, artifact_store: LocalArtifactStore | None = None, model: Any | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
         self.model = model or create_validated_structured_chat_model(
-            ReviewSynthesis,
-            temperature = 0,
+            ReviewSynthesis, temperature=0,
         )
 
-    async def __call__(
-        self,
-        state: Mapping[str, Any],
-    ) -> dict[str, Any]:
+    async def __call__(self, state: Mapping[str, Any],) -> dict[str, Any]:
         try:
             framework_payload = await self.artifact_store.read_json_uri(
                 state["framework_artifact_ref"]
             )
-            corpus_payload = await self.artifact_store.read_json_uri(
-                state["corpus_artifact_ref"]
-            )
+            corpus_payload = await self.artifact_store.read_json_uri(state["corpus_artifact_ref"])
             framework = ReviewFramework.model_validate(framework_payload["framework"])
             section_refs = state["section_draft_artifact_refs"]
 
             draft_payloads = await asyncio.gather(
                 *[
-                    self.artifact_store.read_json_uri(
-                        section_refs[section.section_id]
-                    )
+                    self.artifact_store.read_json_uri(section_refs[section.section_id])
                     for section in framework.sections
                     if section.section_id in section_refs
                 ]
@@ -87,10 +77,7 @@ class AssembleReviewNode:
         except Exception as exc:
             return failed(f"review assembly failed: {exc}")
 
-        drafts_by_section = {
-            draft["section_id"]: draft
-            for draft in draft_payloads
-        }
+        drafts_by_section = {draft["section_id"]: draft for draft in draft_payloads}
 
         sections = []
         omitted_sections = []
@@ -116,25 +103,22 @@ class AssembleReviewNode:
                     "description": section.description,
                     "text": text,
                     "summary": draft["summary"],
+                    "arguments": draft.get("arguments", []),
                     "used_claim_ids": draft.get("used_claim_ids", []),
-                    "omitted_claim_ids": draft.get(
-                        "omitted_claim_ids",
-                        [],
-                    ),
+                    "omitted_claim_ids": draft.get("omitted_claim_ids", [],),
                 }
             )
 
         body_markdown = "\n\n".join(
-            f"## {section['title']}\n\n{section['text']}"
-            for section in sections
+            f"## {section['title']}\n\n{section['text']}" for section in sections
         )
 
         if sections:
             synthesis = await self._synthesize(
                 [
-                    SystemMessage(content = ASSEMBLE_REVIEW_PROMPT),
+                    SystemMessage(content=ASSEMBLE_REVIEW_PROMPT),
                     HumanMessage(
-                        content = json.dumps(
+                        content=json.dumps(
                             {
                                 "output_language": state["language"],
                                 "review_title": framework.title,
@@ -148,46 +132,50 @@ class AssembleReviewNode:
                                     for section in sections
                                 ],
                                 "review_body": body_markdown,
+                                "revisions": revisions_for(state, "synthesis"),
+                                "old_draft": (
+                                    await self.artifact_store.read_json_uri(
+                                        state["review_draft_artifact_ref"]
+                                    )
+                                    if state.get("review_draft_artifact_ref")
+                                    else None
+                                ),
                             },
-                            ensure_ascii = False,
+                            ensure_ascii=False,
                         )
                     ),
                 ]
             )
 
             unsupported_anchor_ids = unsupported_synthesis_anchor_ids(
-                body_markdown = body_markdown,
-                abstract = synthesis.abstract,
-                conclusion = synthesis.conclusion,
+                body_markdown=body_markdown,
+                abstract=synthesis.abstract,
+                conclusion=synthesis.conclusion,
             )
             if unsupported_anchor_ids:
                 synthesis = await self._synthesize(
                     [
-                        SystemMessage(content = REPAIR_SYNTHESIS_PROMPT),
+                        SystemMessage(content=REPAIR_SYNTHESIS_PROMPT),
                         HumanMessage(
-                            content = json.dumps(
+                            content=json.dumps(
                                 {
                                     "output_language": state["language"],
                                     "allowed_anchor_ids": sorted(
                                         citation_anchor_ids(body_markdown)
                                     ),
-                                    "unsupported_anchor_ids": sorted(
-                                        unsupported_anchor_ids
-                                    ),
+                                    "unsupported_anchor_ids": sorted(unsupported_anchor_ids),
                                     "review_body": body_markdown,
-                                    "previous_synthesis": synthesis.model_dump(
-                                        mode = "json"
-                                    ),
+                                    "previous_synthesis": synthesis.model_dump(mode="json"),
                                 },
-                                ensure_ascii = False,
+                                ensure_ascii=False,
                             )
                         ),
                     ]
                 )
                 unsupported_anchor_ids = unsupported_synthesis_anchor_ids(
-                    body_markdown = body_markdown,
-                    abstract = synthesis.abstract,
-                    conclusion = synthesis.conclusion,
+                    body_markdown=body_markdown,
+                    abstract=synthesis.abstract,
+                    conclusion=synthesis.conclusion,
                 )
                 if unsupported_anchor_ids:
                     return failed(
@@ -195,38 +183,23 @@ class AssembleReviewNode:
                         + ", ".join(sorted(unsupported_anchor_ids))
                     )
         else:
-            synthesis = ReviewSynthesis(
-                abstract = "",
-                conclusion = "",
-            )
+            synthesis = ReviewSynthesis(abstract="", conclusion="",)
 
         review_text = "\n\n".join(
             part
-            for part in [
-                synthesis.abstract.strip(),
-                body_markdown,
-                synthesis.conclusion.strip(),
-            ]
+            for part in [synthesis.abstract.strip(), body_markdown, synthesis.conclusion.strip(),]
             if part
         )
 
         citation_paper_ids = citation_anchor_ids(review_text)
 
-        papers_by_id = {
-            str(paper["paper_id"]): paper
-            for paper in corpus_payload["papers"]
-        }
+        papers_by_id = {str(paper["paper_id"]): paper for paper in corpus_payload["papers"]}
 
         citation_metadata = {
             paper_id: {
                 "title": papers_by_id[paper_id]["title"],
-                "authors": papers_by_id[paper_id].get(
-                    "authors",
-                    [],
-                ),
-                "published_date": papers_by_id[paper_id].get(
-                    "published_date"
-                ),
+                "authors": papers_by_id[paper_id].get("authors", [],),
+                "published_date": papers_by_id[paper_id].get("published_date"),
                 "doi": papers_by_id[paper_id].get("doi"),
             }
             for paper_id in citation_paper_ids
@@ -234,9 +207,7 @@ class AssembleReviewNode:
         }
 
         unknown_citation_paper_ids = [
-            paper_id
-            for paper_id in citation_paper_ids
-            if paper_id not in papers_by_id
+            paper_id for paper_id in citation_paper_ids if paper_id not in papers_by_id
         ]
 
         review_draft = {
@@ -256,12 +227,12 @@ class AssembleReviewNode:
 
         try:
             artifact = await self.artifact_store.write_json(
-                run_id = state["run_id"],
-                step_key = "assemble_review",
-                source = "task_review",
-                kind = "task_review_draft_json",
-                count = len(sections),
-                payload = review_draft,
+                run_id=state["run_id"],
+                step_key="assemble_review",
+                source="task_review",
+                kind="task_review_draft_json",
+                count=len(sections),
+                payload=review_draft,
             )
         except Exception as exc:
             return failed(f"review draft persistence failed: {exc}")
@@ -273,14 +244,10 @@ class AssembleReviewNode:
             "error": None,
         }
 
-    async def _synthesize(
-        self,
-        messages: list[SystemMessage | HumanMessage],
-    ) -> ReviewSynthesis:
+    async def _synthesize(self, messages: list[SystemMessage | HumanMessage],) -> ReviewSynthesis:
         result = await self.model.ainvoke(messages)
         return (
             result
             if isinstance(result, ReviewSynthesis)
             else ReviewSynthesis.model_validate(result)
         )
-

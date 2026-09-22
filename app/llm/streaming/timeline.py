@@ -119,17 +119,16 @@ TASK_REVIEW_TIMELINE = (
     ),
     TimelineStep(
         key="extract_studies",
-        label="逐篇抽取研究记录",
+        label="复用阅读缓存、逐篇阅读与保存",
         starts_at=frozenset({"extract_studies"}),
         completes_at=frozenset({"extract_studies"}),
         nodes=frozenset({"extract_studies"}),
     ),
     TimelineStep(
-        key="framework",
-        label="生成综述框架",
-        starts_at=frozenset({"generate_framework"}),
-        completes_at=frozenset({"generate_framework"}),
-        nodes=frozenset({"generate_framework"}),
+        key="review_focus", label="读后明确研究问题",
+        starts_at=frozenset({"resolve_review_focus"}),
+        completes_at=frozenset({"resolve_review_focus"}),
+        nodes=frozenset({"resolve_review_focus"}),
     ),
     TimelineStep(
         key="claims",
@@ -145,6 +144,19 @@ TASK_REVIEW_TIMELINE = (
         starts_at=frozenset({"retrieve_evidence"}),
         completes_at=frozenset({"retrieve_evidence"}),
         nodes=frozenset({"retrieve_evidence"}),
+        repeats=True,
+    ),
+    TimelineStep(
+        key="verify_claims", label="原文核验论点",
+        starts_at=frozenset({"verify_claims"}), completes_at=frozenset({"verify_claims"}),
+        nodes=frozenset({"verify_claims"}), repeats=True,
+    ),
+    TimelineStep(
+        key="framework",
+        label="生成综述框架",
+        starts_at=frozenset({"generate_framework"}),
+        completes_at=frozenset({"generate_framework"}),
+        nodes=frozenset({"generate_framework"}),
         repeats=True,
     ),
     TimelineStep(

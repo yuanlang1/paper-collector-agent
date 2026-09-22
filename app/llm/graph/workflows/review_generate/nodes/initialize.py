@@ -9,9 +9,7 @@ from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.subagents.task_review import TaskReviewDelegation
 
 
-async def initialize_review_node(
-    state: Mapping[str, Any],
-) -> dict[str, Any]:
+async def initialize_review_node(state: Mapping[str, Any],) -> dict[str, Any]:
     run_id = state.get("run_id")
     if not isinstance(run_id, str) or not run_id.strip():
         return failed("missing valid run_id", warnings=[])
@@ -38,6 +36,13 @@ async def initialize_review_node(
         "status": "running",
         "error": None,
         "warnings": [],
+        "error_code": None,
+        "retryable": False,
+        "review_focus": {},
+        "review_focus_artifact_ref": None,
+        "claim_verification_artifact_ref": None,
+        "revision_items": [],
+        "revision_before": None,
         "reflection_round": 0,
         "paper_ids_snapshot": [],
         "corpus_artifact_ref": None,
@@ -47,9 +52,6 @@ async def initialize_review_node(
         "framework_hash": None,
         "claims_artifact_ref": None,
         "evidence_ledger_artifact_ref": None,
-        "render_section_ids": [],
-        "retrieve_claim_ids": [],
-        "revise_claim_ids": [],
         "section_draft_artifact_refs": {},
         "review_draft_artifact_ref": None,
         "reflection_report_artifact_ref": None,

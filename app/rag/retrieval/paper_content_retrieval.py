@@ -7,9 +7,7 @@ from app.config import settings
 from app.rag.retrieval.base import BaseHybridRetrievalModule
 
 
-def paper_content_document_from_payload(
-    payload: dict,
-) -> Document:
+def paper_content_document_from_payload(payload: dict,) -> Document:
     metadata = {
         "paper_id": str(payload["paper_id"]),
         "chunk_id": str(payload["chunk_id"]),
@@ -23,25 +21,15 @@ def paper_content_document_from_payload(
             {
                 "page_start": int(payload["page_start"]),
                 "page_end": int(payload["page_end"]),
-                "page_numbers": [
-                    int(page)
-                    for page in payload.get("page_numbers", [])
-                ],
-                "source_spans": list(
-                    payload.get("source_spans", [])
-                ),
+                "page_numbers": [int(page) for page in payload.get("page_numbers", [])],
+                "source_spans": list(payload.get("source_spans", [])),
             }
         )
 
-    return Document(
-        page_content = str(payload.get("content") or ""),
-        metadata = metadata,
-    )
+    return Document(page_content=str(payload.get("content") or ""), metadata=metadata,)
 
 
-class PaperContentHybridRetrievalModule(
-    BaseHybridRetrievalModule
-):
+class PaperContentHybridRetrievalModule(BaseHybridRetrievalModule):
     def __init__(
         self,
         *,
@@ -49,9 +37,7 @@ class PaperContentHybridRetrievalModule(
         default_top_k: int = 20,
     ) -> None:
         super().__init__(
-            collection_name = collection_name,
-            default_top_k = default_top_k,
-            default_prefetch_limit = 80,
+            collection_name=collection_name, default_top_k=default_top_k, default_prefetch_limit=80,
         )
 
     async def search(
@@ -61,33 +47,37 @@ class PaperContentHybridRetrievalModule(
         sparse_query: str | None = None,
         top_k: int | None = None,
         paper_ids: list[str] | None = None,
+        exclude_chunks: list[tuple[str, str]] | None = None,
     ) -> list[Document]:
         if paper_ids is not None:
             if not paper_ids:
                 return []
 
             query_filter = models.Filter(
-                must = [
-                    models.FieldCondition(
-                        key = "paper_id",
-                        match = models.MatchAny(
-                            any = paper_ids
-                        ),
-                    )
-                ]
+                must=[models.FieldCondition(key="paper_id", match=models.MatchAny(any=paper_ids),)]
             )
         else:
             query_filter = None
 
+        if exclude_chunks:
+            query_filter = query_filter or models.Filter()
+            query_filter.must_not = [
+                models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="paper_id", match=models.MatchValue(value=paper_id)
+                        ),
+                        models.FieldCondition(
+                            key="chunk_id", match=models.MatchValue(value=chunk_id)
+                        ),
+                    ]
+                )
+                for paper_id, chunk_id in exclude_chunks
+            ]
+
         return await super().search(
-            query,
-            sparse_query = sparse_query,
-            top_k = top_k,
-            query_filter = query_filter,
+            query, sparse_query=sparse_query, top_k=top_k, query_filter=query_filter,
         )
 
-    def _payload_to_document(
-        self,
-        payload: dict,
-    ) -> Document:
+    def _payload_to_document(self, payload: dict,) -> Document:
         return paper_content_document_from_payload(payload)
