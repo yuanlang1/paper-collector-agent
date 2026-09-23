@@ -4,8 +4,7 @@ from collections.abc import Sequence
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.llm.model_factory import create_validated_structured_chat_model
-from app.llm.structured_output import ValidatedJsonInvoker
+from app.llm.provider import ChatClient, ModelOptions, ValidatedJsonInvoker
 from app.memory.schemas import (
     ConsolidationOutput,
     EpisodeCandidate,
@@ -34,13 +33,13 @@ class LangChainMemoryExtractor:
         self,
         invoker: ValidatedJsonInvoker[MemoryExtractionPayload] | None = None,
         *,
+        chat: ChatClient | None = None,
         max_characters: int = 12_000,
     ) -> None:
-        self.invoker = invoker or create_validated_structured_chat_model(
+        self.invoker = invoker or (chat or ChatClient()).structured(
             MemoryExtractionPayload,
-            temperature=0,
             max_attempts=2,
-            purpose="memory",
+            options=ModelOptions(temperature=0, purpose="memory"),
         )
         self.max_characters = max_characters
 

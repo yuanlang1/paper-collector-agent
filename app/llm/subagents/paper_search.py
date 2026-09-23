@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
+from app.llm.provider import ChatClient
 
 if TYPE_CHECKING:
     from app.llm.subagents.registry import SubAgentRuntime
@@ -40,6 +41,7 @@ class PaperSearchDelegation(BaseModel):
 def build_paper_search_runtime(
     *,
     source_query_plan_model: Any,
+    chat: ChatClient,
 ) -> SubAgentRuntime:
     from app.llm.graph.workflows.paper_search.workflow import (
         build_paper_search_workflow,
@@ -60,10 +62,11 @@ def build_paper_search_runtime(
         ),
         graph=build_paper_search_workflow(
             skip_confirmation=True,
+            chat=chat,
             node_overrides={
                 "generate_queries": _source_query_plan_node(
                     source_query_plan_model,
-                )
+                ),
             },
         ),
         error_code="PAPER_SEARCH_SUBGRAPH_FAILED",

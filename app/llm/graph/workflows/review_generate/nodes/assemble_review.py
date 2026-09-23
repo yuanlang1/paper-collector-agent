@@ -15,7 +15,7 @@ from app.llm.graph.workflows.review_generate.citations import (
 )
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.graph.workflows.review_generate.nodes.generate_framework import ReviewFramework
-from app.llm.model_factory import create_validated_structured_chat_model
+from app.llm.provider import ChatClient, ModelOptions
 from app.llm.graph.workflows.review_generate.contracts import revisions_for
 
 
@@ -52,10 +52,11 @@ class ReviewSynthesis(BaseModel):
 class AssembleReviewNode:
     def __init__(
         self, *, artifact_store: LocalArtifactStore | None = None, model: Any | None = None,
+        chat: ChatClient | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = model or create_validated_structured_chat_model(
-            ReviewSynthesis, temperature=0,
+        self.model = model or (chat or ChatClient()).structured(
+            ReviewSynthesis, options=ModelOptions(temperature=0),
         )
 
     async def __call__(self, state: Mapping[str, Any],) -> dict[str, Any]:

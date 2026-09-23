@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel
+from app.llm.provider import ChatClient
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,7 @@ class SubAgentRegistry:
 def build_default_subagent_registry(
     *,
     source_query_plan_model: Any,
+    chat: ChatClient,
 ) -> SubAgentRegistry:
     from app.llm.subagents.paper_search import build_paper_search_runtime
     from app.llm.subagents.task_indexing import build_task_indexing_runtime
@@ -97,8 +99,9 @@ def build_default_subagent_registry(
         (
             build_paper_search_runtime(
                 source_query_plan_model=source_query_plan_model,
+                chat=chat,
             ),
             build_task_indexing_runtime(),
-            build_task_review_runtime(),
+            build_task_review_runtime(chat=chat),
         )
     )

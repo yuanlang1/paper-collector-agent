@@ -11,7 +11,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, model_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.model_factory import create_validated_structured_chat_model
+from app.llm.provider import ChatClient, ModelOptions
 from app.llm.tools.venue_tools.easy_scholar import (
     EASY_SCHOLAR_VENUE_TOOL,
 )
@@ -310,6 +310,7 @@ class VenueResolutionNode:
         *,
         artifact_store: LocalArtifactStore | None = None,
         model: Any | None = None,
+        chat: ChatClient | None = None,
         easy_scholar_handler: Any | None = None,
         cache_store: VenueCacheStore | None = None,
     ) -> None:
@@ -317,9 +318,9 @@ class VenueResolutionNode:
         self.cache_store = cache_store or VenueCacheStore(
             self.artifact_store.base_dir.parent / "venue_cache.json"
         )
-        self.model = model or create_validated_structured_chat_model(
+        self.model = model or (chat or ChatClient()).structured(
             ModelVenueInfoDraft,
-            temperature=0,
+            options=ModelOptions(temperature=0),
         )
         self.easy_scholar_handler = easy_scholar_handler or EASY_SCHOLAR_VENUE_TOOL.fn
     

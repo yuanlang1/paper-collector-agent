@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
+from app.llm.provider import ChatClient
 
 if TYPE_CHECKING:
     from app.llm.subagents.registry import SubAgentRuntime
@@ -27,7 +28,7 @@ class TaskReviewDelegation(BaseModel):
     ] = "narrative"
     max_reflection_rounds: int = Field(default=5, ge=1, le=5)
 
-def build_task_review_runtime() -> SubAgentRuntime:
+def build_task_review_runtime(*, chat: ChatClient) -> SubAgentRuntime:
     from app.llm.graph.workflows.review_generate.workflow import (
         build_task_review_workflow,
     )
@@ -48,7 +49,7 @@ def build_task_review_runtime() -> SubAgentRuntime:
             display_name="文献综述子代理",
             confirmation_summary="将分析已有文献并生成综述建议。",
         ),
-        graph=build_task_review_workflow(),
+        graph=build_task_review_workflow(chat=chat),
         error_code="TASK_REVIEW_SUBGRAPH_FAILED",
         failure_summary="文献综述工作流执行失败，未完成结果保存。",
         stream=SubAgentStreamSpec(workflow="task_review"),

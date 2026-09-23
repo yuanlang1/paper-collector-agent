@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
-from app.llm.model_factory import create_chat_model
+from app.llm.provider import ChatClient, ModelOptions
 from app.llm.streaming.notify import langgraph_notifier
 from app.rag.retrieval.paper_content_corpus import PaperContentCorpusReader
 from app.rag.retrieval.paper_content_retrieval import PaperContentHybridRetrievalModule
@@ -105,6 +105,7 @@ class ExtractStudiesNode:
         *,
         artifact_store: LocalArtifactStore | None = None,
         model: Any | None = None,
+        chat: ChatClient | None = None,
         corpus_reader: PaperContentCorpusReader | None = None,
         content_retrieval: PaperContentHybridRetrievalModule | None = None,
         reading_index: Any | None = None,
@@ -120,7 +121,10 @@ class ExtractStudiesNode:
             raise ValueError("max_concurrent_papers must be positive")
 
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = (model or create_chat_model(temperature=0)).bind_tools(ARTICLE_PROFILE_TOOLS)
+        base_model = model or (chat or ChatClient()).model(
+            ModelOptions(temperature=0),
+        )
+        self.model = base_model.bind_tools(ARTICLE_PROFILE_TOOLS)
         self.corpus_reader = corpus_reader or PaperContentCorpusReader()
         self.content_retrieval = content_retrieval or PaperContentHybridRetrievalModule()
         self.reading_index = reading_index or PaperReadingIndexConstructionModule()

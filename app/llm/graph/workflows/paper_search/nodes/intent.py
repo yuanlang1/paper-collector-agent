@@ -6,7 +6,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.llm.graph.workflows.paper_search_schemas import PromptUnderstandingArgs
-from app.llm.model_factory import create_validated_structured_chat_model
+from app.llm.provider import ChatClient, ModelOptions
 from app.llm.subagents.paper_search import PaperSearchConstraints
 
 
@@ -30,11 +30,12 @@ class IntentUnderstandingNode:
 
     def __init__(
         self,
-         model: Any | None = None
+         model: Any | None = None,
+         chat: ChatClient | None = None,
     ) -> None:
-        self.model = model or create_validated_structured_chat_model(
+        self.model = model or (chat or ChatClient()).structured(
             PromptUnderstandingArgs,
-            temperature=0,
+            options=ModelOptions(temperature=0),
         )
 
     async def __call__(self, state: Mapping[str, Any]) -> dict[str, Any]:

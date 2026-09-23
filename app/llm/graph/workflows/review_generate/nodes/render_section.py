@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.model_factory import create_validated_structured_chat_model
+from app.llm.provider import ChatClient, ModelOptions
 from app.llm.graph.workflows.review_generate.citations import citation_anchor_ids
 from app.llm.graph.workflows.review_generate.contracts import (
     batches,
@@ -34,9 +34,9 @@ class SectionDraft(BaseModel):
 
 
 class RenderSectionsNode:
-    def __init__(self, *, artifact_store=None, model=None):
+    def __init__(self, *, artifact_store=None, model=None, chat: ChatClient | None = None):
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = model or create_validated_structured_chat_model(SectionDraft, temperature=0)
+        self.model = model or (chat or ChatClient()).structured(SectionDraft, options=ModelOptions(temperature=0))
 
     async def __call__(self, state):
         refs = dict(state.get("section_draft_artifact_refs", {}))

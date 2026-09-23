@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-22T01:46:30Z",
-  "updated_at": "2026-09-22T13:06:28Z",
+  "updated_at": "2026-09-23T00:36:42Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -18544,6 +18544,12 @@
       "sha256": "6fec0656dd5a2cb1079d6d0f41ad507b3b6f30336e1bdafc3a20d9a42e45d6b7",
       "size": 2382,
       "normalized_sha256": "6fec0656dd5a2cb1079d6d0f41ad507b3b6f30336e1bdafc3a20d9a42e45d6b7"
+    },
+    "tests/test_llm_provider.py": {
+      "role": "observe",
+      "sha256": "13c208c3d8f376843c653840af7e464171940b2003c79c4be6f855bcf46539ae",
+      "size": 3890,
+      "normalized_sha256": "13c208c3d8f376843c653840af7e464171940b2003c79c4be6f855bcf46539ae"
     },
     "tests/test_memory_hybrid_retrieval.py": {
       "role": "observe",

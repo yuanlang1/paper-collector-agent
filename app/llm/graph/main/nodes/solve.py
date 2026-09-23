@@ -7,6 +7,7 @@ from langchain_core.runnables import RunnableConfig
 from app.config import settings
 from app.llm.graph.main.native_tools import get_tool_kind, requires_confirmation
 from app.llm.graph.main.state import MainAgentState
+from app.llm.provider import ChatClient
 from app.llm.streaming.notify import langgraph_notifier
 from app.llm.streaming.utils import content_to_text
 from app.llm.tools.registry import ToolRegistry, build_tool_registry
@@ -18,10 +19,12 @@ class SolveNode:
         self,
         *,
         model: Any,
+        chat: ChatClient | None = None,
         tool_registry: ToolRegistry | None = None,
         subagent_registry: SubAgentRegistry,
     ) -> None:
         self.model = model
+        self.chat = chat
         self.tool_registry = tool_registry or build_tool_registry()
         self.subagent_registry = subagent_registry
 
@@ -37,22 +40,22 @@ class SolveNode:
         reasoning_id = f"{state['run_id']}:solve:{uuid4().hex}"
         notify("iteration_started", {"iteration": iteration})
 
-        system = SystemMessage(content=str(state.get("system_context") or ""))
-
         messages = self._messages_from_window_start(
             state["messages"],
             conversation_window_start_id=state.get(
                 "conversation_window_start_id"
             ),
         )
-        messages = [
-            *(
-                [system]
-                if system is not None
-                else []
-            ),
-            *messages,
-        ]
+        if self.chat is not None:
+            messages = self.chat.messages(
+                messages,
+                system_prompt=str(state.get("system_context") or ""),
+            )
+        else:
+            messages = [
+                SystemMessage(content=str(state.get("system_context") or "")),
+                *messages,
+            ]
 
         async for chunk in self.model.astream(messages):
             chunks.append(chunk)

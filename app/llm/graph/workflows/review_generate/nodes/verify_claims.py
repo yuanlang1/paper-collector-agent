@@ -3,7 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.model_factory import create_validated_structured_chat_model
+from app.llm.provider import ChatClient, ModelOptions
 from app.llm.graph.workflows.review_generate.contracts import (
     RevisionItem,
     batches,
@@ -50,9 +50,10 @@ class EvidenceSelection(BaseModel):
 
 
 class VerifyClaimsNode:
-    def __init__(self, *, artifact_store=None, model=None, selection_model=None):
+    def __init__(self, *, artifact_store=None, model=None, selection_model=None, chat: ChatClient | None = None):
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = model or create_validated_structured_chat_model(Verdict, temperature=0)
+        self.chat = chat or ChatClient()
+        self.model = model or self.chat.structured(Verdict, options=ModelOptions(temperature=0))
         self.selection_model = selection_model
 
     async def _context(self, claim, evidence):
@@ -60,8 +61,8 @@ class VerifyClaimsNode:
         groups = list(batches(windows, budget=20000))
         if len(groups) <= 1:
             return evidence
-        model = self.selection_model or create_validated_structured_chat_model(
-            EvidenceSelection, temperature=0
+        model = self.selection_model or self.chat.structured(
+            EvidenceSelection, options=ModelOptions(temperature=0)
         )
         selected = []
         for group in groups:

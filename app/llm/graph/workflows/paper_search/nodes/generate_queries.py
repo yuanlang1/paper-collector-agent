@@ -8,9 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.config import settings
-from app.llm.model_factory import (
-    create_validated_structured_chat_model,
-)
+from app.llm.provider import ChatClient, ModelOptions
 from app.llm.graph.workflows.paper_search_schemas import (
     PromptUnderstandingArgs,
     SearchTagArgs,
@@ -178,11 +176,12 @@ class BuildSourceQueryPlanNode:
     def __init__(
         self,
         model: Any | None = None,
+        chat: ChatClient | None = None,
         pagination_settings: dict[str, int] | None = None,
     ) -> None:
-        self.model = model or create_validated_structured_chat_model(
+        self.model = model or (chat or ChatClient()).structured(
             SourceQueryPlansOutput,
-            temperature=0,
+            options=ModelOptions(temperature=0),
         )
         self.pagination_settings = pagination_settings or {
             "arxiv_max_pages": settings.PAPER_SEARCH_ARXIV_MAX_PAGES,

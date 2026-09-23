@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.paper_search_schemas import PromptUnderstandingArgs
-from app.llm.model_factory import create_validated_structured_chat_model
+from app.llm.provider import ChatClient, ModelOptions
 
 
 RECOMMENDATION_SYSTEM_PROMPT = """
@@ -53,11 +53,12 @@ class RecommendationNode:
         self,
         artifact_store: LocalArtifactStore | None = None,
         model: Any | None = None,
+        chat: ChatClient | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = model or create_validated_structured_chat_model(
+        self.model = model or (chat or ChatClient()).structured(
             PaperRecommendationResult,
-            temperature=0,
+            options=ModelOptions(temperature=0),
         )
 
     async def _recommend_one(

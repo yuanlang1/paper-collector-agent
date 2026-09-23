@@ -28,6 +28,7 @@ from app.llm.graph.workflows.review_generate.nodes.resolve_review_focus import (
     ResolveReviewFocusNode,
 )
 from app.llm.graph.workflows.review_generate.nodes.verify_claims import VerifyClaimsNode
+from app.llm.provider import ChatClient
 
 
 def _route(expected_stage: str, target: str):
@@ -53,10 +54,12 @@ def _route_after_reflection(state: TaskReviewWorkflowState,) -> str:
 def build_task_review_workflow(
     *,
     paper_client: PaperServiceGrpcClient | None = None,
+    chat: ChatClient | None = None,
     checkpointer: Any | None = None,
     node_overrides: dict[str, object] | None = None,
 ):
     node_overrides = node_overrides or {}
+    chat = chat or ChatClient()
 
     def node(name: str, factory):
         if name in node_overrides:
@@ -72,33 +75,33 @@ def build_task_review_workflow(
         )
 
     builder = StateGraph(TaskReviewWorkflowState)
-    builder.add_node("resolve_review_focus", node("resolve_review_focus", ResolveReviewFocusNode))
-    builder.add_node("verify_claims", node("verify_claims", VerifyClaimsNode))
+    builder.add_node("resolve_review_focus", node("resolve_review_focus", lambda: ResolveReviewFocusNode(chat=chat)))
+    builder.add_node("verify_claims", node("verify_claims", lambda: VerifyClaimsNode(chat=chat)))
     builder.add_node("initialize", node("initialize", lambda: initialize_review_node))
     builder.add_node(
         "load_task_corpus",
         node("load_task_corpus", lambda: LoadTaskCorpusNode(client=paper_client),),
     )
     builder.add_node(
-        "generate_framework", node("generate_framework", GenerateFrameworkNode),
+        "generate_framework", node("generate_framework", lambda: GenerateFrameworkNode(chat=chat)),
     )
     builder.add_node(
-        "extract_studies", node("extract_studies", ExtractStudiesNode),
+        "extract_studies", node("extract_studies", lambda: ExtractStudiesNode(chat=chat)),
     )
     builder.add_node(
-        "generate_claims", node("generate_claims", GenerateClaimsNode),
+        "generate_claims", node("generate_claims", lambda: GenerateClaimsNode(chat=chat)),
     )
     builder.add_node(
         "retrieve_evidence", node("retrieve_evidence", RetrieveEvidenceNode),
     )
     builder.add_node(
-        "render_sections", node("render_sections", RenderSectionsNode),
+        "render_sections", node("render_sections", lambda: RenderSectionsNode(chat=chat)),
     )
     builder.add_node(
-        "assemble_review", node("assemble_review", AssembleReviewNode),
+        "assemble_review", node("assemble_review", lambda: AssembleReviewNode(chat=chat)),
     )
     builder.add_node(
-        "reflect_review", node("reflect_review", ReflectReviewNode),
+        "reflect_review", node("reflect_review", lambda: ReflectReviewNode(chat=chat)),
     )
     builder.add_node(
         "finalizing_handoff", node("finalizing_handoff", FinalizingHandoffNode),

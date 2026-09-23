@@ -12,7 +12,7 @@ from app.llm.graph.main.workflow import build_main_agent_workflow
 from app.llm.graph.workflows.paper_search.nodes.generate_queries import (
     BuildSourceQueryPlanNode,
 )
-from app.llm.model_factory import create_chat_model, use_llm_runtime_config
+from app.llm.provider import ChatClient, ModelOptions
 from app.llm.tool_adapter import to_openai_tool_schemas
 from app.llm.tools.registry import build_tool_registry
 from app.services.llm_profile_service import LlmRuntimeConfig
@@ -56,39 +56,42 @@ class AgentService:
         self.memory_llm_config = memory_llm_config
         self.artifact_access_service = artifact_access_service
         self.tool_registry = build_tool_registry()
-        with use_llm_runtime_config(llm_config):
-            if subagent_registry is None:
-                source_query_plan_node = BuildSourceQueryPlanNode()
-                self.subagent_registry = build_default_subagent_registry(
-                    source_query_plan_model=source_query_plan_node.model,
-                )
-            else:
-                self.subagent_registry = subagent_registry
-            model = create_chat_model(temperature=0).bind_tools(
-                to_openai_tool_schemas(
-                    build_native_tool_schemas(
-                        self.tool_registry,
-                        self.subagent_registry,
-                    )
-                )
+        self.chat = ChatClient(llm_config)
+        if subagent_registry is None:
+            source_query_plan_node = BuildSourceQueryPlanNode(chat=self.chat)
+            self.subagent_registry = build_default_subagent_registry(
+                source_query_plan_model=source_query_plan_node.model,
+                chat=self.chat,
             )
-            self.graph = build_main_agent_workflow(
-                memory_node=MemoryNode(
-                    db_factory=SessionLocal,
-                    system_context_builder=SystemContextBuilder(),
-                    llm_config=llm_config,
-                    memory_llm_config=memory_llm_config,
-                ),
-                solve_node=SolveNode(
-                    model=model,
-                    tool_registry=self.tool_registry,
-                    subagent_registry=self.subagent_registry,
-                ),
-                subagent_registry=self.subagent_registry,
+        else:
+            self.subagent_registry = subagent_registry
+        model = self.chat.bind_tools(
+            to_openai_tool_schemas(
+                build_native_tool_schemas(
+                    self.tool_registry,
+                    self.subagent_registry,
+                )
+            ),
+            options=ModelOptions(temperature=0),
+        )
+        self.graph = build_main_agent_workflow(
+            memory_node=MemoryNode(
+                db_factory=SessionLocal,
+                system_context_builder=SystemContextBuilder(),
+                llm_config=llm_config,
+                memory_llm_config=memory_llm_config,
+            ),
+            solve_node=SolveNode(
+                model=model,
+                chat=self.chat,
                 tool_registry=self.tool_registry,
-                artifact_access_service=self.artifact_access_service,
-                checkpointer=self.checkpointer,
-            )
+                subagent_registry=self.subagent_registry,
+            ),
+            subagent_registry=self.subagent_registry,
+            tool_registry=self.tool_registry,
+            artifact_access_service=self.artifact_access_service,
+            checkpointer=self.checkpointer,
+        )
 
     async def get_state(self, session: Session):
         return await self.graph.aget_state(session.graph_config)

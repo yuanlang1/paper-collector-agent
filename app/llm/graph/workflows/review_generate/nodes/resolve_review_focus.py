@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.model_factory import create_validated_structured_chat_model
+from app.llm.provider import ChatClient, ModelOptions
 from app.llm.graph.workflows.review_generate.contracts import batches, invoke, save
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 
@@ -47,9 +47,10 @@ class Themes(BaseModel):
 
 
 class ResolveReviewFocusNode:
-    def __init__(self, *, artifact_store=None, model=None, theme_model=None):
+    def __init__(self, *, artifact_store=None, model=None, theme_model=None, chat: ChatClient | None = None):
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = model or create_validated_structured_chat_model(ReviewFocus, temperature=0)
+        self.chat = chat or ChatClient()
+        self.model = model or self.chat.structured(ReviewFocus, options=ModelOptions(temperature=0))
         self.theme_model = theme_model
 
     async def __call__(self, state):
@@ -60,8 +61,8 @@ class ResolveReviewFocusNode:
             overview = studies
             groups = list(batches(overview))
             while len(groups) > 1:
-                model = self.theme_model or create_validated_structured_chat_model(
-                    Themes, temperature=0
+                model = self.theme_model or self.chat.structured(
+                    Themes, options=ModelOptions(temperature=0)
                 )
                 compact = []
                 for group in groups:

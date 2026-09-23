@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.model_factory import create_validated_structured_chat_model
+from app.llm.provider import ChatClient, ModelOptions
 from app.llm.graph.workflows.review_generate.contracts import (
     CandidateClaim,
     batches,
@@ -33,11 +33,12 @@ class ClaimsPlan(BaseModel):
 
 
 class GenerateClaimsNode:
-    def __init__(self, *, artifact_store=None, model=None, revision_model=None):
+    def __init__(self, *, artifact_store=None, model=None, revision_model=None, chat: ChatClient | None = None):
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = model or create_validated_structured_chat_model(ClaimsPlan, temperature=0)
-        self.revision_model = revision_model or create_validated_structured_chat_model(
-            CandidateClaim, temperature=0
+        client = chat or ChatClient()
+        self.model = model or client.structured(ClaimsPlan, options=ModelOptions(temperature=0))
+        self.revision_model = revision_model or client.structured(
+            CandidateClaim, options=ModelOptions(temperature=0)
         )
 
     async def __call__(self, state):

@@ -5,11 +5,7 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from app.llm.model_factory import (
-    create_validated_structured_chat_model,
-    use_llm_runtime_config,
-)
-from app.llm.structured_output import ValidatedJsonInvoker
+from app.llm.provider import ChatClient, ModelOptions, ValidatedJsonInvoker
 from app.services.llm_profile_service import LlmRuntimeConfig
 
 
@@ -58,19 +54,17 @@ class MemoryRetrievalGate:
             return RetrievalDecision(retrieve=False)
 
         try:
-            with use_llm_runtime_config(llm_config):
-                invoker = self.invoker or create_validated_structured_chat_model(
-                    RetrievalDecision,
-                    temperature=0,
-                    max_attempts=2,
-                    purpose="memory",
-                )
-                result = await invoker.ainvoke(
-                    [
-                        SystemMessage(content=GATE_PROMPT),
-                        HumanMessage(content=message),
-                    ]
-                )
+            invoker = self.invoker or ChatClient(llm_config).structured(
+                RetrievalDecision,
+                max_attempts=2,
+                options=ModelOptions(temperature=0, purpose="memory"),
+            )
+            result = await invoker.ainvoke(
+                [
+                    SystemMessage(content=GATE_PROMPT),
+                    HumanMessage(content=message),
+                ]
+            )
             return RetrievalDecision(
                 retrieve=result.retrieve,
                 query=result.query.strip(),

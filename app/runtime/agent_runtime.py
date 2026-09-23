@@ -9,7 +9,7 @@ from app.database import SessionLocal
 from app.core.exceptions import ConflictException
 from app.history.store import ChatHistoryStore, ConversationDeletionJob
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.model_factory import use_llm_runtime_config
+from app.llm.provider import ChatClient
 from app.memory.consolidation import Consolidator
 from app.memory.extraction import LangChainMemoryExtractor
 from app.models.memory import (
@@ -511,13 +511,14 @@ class AgentRuntime:
                 else None
             )
             memory_llm_config = resolve_runtime_config(db, profile_id)
-            with use_llm_runtime_config(memory_llm_config):
-                result = await Consolidator(
-                    db,
-                    user_id=user_id,
-                    history_reader=self.history_store,
-                    extraction_model=LangChainMemoryExtractor(),
-                ).consolidate_if_due(conversation_id=conversation_id)
+            result = await Consolidator(
+                db,
+                user_id=user_id,
+                history_reader=self.history_store,
+                extraction_model=LangChainMemoryExtractor(
+                    chat=ChatClient(memory_llm_config),
+                ),
+            ).consolidate_if_due(conversation_id=conversation_id)
             if result.due:
                 logger.info(
                     "Memory consolidated: user_id=%s, conversation_id=%s, "

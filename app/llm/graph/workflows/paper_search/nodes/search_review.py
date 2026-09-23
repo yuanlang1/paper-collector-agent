@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.model_factory import create_validated_structured_chat_model
+from app.llm.provider import ChatClient, ModelOptions
 
 
 class SourceSupplementAction(BaseModel):
@@ -29,11 +29,12 @@ class SearchReviewDecision(BaseModel):
 
 class SearchReviewBrainNode:
     def __init__(
-        self, artifact_store: LocalArtifactStore | None = None, model: Any | None = None
+        self, artifact_store: LocalArtifactStore | None = None, model: Any | None = None,
+        chat: ChatClient | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = model or create_validated_structured_chat_model(
-            SearchReviewDecision, temperature=0
+        self.model = model or (chat or ChatClient()).structured(
+            SearchReviewDecision, options=ModelOptions(temperature=0)
         )
 
     async def __call__(self, state: Mapping[str, Any]) -> dict[str, Any]:

@@ -27,6 +27,7 @@ from app.llm.graph.workflows.paper_search.nodes.supplemental_search import Suppl
 from app.llm.graph.workflows.paper_search.nodes.update_task_status import UpdatePaperSearchTaskStatusNode
 from app.llm.graph.workflows.paper_search.nodes.venue import VenueResolutionNode
 from app.llm.graph.workflows.paper_search.state import PaperSearchWorkflowState
+from app.llm.provider import ChatClient
 from app.llm.streaming.timeline import (
     PAPER_SEARCH_TIMELINE,
     instrument_timeline_node,
@@ -98,11 +99,13 @@ def _route_after_supplemental_search(
 def build_paper_search_workflow(
     *,
     task_client=None,
+    chat: ChatClient | None = None,
     checkpointer=None,
     skip_confirmation: bool = False,
     node_overrides: dict[str, object] | None = None,
 ):
     node_overrides = node_overrides or {}
+    chat = chat or ChatClient()
 
     def node(name, default):
         return instrument_timeline_node(
@@ -118,19 +121,20 @@ def build_paper_search_workflow(
         "initialize",
         node("initialize", initialize_paper_search_node),
     )
-    builder.add_node("intent_understanding", node("intent_understanding", IntentUnderstandingNode()))
+    builder.add_node("intent_understanding", node("intent_understanding", IntentUnderstandingNode(chat=chat)))
     builder.add_node(
         "build_search_tag",
         node(
             "build_search_tag",
             BuildSearchTagNode(
+                chat=chat,
                 skip_confirmation=skip_confirmation,
             ),
         ),
     )
     builder.add_node("confirm", node("confirm", paper_search_confirm_node))
     builder.add_node("create_task", node("create_task", CreatePaperSearchTaskNode(client=task_client)))
-    builder.add_node("generate_queries", node("generate_queries", BuildSourceQueryPlanNode()))
+    builder.add_node("generate_queries", node("generate_queries", BuildSourceQueryPlanNode(chat=chat)))
     builder.add_node("search_arxiv", node("search_arxiv", ArxivSearchNode()))
     builder.add_node("search_dblp", node("search_dblp", DblpSearchNode()))
     builder.add_node("search_google", node("search_google", GoogleScholarSearchNode()))
@@ -142,14 +146,14 @@ def build_paper_search_workflow(
         ),
     )
     builder.add_node("filter", node("filter", NormalizeDeduplicateFilterNode()))
-    builder.add_node("search_review", node("search_review", SearchReviewBrainNode()))
+    builder.add_node("search_review", node("search_review", SearchReviewBrainNode(chat=chat)))
     builder.add_node("supplemental_search", node("supplemental_search", SupplementalSearchPlannerNode()))
     builder.add_node("enrich", node("enrich", PaperEnrichmentNode()))
     builder.add_node("crossref_enrich", node("crossref_enrich", CrossrefMetadataEnrichmentNode()))
-    builder.add_node("venue", node("venue", VenueResolutionNode()))
+    builder.add_node("venue", node("venue", VenueResolutionNode(chat=chat)))
     builder.add_node("download_pdf", node("download_pdf", PdfDownloadNode()))
-    builder.add_node("abstract_enrich", node("abstract_enrich", AbstractEnrichNode()))
-    builder.add_node("recommend", node("recommend", RecommendationNode()))
+    builder.add_node("abstract_enrich", node("abstract_enrich", AbstractEnrichNode(chat=chat)))
+    builder.add_node("recommend", node("recommend", RecommendationNode(chat=chat)))
     builder.add_node("persist", node("persist", PersistRecommendedPapersNode()))
     builder.add_node(
         "save_pdfs_to_oss",

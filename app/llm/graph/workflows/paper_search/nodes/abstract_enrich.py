@@ -11,7 +11,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.model_factory import create_validated_structured_chat_model
+from app.llm.provider import ChatClient, ModelOptions
 from pypdf import PdfReader
 
 
@@ -22,13 +22,13 @@ MAX_KEYWORD_CHARS = 1_000
 
 
 PDF_FRONT_PAGE_ENRICHMENT_SYSTEM_PROMPT = """
-你负责仅根据论文前几页文本完成三个字段。
+    你负责仅根据论文前几页文本完成三个字段。
 
-- paper_abstract：提取页面中原始的 Abstract 段落，保留原文语言和含义；
-  未找到时返回 null，不得改写或编造。
-- keywords：提取页面中 Keywords、Index Terms 或“关键词”段落；如果未找到就根据论文内容生成关键词。
-- ai_abstract：使用中文概括研究问题、核心方法、实验设置、主要结果和贡献；
-  仅依据页面文本，不得编造其中没有的事实。
+    - paper_abstract：提取页面中原始的 Abstract 段落，保留原文语言和含义；
+    未找到时返回 null，不得改写或编造。
+    - keywords：提取页面中 Keywords、Index Terms 或“关键词”段落；如果未找到就根据论文内容生成关键词。
+    - ai_abstract：使用中文概括研究问题、核心方法、实验设置、主要结果和贡献；
+    仅依据页面文本，不得编造其中没有的事实。
 """.strip()
 
 
@@ -101,11 +101,12 @@ class AbstractEnrichNode:
         self,
         artifact_store: LocalArtifactStore | None = None,
         model: Any | None = None,
+        chat: ChatClient | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = model or create_validated_structured_chat_model(
+        self.model = model or (chat or ChatClient()).structured(
             PdfFrontPageEnrichmentResult,
-            temperature=0,
+            options=ModelOptions(temperature=0),
         )
 
     async def _enrich_from_pdf_front_pages(
