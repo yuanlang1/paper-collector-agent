@@ -317,6 +317,7 @@ class ExtractStudiesNode:
                 messages.append(HumanMessage(content=PROFILE_SUBMISSION_PROMPT))
 
             response = await self.model.ainvoke(messages)
+
             if not isinstance(response, AIMessage):
                 raise ValueError("profile agent must return an AIMessage")
             messages.append(response)
@@ -324,8 +325,10 @@ class ExtractStudiesNode:
 
             if len(tool_calls) == 1 and tool_calls[0]["name"] == "submit_article_profile":
                 return self._submitted_profile(tool_calls[0], observed_chunk_ids=observed_chunk_ids)
+
             if any(call["name"] == "submit_article_profile" for call in tool_calls):
                 raise ValueError("submit_article_profile cannot be combined with other tools")
+
             if round_index + 1 == self.max_rounds:
                 raise ValueError("profile agent did not submit an article profile")
 
@@ -359,10 +362,12 @@ class ExtractStudiesNode:
             tool_call_id = str(tool_call.get("id") or "")
             if not tool_call_id:
                 raise ValueError("profile search tool call is missing an id")
+
             arguments = SearchCurrentPaperArgs.model_validate(tool_call["args"])
             normalized = " ".join(arguments.query.casefold().split())
             if not normalized:
                 raise ValueError("profile search query is blank")
+                
             is_new = normalized not in seen_queries and normalized not in pending_queries
             calls.append((tool_call_id, arguments, normalized, is_new))
             if is_new:
@@ -375,6 +380,7 @@ class ExtractStudiesNode:
                 for query in pending_queries.values()
             )
         )
+
         retrieved = dict(zip(pending_queries, result_sets, strict=True))
         max_chars = RETRIEVAL_CONTEXT_MAX_CHARS // max(len(pending_queries), 1)
         messages = []

@@ -19,11 +19,16 @@ from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.graph.workflows.review_generate.revisions import schedule_revision
 
 
+CLAIM_REFLECTION_PROMPT = (
+    "逐个检查论点在本章节中的真实论证。arguments 的 evidence_ids 表示正文实际使用的摘录；"
+    "verification.evidence 是该论点完整的已核验证据，包含支持和反对依据。"
+    "核对引用绑定、适用范围、数值、比较条件、反证和扩大论断。不能仅因未引用某条摘录判错；"
+    "但省略反证或条件而使结论失真时必须提出修订。"
+    "发现问题时提出 claim、retrieval 或 section 修订，且明确问题、修改要求与验收条件。"
+)
+
 SECTION_REFLECTION_PROMPT = (
-    "检查真实正文中每个事实，不能只信 used_claim_ids。核对原文适用范围、引用绑定、"
-    "数值、比较条件、反证和新增扩大论断。claims 是此章节完整的已核验论点列表，"
-    "超出该列表的具体事实必须修订或重新核验。本次只看到部分证据窗口，"
-    "不能仅因本窗口缺证据判为无依据；需要完整核验时提出 claim 或 retrieval 修订。"
+    "只检查本章节的结构、重复、衔接和范围，不重复核验论点与原文证据。"
     "修订明确问题、修改要求与验收条件，章节修改使用当前 section_id。"
 )
 
@@ -65,52 +70,56 @@ class ReflectReviewNode:
             verification = (
                 await self.artifact_store.read_json_uri(state["claim_verification_artifact_ref"])
             )["claims"]
-            ledger = {
-                item["claim_id"]: item
-                for item in (
-                    await self.artifact_store.read_json_uri(state["evidence_ledger_artifact_ref"])
-                )["claims"]
-            }
             framework = (await self.artifact_store.read_json_uri(state["framework_artifact_ref"]))[
                 "framework"
             ]
+            claims_by_id = {claim["claim_id"]: claim for claim in claims}
+            verification_by_id = {item["claim_id"]: item for item in verification}
             reports = []
             for section in draft["sections"]:
-                section_claims = [
-                    claim for claim in claims if claim["claim_id"] in section["used_claim_ids"]
+                claim_checks = [
+                    {
+                        "claim": claims_by_id[claim_id],
+                        "verification": {
+                            "status": verification_by_id[claim_id]["status"],
+                            "reason": verification_by_id[claim_id]["reason"],
+                            "evidence": verification_by_id[claim_id]["evidence"],
+                        },
+                        "arguments": [
+                            argument
+                            for argument in section["arguments"]
+                            if claim_id in argument["claim_ids"]
+                        ],
+                    }
+                    for claim_id in section["used_claim_ids"]
                 ]
-                checks = [
-                    item for item in verification if item["claim_id"] in section["used_claim_ids"]
-                ]
-                # Bound raw-text windows and overlap them for boundary-spanning issues.
-                records = []
-                for check in checks:
-                    for evidence in ledger[check["claim_id"]]["chunk_snippets"]:
-                        for window in text_windows(evidence["text"]):
-                            records.append(
-                                {
-                                    "claim_id": check["claim_id"],
-                                    "verdict": check["status"],
-                                    **evidence,
-                                    **window,
-                                }
-                            )
-                for window in text_windows(section["text"]):
-                    for group in list(batches(records, budget=12000)) or [[]]:
-                        reports.append(
-                            await invoke(
-                                self.model,
-                                ReflectionResult,
-                                SECTION_REFLECTION_PROMPT,
-                                {
-                                    "section_id": section["section_id"],
-                                    "actual_text": window,
-                                    "claims": section_claims,
-                                    "original_evidence": group,
-                                    "previous_revisions": state.get("revision_items", []),
-                                },
-                            )
+                for group in batches(claim_checks, budget=24000):
+                    reports.append(
+                        await invoke(
+                            self.model,
+                            ReflectionResult,
+                            CLAIM_REFLECTION_PROMPT,
+                            {
+                                "section_id": section["section_id"],
+                                "claim_checks": group,
+                                "previous_revisions": state.get("revision_items", []),
+                            },
                         )
+                    )
+                for window in text_windows(section["text"]):
+                    reports.append(
+                        await invoke(
+                            self.model,
+                            ReflectionResult,
+                            SECTION_REFLECTION_PROMPT,
+                            {
+                                "section_id": section["section_id"],
+                                "actual_text": window,
+                                "section_summary": section["summary"],
+                                "previous_revisions": state.get("revision_items", []),
+                            },
+                        )
+                    )
             hard_issues = self._check_hard_constraints(review_draft=draft, corpus_payload=corpus)
             for group in batches(list(text_windows(draft["body_markdown"])), budget=24000):
                 reports.append(

@@ -4,6 +4,7 @@ from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.provider import ChatClient, ModelOptions
 from app.llm.graph.workflows.review_generate.contracts import (
     content_hash,
+    framework_input_hash,
     invoke,
     revisions_for,
     save,
@@ -47,9 +48,9 @@ class GenerateFrameworkNode:
 
     async def __call__(self, state):
         try:
-            claims = (await self.artifact_store.read_json_uri(state["claims_artifact_ref"]))[
-                "claims"
-            ]
+            claims_payload = await self.artifact_store.read_json_uri(state["claims_artifact_ref"])
+            claims = claims_payload["claims"]
+            unanswered = claims_payload["unanswered"]
             verdicts = {
                 item["claim_id"]: item
                 for item in (
@@ -61,17 +62,18 @@ class GenerateFrameworkNode:
             active = [claim for claim in claims if not claim["withdrawn_reason"]]
             for claim in active:
                 verified_pack(claim, verdicts[claim["claim_id"]])
+            old_payload = None
             old = None
             if state.get("framework_artifact_ref"):
-                old = (await self.artifact_store.read_json_uri(state["framework_artifact_ref"]))[
-                    "framework"
-                ]
-            ids = [claim["claim_id"] for claim in active]
+                old_payload = await self.artifact_store.read_json_uri(
+                    state["framework_artifact_ref"]
+                )
+                old = old_payload["framework"]
+            input_hash = framework_input_hash(state["review_focus"], active, unanswered)
             if (
-                old
+                old_payload
                 and not revisions_for(state, "framework")
-                and sorted(ids)
-                == sorted(cid for section in old["sections"] for cid in section["claim_ids"])
+                and old_payload.get("framework_input_hash") == input_hash
             ):
                 return {"stage": "rendering_sections", "status": "running"}
             framework = await invoke(
@@ -81,11 +83,13 @@ class GenerateFrameworkNode:
                 {
                     "focus": state["review_focus"],
                     "claims": active,
+                    "unanswered": unanswered,
                     "old_framework": old,
                     "revisions": revisions_for(state, "framework"),
                     "output_language": state["language"],
                 },
             )
+            ids = [claim["claim_id"] for claim in active]
             mapped = [cid for section in framework["sections"] for cid in section["claim_ids"]]
             if sorted(mapped) != sorted(ids) or any(
                 not section["claim_ids"] for section in framework["sections"]
@@ -98,7 +102,11 @@ class GenerateFrameworkNode:
                 self.artifact_store,
                 state,
                 "framework",
-                {"framework": framework, "framework_hash": digest},
+                {
+                    "framework": framework,
+                    "framework_hash": digest,
+                    "framework_input_hash": input_hash,
+                },
             )
             return {
                 "framework_artifact_ref": ref,

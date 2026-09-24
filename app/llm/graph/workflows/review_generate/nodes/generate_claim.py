@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.provider import ChatClient, ModelOptions
@@ -15,7 +15,8 @@ from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 
 
 CLAIM_REVISION_PROMPT = (
-    "根据原文和修订要求调整当前论点。收缩范围或明确分歧；不能成立的非核心候选可填写 withdrawn_reason。" "不可换题，不得虚构。查询可改写以寻找支持或反证。"
+    "根据原文和修订要求调整当前论点。收缩范围或明确分歧；条件、对象或结论不可兼容时拆分为多个独立论点。"
+    "不能成立的非核心候选可填写 withdrawn_reason。不可换题，不得虚构。每条论点可改写查询以寻找支持或反证。"
 )
 
 CLAIM_GENERATION_PROMPT = (
@@ -32,13 +33,17 @@ class ClaimsPlan(BaseModel):
     unanswered_reason: str = ""
 
 
+class ClaimRevisionPlan(BaseModel):
+    claims: list[CandidateClaim] = Field(min_length=1)
+
+
 class GenerateClaimsNode:
     def __init__(self, *, artifact_store=None, model=None, revision_model=None, chat: ChatClient | None = None):
         self.artifact_store = artifact_store or LocalArtifactStore()
         client = chat or ChatClient()
         self.model = model or client.structured(ClaimsPlan, options=ModelOptions(temperature=0))
         self.revision_model = revision_model or client.structured(
-            CandidateClaim, options=ModelOptions(temperature=0)
+            ClaimRevisionPlan, options=ModelOptions(temperature=0)
         )
 
     async def __call__(self, state):
@@ -49,6 +54,7 @@ class GenerateClaimsNode:
             )["studies"]
             items = revisions_for(state, "claim")
             unanswered = []
+
             if state.get("claims_artifact_ref"):
                 payload = await self.artifact_store.read_json_uri(state["claims_artifact_ref"])
                 claims, unanswered = payload["claims"], payload["unanswered"]
@@ -58,12 +64,14 @@ class GenerateClaimsNode:
                 evidence = await self.artifact_store.read_json_uri(
                     state["evidence_ledger_artifact_ref"]
                 )
-                for index, claim in enumerate(claims):
+                updated_claims = []
+                for claim in claims:
                     if claim["claim_id"] not in targets:
+                        updated_claims.append(claim)
                         continue
                     result = await invoke(
                         self.revision_model,
-                        CandidateClaim,
+                        ClaimRevisionPlan,
                         CLAIM_REVISION_PROMPT,
                         {
                             "old_claim": claim,
@@ -76,9 +84,17 @@ class GenerateClaimsNode:
                             ),
                         },
                     )
-                    result.update(claim_id=claim["claim_id"], question_id=claim["question_id"])
-                    result["claim_hash"] = claim_hash(result)
-                    claims[index] = result
+                    replacements = result["claims"]
+                    ids = (
+                        [claim["claim_id"]]
+                        if len(replacements) == 1
+                        else [f'{claim["claim_id"]}_{index}' for index in range(1, len(replacements) + 1)]
+                    )
+                    for replacement, claim_id in zip(replacements, ids):
+                        replacement.update(claim_id=claim_id, question_id=claim["question_id"])
+                        replacement["claim_hash"] = claim_hash(replacement)
+                    updated_claims.extend(replacements)
+                claims = updated_claims
             else:
                 claims = []
                 for question in focus["research_questions"]:

@@ -326,6 +326,16 @@ class RefactorTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 validate_claims(claims, FOCUS, ["1", "2"])
 
+    async def test_comparative_claim_requires_multiple_sources(self):
+        await self.seed()
+        self.state.pop("claims_artifact_ref")
+        candidate = dict(CANDIDATE, evidence_requirement="fulltext")
+        update = await GenerateClaimsNode(
+            artifact_store=self.store, model=Model(dict(claims=[candidate]))
+        )(self.state)
+        payload = await self.store.read_json_uri(update["claims_artifact_ref"])
+        self.assertEqual(payload["claims"][0]["evidence_requirement"], "multiple_fulltext")
+
     async def test_focus_corrects_title_and_preserves_topic(self):
         await self.seed()
         update = await ResolveReviewFocusNode(artifact_store=self.store, model=Model(FOCUS))(
@@ -381,6 +391,30 @@ class RefactorTests(unittest.IsolatedAsyncioTestCase):
         ledger = await self.store.read_json_uri(update["evidence_ledger_artifact_ref"])
         self.assertEqual(len(ledger["claims"][0]["chunk_snippets"]), 3)
 
+    async def test_changed_query_invalidates_cached_evidence(self):
+        await self.seed()
+        await self.retrieve()
+        previous = await self.store.read_json_uri(self.state["evidence_ledger_artifact_ref"])
+        updated_claim = dict(CLAIM, retrieval_queries=["conditional counterexample"])
+        self.assertEqual(updated_claim["claim_hash"], CLAIM["claim_hash"])
+        self.state["claims_artifact_ref"] = await save(
+            self.store, self.state, "claims", {"claims": [updated_claim], "unanswered": []}
+        )
+        retrieval = AsyncMock()
+        retrieval.search.return_value = [document("2", "counterexample")]
+
+        update = await RetrieveEvidenceNode(
+            artifact_store=self.store, content_retrieval=retrieval
+        )(self.state)
+
+        self.assertEqual(retrieval.search.await_count, 1)
+        self.assertEqual(retrieval.search.call_args.kwargs["query"], "conditional counterexample")
+        ledger = await self.store.read_json_uri(update["evidence_ledger_artifact_ref"])
+        self.assertNotEqual(
+            ledger["claims"][0]["retrieval_plan_hash"],
+            previous["claims"][0]["retrieval_plan_hash"],
+        )
+
     async def test_opposing_or_insufficient_evidence_routes_to_revision(self):
         for status in ("mixed", "contradicted", "insufficient"):
             await self.seed()
@@ -413,8 +447,12 @@ class RefactorTests(unittest.IsolatedAsyncioTestCase):
     async def test_claim_revision_preserves_identity_and_receives_requirements(self):
         await self.seed()
         await self.retrieve()
-        revised = dict(CANDIDATE, text="Outcomes differ under the reported study conditions.")
-        model = Model(revised)
+        revised = dict(
+            CANDIDATE,
+            text="Outcomes differ under the reported study conditions.",
+            evidence_requirement="fulltext",
+        )
+        model = Model(dict(claims=[revised]))
         self.state["revision_items"] = [revision("claim")]
         update = await GenerateClaimsNode(
             artifact_store=self.store, model=Model(), revision_model=model
@@ -423,7 +461,32 @@ class RefactorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["claims"][0]["claim_id"], CLAIM["claim_id"])
         self.assertEqual(payload["claims"][0]["question_id"], CLAIM["question_id"])
         self.assertNotEqual(payload["claims"][0]["claim_hash"], CLAIM["claim_hash"])
+        self.assertEqual(payload["claims"][0]["evidence_requirement"], "multiple_fulltext")
         self.assertEqual(model.inputs[0]["revisions"], self.state["revision_items"])
+
+    async def test_claim_revision_can_split_into_retrieved_and_verified_children(self):
+        await self.seed()
+        await self.retrieve()
+        self.state["revision_items"] = [revision("claim")]
+        children = [
+            dict(CANDIDATE, text="Results depend on sample size."),
+            dict(CANDIDATE, text="Results depend on intervention duration."),
+        ]
+        update = await GenerateClaimsNode(
+            artifact_store=self.store, model=Model(), revision_model=Model(dict(claims=children))
+        )(self.state)
+        payload = await self.store.read_json_uri(update["claims_artifact_ref"])
+        self.assertEqual([claim["claim_id"] for claim in payload["claims"]], ["claim_001_1", "claim_001_2"])
+        self.assertTrue(all(claim["question_id"] == "rq_001" for claim in payload["claims"]))
+
+        self.state.update(update)
+        await self.retrieve()
+        ledger = await self.store.read_json_uri(self.state["evidence_ledger_artifact_ref"])
+        self.assertEqual([item["claim_id"] for item in ledger["claims"]], ["claim_001_1", "claim_001_2"])
+        update = await VerifyClaimsNode(
+            artifact_store=self.store, model=Model(verdict(), verdict())
+        )(self.state)
+        self.assertEqual(update["stage"], "generating_framework", update)
 
     async def test_final_package_requires_two_supporting_papers(self):
         await self.seed()
@@ -474,8 +537,24 @@ class RefactorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_writing_and_reflection_use_original_evidence(self):
         await self.seed()
-        await self.retrieve()
-        self.assertEqual((await self.verify())["stage"], "generating_framework")
+        opposing_quote = "The result is reversed in small samples."
+        await self.retrieve(
+            [
+                document(),
+                document("2", "chunk2"),
+                document("2", "counterexample", opposing_quote),
+            ]
+        )
+        verification = verdict()
+        verification["evidence"].append(
+            dict(
+                paper_id="2",
+                chunk_id="counterexample",
+                quote=opposing_quote,
+                relation="opposes",
+            )
+        )
+        self.assertEqual((await self.verify(verification))["stage"], "generating_framework")
         outline = dict(
             title=FOCUS["title"],
             scope=FOCUS["scope"],
@@ -500,7 +579,11 @@ class RefactorTests(unittest.IsolatedAsyncioTestCase):
                     dict(
                         text="Results depend on conditions [[REF_1]] [[REF_2]].",
                         claim_ids=["claim_001"],
-                        evidence_ids=[item["evidence_id"] for item in check["evidence"]],
+                        evidence_ids=[
+                            item["evidence_id"]
+                            for item in check["evidence"]
+                            if item["relation"] == "supports"
+                        ],
                     )
                 ],
                 summary="Conditional outcomes",
@@ -509,7 +592,8 @@ class RefactorTests(unittest.IsolatedAsyncioTestCase):
         update = await RenderSectionsNode(artifact_store=self.store, model=model)(self.state)
         self.assertEqual(update["stage"], "assembling_review", update)
         self.assertEqual(model.inputs[0]["output_language"], "en")
-        self.assertEqual(len(model.inputs[0]["claims_with_evidence"][0]["evidence"]), 2)
+
+        self.assertEqual(len(model.inputs[0]["claims_with_evidence"][0]["evidence"]), 3)
         self.state.update(update)
         self.state.update(
             await AssembleReviewNode(
@@ -520,11 +604,23 @@ class RefactorTests(unittest.IsolatedAsyncioTestCase):
             )(self.state)
         )
         reflection = Model(
-            *[dict(satisfied=True, summary="Supported", issues=[], revisions=[]) for _ in range(2)]
+            *[dict(satisfied=True, summary="Supported", issues=[], revisions=[]) for _ in range(3)]
         )
         update = await ReflectReviewNode(artifact_store=self.store, model=reflection)(self.state)
         self.assertEqual(update["stage"], "finalizing_handoff", update)
-        self.assertIn("original_evidence", reflection.inputs[0])
+        claim_check = reflection.inputs[0]["claim_checks"][0]
+        self.assertEqual(claim_check["arguments"][0]["evidence_ids"], [
+            item["evidence_id"]
+            for item in check["evidence"]
+            if item["relation"] == "supports"
+        ])
+        self.assertEqual(claim_check["verification"]["reason"], check["reason"])
+        self.assertEqual(
+            {item["relation"] for item in claim_check["verification"]["evidence"]},
+            {"supports", "opposes"},
+        )
+        self.assertNotIn("original_evidence", reflection.inputs[0])
+        self.assertEqual(len(reflection.inputs), 3)
         self.assertIn("abstract", reflection.inputs[-1])
         self.state["revision_items"] = [revision("section", "results")]
         rewrite = (
@@ -551,6 +647,7 @@ class RefactorTests(unittest.IsolatedAsyncioTestCase):
         draft["conclusion"] = "This proves universal superiority."
         self.state["review_draft_artifact_ref"] = await save(self.store, self.state, "draft", draft)
         reject = Model(
+            dict(satisfied=True, summary="Argument supported"),
             dict(satisfied=True, summary="Section supported"),
             dict(
                 satisfied=False,
@@ -564,10 +661,48 @@ class RefactorTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
         result = await ReflectReviewNode(artifact_store=self.store, model=reject)(self.state)
-        self.assertEqual(result["stage"], "rendering_sections")
+        self.assertEqual(result["stage"], "rendering_sections", result)
         self.assertEqual(result["reflection_round"], 1)
         self.assertIn("unsupported universal improvement", str(reject.inputs[-1]["body_sections"]))
         self.assertEqual(reject.inputs[-1]["conclusion"], "This proves universal superiority.")
+
+    async def test_framework_cache_requires_current_claim_content(self):
+        await self.seed()
+        await self.retrieve()
+        await self.verify()
+        outline = dict(
+            title=FOCUS["title"],
+            scope=FOCUS["scope"],
+            sections=[
+                dict(
+                    section_id="results",
+                    title="Results",
+                    description="Conditional outcomes",
+                    claim_ids=["claim_001"],
+                )
+            ],
+        )
+        first = Model(outline)
+        self.state.update(await GenerateFrameworkNode(artifact_store=self.store, model=first)(self.state))
+        self.assertEqual(len(first.inputs), 1)
+
+        cached = Model()
+        update = await GenerateFrameworkNode(artifact_store=self.store, model=cached)(self.state)
+        self.assertEqual(update["stage"], "rendering_sections")
+        self.assertEqual(cached.inputs, [])
+
+        updated = dict(CLAIM, text="The results depend on documented study conditions.")
+        updated["claim_hash"] = claim_hash(updated)
+        self.state["claims_artifact_ref"] = await save(
+            self.store, self.state, "claims", {"claims": [updated], "unanswered": []}
+        )
+        await self.retrieve()
+        await self.verify()
+        regenerated = Model(outline)
+        self.state.update(
+            await GenerateFrameworkNode(artifact_store=self.store, model=regenerated)(self.state)
+        )
+        self.assertEqual(len(regenerated.inputs), 1)
 
     async def test_real_claim_revision_is_retrieved_and_reverified(self):
         await self.seed()
@@ -578,7 +713,7 @@ class RefactorTests(unittest.IsolatedAsyncioTestCase):
         revised = dict(CANDIDATE, text="Outcomes differ only under the reported conditions.")
         self.state.update(
             await GenerateClaimsNode(
-                artifact_store=self.store, model=Model(), revision_model=Model(revised)
+                artifact_store=self.store, model=Model(), revision_model=Model(dict(claims=[revised]))
             )(self.state)
         )
         await self.retrieve()

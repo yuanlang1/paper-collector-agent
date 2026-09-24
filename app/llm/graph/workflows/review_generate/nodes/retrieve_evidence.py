@@ -2,7 +2,11 @@ import asyncio
 
 from app.llm.artifacts.store import LocalArtifactStore
 from app.rag.retrieval.paper_content_retrieval import PaperContentHybridRetrievalModule
-from app.llm.graph.workflows.review_generate.contracts import revisions_for, save
+from app.llm.graph.workflows.review_generate.contracts import (
+    retrieval_plan_hash,
+    revisions_for,
+    save,
+)
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 
 
@@ -33,7 +37,13 @@ class RetrieveEvidenceNode:
             async def retrieve(claim):
                 old = previous.get(claim["claim_id"])
                 revisions = revisions_for(state, "retrieval", claim["claim_id"])
-                if old and old["claim_hash"] == claim["claim_hash"] and not revisions:
+                plan_hash = retrieval_plan_hash(claim)
+                if (
+                    old
+                    and old["claim_hash"] == claim["claim_hash"]
+                    and old.get("retrieval_plan_hash") == plan_hash
+                    and not revisions
+                ):
                     return old
                 snippets = {
                     (item["paper_id"], item["chunk_id"]): item
@@ -88,6 +98,7 @@ class RetrieveEvidenceNode:
                 return {
                     "claim_id": claim["claim_id"],
                     "claim_hash": claim["claim_hash"],
+                    "retrieval_plan_hash": plan_hash,
                     "queries": queries,
                     "chunk_snippets": list(snippets.values()),
                 }
