@@ -8,6 +8,7 @@ from app.llm.graph.workflows.review_generate.contracts import (
     RevisionItem,
     batches,
     content_hash,
+    evidence_requirement_met,
     invoke,
     save,
     text_windows,
@@ -200,44 +201,59 @@ class VerifyClaimsNode:
                                 )
                             ],
                         )
-                    if verdict["status"] == "supported":
-                        verified_pack(claim, verdict)
-                        if verdict["revisions"]:
-                            raise ValueError("supported verdict cannot request claim changes")
-                    elif not verdict["revisions"]:
-                        raise ValueError("unsupported verdict needs an executable revision")
-                    if any(
-                        item["target_type"] not in {"claim", "retrieval"}
-                        or item["target_id"] != claim["claim_id"]
-                        for item in verdict["revisions"]
-                    ):
-                        raise ValueError("verification revision must target the current claim")
+                if verdict["status"] == "supported" and not evidence_requirement_met(claim, verdict):
+                    verdict.update(
+                        status="insufficient",
+                        reason=f'{verdict["reason"]} Supporting sources do not meet the claim requirement.',
+                        revisions=[
+                            dict(
+                                target_type="retrieval",
+                                target_id=claim["claim_id"],
+                                issue="Supporting source count is below the claim requirement",
+                                required_change="Retrieve evidence from additional task papers",
+                                acceptance_criteria="The required number of supporting papers is verified",
+                                queries=[],
+                            )
+                        ],
+                    )
+                if verdict["status"] == "supported":
+                    verified_pack(claim, verdict)
+                    if verdict["revisions"]:
+                        raise ValueError("supported verdict cannot request claim changes")
+                elif not verdict["revisions"]:
+                    raise ValueError("unsupported verdict needs an executable revision")
+                if any(
+                    item["target_type"] not in {"claim", "retrieval"}
+                    or item["target_id"] != claim["claim_id"]
+                    for item in verdict["revisions"]
+                ):
+                    raise ValueError("verification revision must target the current claim")
                 verdicts.append(verdict)
                 revisions.extend(verdict["revisions"])
             supported = {item["claim_id"] for item in verdicts if item["status"] == "supported"}
-            missing = [
-                question
-                for question in state["review_focus"]["research_questions"]
-                if question["core"]
-                and not any(
-                    claim["question_id"] == question["question_id"]
-                    and claim["claim_id"] in supported
-                    for claim in claims
-                )
-            ]
             ref = await save(
                 self.artifact_store,
                 state,
                 "claim_verification",
-                {"claims": verdicts, "unanswered_core_questions": missing},
+                {"claims": verdicts},
             )
             update = {"claim_verification_artifact_ref": ref}
             if revisions:
-                revisions.extend(
+                pending = [
                     item
                     for item in state.get("revision_items", [])
-                    if item["target_type"] in {"framework", "section", "synthesis"}
-                )
+                    if item["target_type"] in {"framework", "add_claim", "section", "synthesis"}
+                ]
+                if state["reflection_round"] >= state["max_reflection_rounds"] - 1 and not pending:
+                    return {
+                        **update,
+                        "revision_items": [],
+                        "warnings": state.get("warnings", [])
+                        + ["Unverified claims were excluded after the revision limit."],
+                        "stage": "rendering_sections",
+                        "status": "running",
+                    }
+                revisions.extend(pending)
                 section_ids = []
                 if state.get("framework_artifact_ref"):
                     section_ids = [
@@ -254,13 +270,17 @@ class VerifyClaimsNode:
                     section_ids=section_ids,
                 )
                 return {**update, **result}
-            if missing or not supported:
-                return failed(
-                    "core research questions lack verified evidence",
-                    **update,
-                    error_code="EVIDENCE_INSUFFICIENT",
-                )
-            return {**update, "stage": "generating_framework", "status": "running"}
+            return {
+                **update,
+                "warnings": (
+                    state.get("warnings", [])
+                    + ["No claim has verified evidence; sections will state material insufficiency."]
+                    if not supported
+                    else state.get("warnings", [])
+                ),
+                "stage": "rendering_sections",
+                "status": "running",
+            }
         except Exception as exc:
             return failed(
                 f"claim verification failed: {exc}",

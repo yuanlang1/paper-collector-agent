@@ -1,7 +1,6 @@
 from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.provider import ChatClient, ModelOptions
 from app.llm.graph.workflows.review_generate.citations import citation_anchor_ids
 from app.llm.graph.workflows.review_generate.contracts import (
     batches,
@@ -12,13 +11,15 @@ from app.llm.graph.workflows.review_generate.contracts import (
     verified_pack,
 )
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
+from app.llm.provider import ChatClient, ModelOptions
 
 
 SECTION_DRAFT_PROMPT = (
     "基于当前已核验论点和证据包写综述论证片段，使用 output_language。"
-    "以问题组织比较，不逐篇罗列，不扩展范围；保留分歧。"
-    "具体事实必须使用对应 [[REF_论文ID]] 引用。"
-    "每个片段关联输入中的 claim_ids 和 evidence_ids。重写须执行修订要求。"
+    "以当前章节的问题组织比较，不逐篇罗列，不扩展范围；保留分歧。"
+    "具体事实必须使用对应 [[REF_论文ID]] 引用。每个片段关联输入中的 claim_ids 和 evidence_ids。"
+    "没有已核验论点时，只在 insufficient_notice 说明当前材料不足以回答本节问题，不得给出肯定性结论或引用。"
+    "重写须执行修订要求。"
 )
 
 
@@ -29,8 +30,9 @@ class Argument(BaseModel):
 
 
 class SectionDraft(BaseModel):
-    arguments: list[Argument] = Field(min_length=1)
+    arguments: list[Argument] = Field(default_factory=list)
     summary: str = Field(min_length=1, max_length=500)
+    insufficient_notice: str = ""
 
 
 class RenderSectionsNode:
@@ -65,89 +67,123 @@ class RenderSectionsNode:
             }
             previous_summary = ""
             for section in framework["sections"]:
-                packages = [
-                    {"claim": claims[cid], "evidence": verified_pack(claims[cid], verdicts[cid])}
-                    for cid in section["claim_ids"]
+                section_claims = [
+                    claim
+                    for claim in claims.values()
+                    if claim["section_id"] == section["section_id"]
+                    and claim["claim_id"] in verdicts
+                    and verdicts[claim["claim_id"]]["status"] == "supported"
                 ]
-                signature = content_hash(
-                    [section, packages, state["language"], state["review_focus"]]
-                )
-                old = None
-                old_ref = state.get("section_draft_artifact_refs", {}).get(section["section_id"])
-                if old_ref:
-                    old = await self.artifact_store.read_json_uri(old_ref)
+                packages = [
+                    {"claim": claim, "evidence": verified_pack(claim, verdicts[claim["claim_id"]])}
+                    for claim in section_claims
+                ]
                 revisions = revisions_for(state, "section", section["section_id"])
+                signature = content_hash(
+                    [
+                        framework["title"],
+                        framework["scope"],
+                        section,
+                        packages,
+                        state["language"],
+                        previous_summary,
+                    ]
+                )
+                old_ref = state.get("section_draft_artifact_refs", {}).get(section["section_id"])
+                old = await self.artifact_store.read_json_uri(old_ref) if old_ref else None
                 if old and old.get("input_hash") == signature and not revisions:
                     refs[section["section_id"]] = old_ref
                     previous_summary = old["summary"]
                     continue
+
                 arguments, summaries = [], []
-                for group in batches(packages, budget=24000):
+                if packages:
+                    for group in batches(packages, budget=24000):
+                        result = await invoke(
+                            self.model,
+                            SectionDraft,
+                            SECTION_DRAFT_PROMPT,
+                            {
+                                "output_language": state["language"],
+                                "review_title": framework["title"],
+                                "review_scope": framework["scope"],
+                                "section": section,
+                                "claims_with_evidence": group,
+                                "old_draft": old if revisions else None,
+                                "revisions": revisions,
+                                "previous_section_summary": previous_summary,
+                            },
+                        )
+                        if result["insufficient_notice"]:
+                            raise ValueError("evidence-backed section cannot contain an insufficiency notice")
+                        group_ids = {item["claim"]["claim_id"] for item in group}
+                        evidence = {
+                            item["evidence_id"]: item for pack in group for item in pack["evidence"]
+                        }
+                        for argument in result["arguments"]:
+                            if (
+                                not set(argument["claim_ids"]) <= group_ids
+                                or not set(argument["evidence_ids"]) <= evidence.keys()
+                            ):
+                                raise ValueError("section argument references unknown claim or evidence")
+                            papers = {evidence[eid]["paper_id"] for eid in argument["evidence_ids"]}
+                            anchors = set(citation_anchor_ids(argument["text"]))
+                            if not anchors or not anchors <= papers:
+                                raise ValueError("section citations are not bound to supplied evidence")
+                            for claim_id in argument["claim_ids"]:
+                                claim_evidence = {
+                                    item["evidence_id"]: item
+                                    for item in verdicts[claim_id]["evidence"]
+                                }
+                                support = {
+                                    claim_evidence[evidence_id]["paper_id"]
+                                    for evidence_id in argument["evidence_ids"]
+                                    if evidence_id in claim_evidence
+                                    and claim_evidence[evidence_id]["relation"] == "supports"
+                                }
+                                required = 2 if claims[claim_id]["evidence_requirement"] == "multiple_fulltext" else 1
+                                if len(support & anchors) < required:
+                                    raise ValueError("argument omitted required claim sources")
+                        used = {
+                            claim_id for argument in result["arguments"] for claim_id in argument["claim_ids"]
+                        }
+                        if used != group_ids:
+                            raise ValueError("section draft omitted verified claims")
+                        arguments.extend(result["arguments"])
+                        summaries.append(result["summary"])
+                    text = "\n\n".join(item["text"] for item in arguments)
+                    summary = " ".join(summaries)
+                else:
                     result = await invoke(
                         self.model,
                         SectionDraft,
                         SECTION_DRAFT_PROMPT,
                         {
                             "output_language": state["language"],
-                            "focus": state["review_focus"],
-                            "framework": framework,
+                            "review_title": framework["title"],
+                            "review_scope": framework["scope"],
                             "section": section,
-                            "claims_with_evidence": group,
-                            "old_draft": old,
+                            "claims_with_evidence": [],
+                            "old_draft": old if revisions else None,
                             "revisions": revisions,
                             "previous_section_summary": previous_summary,
                         },
                     )
-                    group_ids = {item["claim"]["claim_id"] for item in group}
-                    evidence = {
-                        item["evidence_id"]: item for pack in group for item in pack["evidence"]
-                    }
-                    for argument in result["arguments"]:
-                        if (
-                            not set(argument["claim_ids"]) <= group_ids
-                            or not set(argument["evidence_ids"]) <= evidence.keys()
-                        ):
-                            raise ValueError(
-                                "section argument references unknown claim or evidence"
-                            )
-                        papers = {evidence[eid]["paper_id"] for eid in argument["evidence_ids"]}
-                        anchors = set(citation_anchor_ids(argument["text"]))
-                        if not anchors or not anchors <= papers:
-                            raise ValueError("section citations are not bound to supplied evidence")
-                        for cid in argument["claim_ids"]:
-                            matching = {item["evidence_id"] for item in verdicts[cid]["evidence"]}
-                            bound = [
-                                evidence[eid] for eid in argument["evidence_ids"] if eid in matching
-                            ]
-                            support = {
-                                item["paper_id"] for item in bound if item["relation"] == "supports"
-                            }
-                            required = (
-                                2
-                                if claims[cid]["evidence_requirement"] == "multiple_fulltext"
-                                else 1
-                            )
-                            if len(support & anchors) < required:
-                                raise ValueError("argument omitted required claim sources")
-                    used = {
-                        cid for argument in result["arguments"] for cid in argument["claim_ids"]
-                    }
-                    if used != group_ids:
-                        raise ValueError("section draft omitted verified claims")
-                    arguments.extend(result["arguments"])
-                    summaries.append(result["summary"])
+                    if result["arguments"] or not result["insufficient_notice"] or citation_anchor_ids(result["insufficient_notice"]):
+                        raise ValueError("insufficient-evidence section must contain only an uncited notice")
+                    text = result["insufficient_notice"]
+                    summary = result["summary"]
+
                 draft = {
                     "section_id": section["section_id"],
                     "title": section["title"],
                     "framework_hash": state["framework_hash"],
                     "input_hash": signature,
-                    "claim_hashes": {
-                        cid: claims[cid]["claim_hash"] for cid in section["claim_ids"]
-                    },
+                    "claim_hashes": {claim["claim_id"]: claim["claim_hash"] for claim in section_claims},
                     "arguments": arguments,
-                    "text": "\n\n".join(item["text"] for item in arguments),
-                    "summary": " ".join(summaries),
-                    "used_claim_ids": section["claim_ids"],
+                    "text": text,
+                    "summary": summary,
+                    "used_claim_ids": [claim["claim_id"] for claim in section_claims],
                     "omitted_claim_ids": [],
                 }
                 refs[section["section_id"]] = await save(
@@ -156,6 +192,9 @@ class RenderSectionsNode:
                 previous_summary = draft["summary"]
             return {
                 "section_draft_artifact_refs": refs,
+                "revision_items": [
+                    item for item in state.get("revision_items", []) if item["target_type"] != "section"
+                ],
                 "stage": "assembling_review",
                 "status": "running",
             }

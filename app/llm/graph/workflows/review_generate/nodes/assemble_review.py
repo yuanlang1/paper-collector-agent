@@ -115,6 +115,7 @@ class AssembleReviewNode:
         )
 
         if sections:
+            synthesis_revisions = revisions_for(state, "synthesis")
             synthesis = await self._synthesize(
                 [
                     SystemMessage(content=ASSEMBLE_REVIEW_PROMPT),
@@ -133,12 +134,12 @@ class AssembleReviewNode:
                                     for section in sections
                                 ],
                                 "review_body": body_markdown,
-                                "revisions": revisions_for(state, "synthesis"),
+                                "revisions": synthesis_revisions,
                                 "old_draft": (
                                     await self.artifact_store.read_json_uri(
                                         state["review_draft_artifact_ref"]
                                     )
-                                    if state.get("review_draft_artifact_ref")
+                                    if synthesis_revisions and state.get("review_draft_artifact_ref")
                                     else None
                                 ),
                             },
@@ -240,6 +241,9 @@ class AssembleReviewNode:
 
         return {
             "review_draft_artifact_ref": artifact.artifact_uri,
+            "revision_items": [
+                item for item in state.get("revision_items", []) if item["target_type"] != "synthesis"
+            ],
             "stage": "reflecting_review",
             "status": "running",
             "error": None,

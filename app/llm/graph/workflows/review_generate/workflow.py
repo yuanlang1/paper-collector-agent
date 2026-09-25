@@ -23,10 +23,6 @@ from app.llm.streaming.timeline import (
     instrument_timeline_node,
 )
 
-
-from app.llm.graph.workflows.review_generate.nodes.resolve_review_focus import (
-    ResolveReviewFocusNode,
-)
 from app.llm.graph.workflows.review_generate.nodes.verify_claims import VerifyClaimsNode
 from app.llm.provider import ChatClient
 
@@ -75,7 +71,6 @@ def build_task_review_workflow(
         )
 
     builder = StateGraph(TaskReviewWorkflowState)
-    builder.add_node("resolve_review_focus", node("resolve_review_focus", lambda: ResolveReviewFocusNode(chat=chat)))
     builder.add_node("verify_claims", node("verify_claims", lambda: VerifyClaimsNode(chat=chat)))
     builder.add_node("initialize", node("initialize", lambda: initialize_review_node))
     builder.add_node(
@@ -126,13 +121,8 @@ def build_task_review_workflow(
     )
     builder.add_conditional_edges(
         "extract_studies",
-        _route("resolving_review_focus", "resolve_review_focus"),
-        {"resolve_review_focus": "resolve_review_focus", "finalize": "finalize_result"},
-    )
-    builder.add_conditional_edges(
-        "resolve_review_focus",
-        _route("generating_claims", "generate_claims"),
-        {"generate_claims": "generate_claims", "finalize": "finalize_result",},
+        _route("generating_framework", "generate_framework"),
+        {"generate_framework": "generate_framework", "finalize": "finalize_result"},
     )
     builder.add_conditional_edges(
         "generate_claims",
@@ -151,13 +141,14 @@ def build_task_review_workflow(
             "generate_framework": "generate_framework",
             "generate_claims": "generate_claims",
             "retrieve_evidence": "retrieve_evidence",
+            "render_sections": "render_sections",
             "finalize": "finalize_result",
         },
     )
     builder.add_conditional_edges(
         "generate_framework",
-        _route("rendering_sections", "render_sections"),
-        {"render_sections": "render_sections", "finalize": "finalize_result"},
+        _route("generating_claims", "generate_claims"),
+        {"generate_claims": "generate_claims", "finalize": "finalize_result"},
     )
     builder.add_conditional_edges(
         "render_sections",

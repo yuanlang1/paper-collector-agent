@@ -21,6 +21,10 @@ class RetrieveEvidenceNode:
             claims = (await self.artifact_store.read_json_uri(state["claims_artifact_ref"]))[
                 "claims"
             ]
+            framework = (
+                await self.artifact_store.read_json_uri(state["framework_artifact_ref"])
+            )["framework"]
+            sections = {section["section_id"]: section for section in framework["sections"]}
             previous = {}
             if state.get("evidence_ledger_artifact_ref"):
                 previous = {
@@ -35,9 +39,10 @@ class RetrieveEvidenceNode:
             semaphore = asyncio.Semaphore(self.max_concurrency)
 
             async def retrieve(claim):
+                section = sections[claim["section_id"]]
                 old = previous.get(claim["claim_id"])
                 revisions = revisions_for(state, "retrieval", claim["claim_id"])
-                plan_hash = retrieval_plan_hash(claim)
+                plan_hash = retrieval_plan_hash(claim, section["description"])
                 if (
                     old
                     and old["claim_hash"] == claim["claim_hash"]
@@ -59,6 +64,7 @@ class RetrieveEvidenceNode:
                     queries += [
                         item["required_change"] for item in revisions if not item["queries"]
                     ]
+                queries = [f"{section['description']}\n{query}" for query in queries]
                 scopes = [claim["candidate_paper_ids"]]
                 if set(scopes[0]) != set(state["paper_ids_snapshot"]):
                     scopes.append(state["paper_ids_snapshot"])
@@ -109,6 +115,9 @@ class RetrieveEvidenceNode:
             ref = await save(self.artifact_store, state, "evidence_ledger", {"claims": results})
             return {
                 "evidence_ledger_artifact_ref": ref,
+                "revision_items": [
+                    item for item in state.get("revision_items", []) if item["target_type"] != "retrieval"
+                ],
                 "stage": "verifying_claims",
                 "status": "running",
             }

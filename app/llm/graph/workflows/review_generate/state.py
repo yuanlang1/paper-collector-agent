@@ -31,6 +31,7 @@ class TaskReviewWorkflowState(TypedDict, total=False):
 
     framework_artifact_ref: str | None
     framework_hash: str | None
+    changed_section_ids: list[str]
 
     claims_artifact_ref: str | None
     evidence_ledger_artifact_ref: str | None
@@ -47,8 +48,6 @@ class TaskReviewWorkflowState(TypedDict, total=False):
 
     error_code: str | None
     retryable: bool
-    review_focus: dict[str, Any]
-    review_focus_artifact_ref: str | None
     claim_verification_artifact_ref: str | None
     revision_items: list[dict[str, Any]]
     revision_before: str | None

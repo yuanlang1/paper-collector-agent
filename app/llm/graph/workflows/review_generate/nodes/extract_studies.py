@@ -134,7 +134,7 @@ class ExtractStudiesNode:
 
     async def __call__(self, state: Mapping[str, Any], config=None) -> dict[str, Any]:
         if state.get("study_records_artifact_ref"):
-            return {"stage": "resolving_review_focus", "status": "running"}
+            return {"stage": "generating_framework", "status": "running"}
         if state.get("stage") != "extracting_studies":
             return failed("extract_studies called in invalid stage")
 
@@ -229,7 +229,7 @@ class ExtractStudiesNode:
         return {
             "study_records_artifact_ref": artifact.artifact_uri,
             "warnings": warnings,
-            "stage": "resolving_review_focus",
+            "stage": "generating_framework",
             "status": "running",
             "error": None,
         }

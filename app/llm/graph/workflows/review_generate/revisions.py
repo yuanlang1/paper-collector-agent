@@ -28,6 +28,7 @@ async def snapshot(store, state):
 async def schedule_revision(store, state, items, *, claim_ids, section_ids):
     allowed = {
         "claim": set(claim_ids),
+        "add_claim": set(section_ids),
         "retrieval": set(claim_ids),
         "section": set(section_ids),
         "framework": {"review"},
@@ -50,9 +51,10 @@ async def schedule_revision(store, state, items, *, claim_ids, section_ids):
     stage = next(
         stage
         for kind, stage in (
+            ("framework", "generating_framework"),
+            ("add_claim", "generating_claims"),
             ("claim", "generating_claims"),
             ("retrieval", "retrieving_evidence"),
-            ("framework", "generating_framework"),
             ("section", "rendering_sections"),
             ("synthesis", "assembling_review"),
         )

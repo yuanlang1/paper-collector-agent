@@ -125,10 +125,12 @@ TASK_REVIEW_TIMELINE = (
         nodes=frozenset({"extract_studies"}),
     ),
     TimelineStep(
-        key="review_focus", label="读后明确研究问题",
-        starts_at=frozenset({"resolve_review_focus"}),
-        completes_at=frozenset({"resolve_review_focus"}),
-        nodes=frozenset({"resolve_review_focus"}),
+        key="framework",
+        label="依据论文画像生成综述框架",
+        starts_at=frozenset({"generate_framework"}),
+        completes_at=frozenset({"generate_framework"}),
+        nodes=frozenset({"generate_framework"}),
+        repeats=True,
     ),
     TimelineStep(
         key="claims",
@@ -150,14 +152,6 @@ TASK_REVIEW_TIMELINE = (
         key="verify_claims", label="原文核验论点",
         starts_at=frozenset({"verify_claims"}), completes_at=frozenset({"verify_claims"}),
         nodes=frozenset({"verify_claims"}), repeats=True,
-    ),
-    TimelineStep(
-        key="framework",
-        label="生成综述框架",
-        starts_at=frozenset({"generate_framework"}),
-        completes_at=frozenset({"generate_framework"}),
-        nodes=frozenset({"generate_framework"}),
-        repeats=True,
     ),
     TimelineStep(
         key="render_sections",

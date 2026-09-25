@@ -58,7 +58,7 @@ def text_windows(text, size=6000, overlap=1000):
 
 
 class RevisionItem(BaseModel):
-    target_type: Literal["claim", "retrieval", "framework", "section", "synthesis"]
+    target_type: Literal["claim", "add_claim", "retrieval", "framework", "section", "synthesis"]
     target_id: str
     issue: str = Field(min_length=1)
     required_change: str = Field(min_length=1)
@@ -81,6 +81,7 @@ class CandidateClaim(BaseModel):
     claim_type: Literal["descriptive", "comparative", "critical", "gap"]
     evidence_requirement: Literal["fulltext", "multiple_fulltext"]
     withdrawn_reason: str = ""
+    section_id: str = ""
 
     @model_validator(mode="after")
     def require_multiple_sources_for_comparison(self):
@@ -95,7 +96,7 @@ def claim_hash(claim):
             key: claim[key]
             for key in (
                 "text",
-                "question_id",
+                "section_id",
                 "claim_type",
                 "evidence_requirement",
                 "withdrawn_reason",
@@ -104,48 +105,62 @@ def claim_hash(claim):
     )
 
 
-def retrieval_plan_hash(claim):
+def retrieval_plan_hash(claim, section_description):
     return content_hash(
         {
             "candidate_paper_ids": claim["candidate_paper_ids"],
             "retrieval_queries": claim["retrieval_queries"],
+            "section_description": section_description,
         }
     )
 
 
-def framework_input_hash(focus, claims, unanswered):
+def framework_input_hash(topic, language, review_type, studies):
     return content_hash(
         {
-            "focus": focus,
-            "claims": [
-                {"claim_id": claim["claim_id"], "claim_hash": claim["claim_hash"]}
-                for claim in claims
-            ],
-            "unanswered": unanswered,
+            "topic": topic,
+            "language": language,
+            "review_type": review_type,
+            "studies": studies,
         }
     )
 
 
-def validate_claims(claims, focus, paper_ids):
+def validate_claims(claims, framework, paper_ids):
     ids = [claim["claim_id"] for claim in claims]
     if len(ids) != len(set(ids)):
         raise ValueError("duplicate Claim IDs")
-    questions = {question["question_id"] for question in focus["research_questions"]}
+    sections = {section["section_id"] for section in framework["sections"]}
     for claim in claims:
         CandidateClaim.model_validate(claim)
-        if claim["question_id"] not in questions:
-            raise ValueError("unknown research question")
+        if claim["section_id"] not in sections:
+            raise ValueError("unknown framework section")
         if not set(claim["candidate_paper_ids"]) <= set(paper_ids):
             raise ValueError("claim references papers outside task")
         if claim["claim_hash"] != claim_hash(claim):
             raise ValueError("stale Claim hash")
 
 
+def required_source_count(claim):
+    return 2 if claim["evidence_requirement"] == "multiple_fulltext" else 1
+
+
+def supporting_paper_ids(verification):
+    return {
+        item["paper_id"]
+        for item in verification["evidence"]
+        if item["relation"] == "supports"
+    }
+
+
+def evidence_requirement_met(claim, verification):
+    return len(supporting_paper_ids(verification)) >= required_source_count(claim)
+
+
 def verified_pack(claim, verification):
     if verification["claim_hash"] != claim_hash(claim) or verification["status"] != "supported":
         raise ValueError("only current supported claims may be written")
     evidence = verification["evidence"]
-    papers = {item["paper_id"] for item in evidence if item["relation"] == "supports"}
-    if not papers or (claim["evidence_requirement"] == "multiple_fulltext" and len(papers) < 2):
+    if not evidence_requirement_met(claim, verification):
         raise ValueError("final evidence package lacks required sources")
     return evidence

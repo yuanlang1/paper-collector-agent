@@ -52,7 +52,6 @@ async def finalize_task_review_node(state: Mapping[str, Any],) -> dict[str, Any]
             ),
             "review_id": state.get("review_id"),
             "version_number": state.get("review_version_number"),
-            "review_focus": state.get("review_focus", {}),
             "warnings": state.get("warnings", []),
         },
         artifact_refs=list(dict.fromkeys(artifacts.values())),

@@ -226,7 +226,7 @@ class ExtractStudiesNodeTests(unittest.IsolatedAsyncioTestCase):
 
             payload = await store.read_json_uri(update["study_records_artifact_ref"])
 
-        self.assertEqual(update["stage"], "resolving_review_focus")
+        self.assertEqual(update["stage"], "generating_framework")
         self.assertEqual(payload["studies"][0]["core_problem"], "Addresses issue A.")
         self.assertEqual(payload["studies"][0]["methods"], "Uses method B.")
         self.assertEqual(payload["studies"][0]["main_discussion"], "Discusses finding C.")

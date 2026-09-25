@@ -29,7 +29,7 @@ FRAMEWORK = {
             "section_id": section_id,
             "title": section_id.title(),
             "description": "A sufficiently detailed section description.",
-            "retrieval_hints": ["topic concept", "topic evidence"],
+            "relevant_paper_ids": ["1", "2"],
         }
         for section_id in ("evidence", "methods", "findings", "synthesis")
     ],
