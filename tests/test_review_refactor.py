@@ -14,12 +14,20 @@ from app.llm.graph.workflows.review_generate.contracts import (
 )
 from app.llm.graph.workflows.review_generate.nodes.generate_claim import GenerateClaimsNode
 from app.llm.graph.workflows.review_generate.nodes.generate_framework import GenerateFrameworkNode
-from app.llm.graph.workflows.review_generate.nodes.reflect_review import ReflectReviewNode
+from app.llm.graph.workflows.review_generate.nodes.initialize import initialize_review_node
+from app.llm.graph.workflows.review_generate.nodes.reflect_review import (
+    ReflectReviewNode,
+    WritingReviewResult,
+)
 from app.llm.graph.workflows.review_generate.nodes.render_section import RenderSectionsNode
 from app.llm.graph.workflows.review_generate.nodes.retrieve_evidence import RetrieveEvidenceNode
 from app.llm.graph.workflows.review_generate.nodes.verify_claims import VerifyClaimsNode
 from app.llm.graph.workflows.review_generate.revisions import schedule_revision
-from app.llm.graph.workflows.review_generate.workflow import build_task_review_workflow
+from app.llm.graph.workflows.review_generate.workflow import (
+    _route_after_writing_review,
+    build_task_review_workflow,
+)
+from app.llm.subagents.task_review import TaskReviewDelegation
 
 
 class Model:
@@ -98,6 +106,25 @@ def verdict(status="supported"):
     }
 
 
+def writing_review(decision="pass", revisions=None, suggestions=None):
+    return {
+        "decision": decision,
+        "summary": "Writing review completed.",
+        "revisions": revisions or [],
+        "suggestions": suggestions or [],
+    }
+
+
+def writing_revision(target_type="section", target_id="results"):
+    return {
+        "target_type": target_type,
+        "target_id": target_id,
+        "issue": "The conclusion is broader than the verified claim.",
+        "required_change": "Restore the verified study conditions.",
+        "acceptance_criteria": "The condition remains explicit in the draft.",
+    }
+
+
 class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -112,6 +139,9 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
             "paper_ids_snapshot": ["1", "2"],
             "max_reflection_rounds": 3,
             "reflection_round": 0,
+            "max_writing_revision_rounds": 1,
+            "writing_revision_round": 0,
+            "writing_review_plan_ref": None,
             "revision_items": [],
             "warnings": [],
         }
@@ -172,6 +202,58 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
         self.state.update(update)
         return update
 
+    async def seed_review_draft(self):
+        await self.seed_claim()
+        self.state["corpus_artifact_ref"] = await save(
+            self.store,
+            self.state,
+            "corpus",
+            {"papers": [{"paper_id": 1}, {"paper_id": 2}]},
+        )
+        self.state["claim_verification_artifact_ref"] = await save(
+            self.store,
+            self.state,
+            "claim_verification",
+            {
+                "claims": [
+                    {
+                        "claim_id": CLAIM["claim_id"],
+                        "claim_hash": CLAIM["claim_hash"],
+                        "status": "supported",
+                        "reason": "Supported.",
+                        "evidence": [],
+                    }
+                ]
+            },
+        )
+        self.state["review_draft_artifact_ref"] = await save(
+            self.store,
+            self.state,
+            "review_draft",
+            {
+                "abstract": "Abstract [[REF_1]].",
+                "sections": [
+                    {
+                        "section_id": "results",
+                        "title": "Results",
+                        "text": "The result depends on study conditions [[REF_1]] [[REF_2]].",
+                        "summary": "Conditional outcomes.",
+                        "arguments": [],
+                        "used_claim_ids": ["claim_001"],
+                        "omitted_claim_ids": [],
+                    }
+                ],
+                "body_markdown": "## Results\n\nThe result depends on study conditions [[REF_1]] [[REF_2]].",
+                "conclusion": "The outcome is conditional [[REF_1]].",
+            },
+        )
+
+    async def renew_review_draft(self):
+        draft = await self.store.read_json_uri(self.state["review_draft_artifact_ref"])
+        self.state["review_draft_artifact_ref"] = await save(
+            self.store, self.state, "review_draft", draft
+        )
+
     async def test_framework_uses_study_profiles_before_claims(self):
         model = Model(FRAMEWORK)
         update = await GenerateFrameworkNode(artifact_store=self.store, model=model)(self.state)
@@ -186,6 +268,21 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["claims"][0]["section_id"], "results")
         self.assertNotIn("question_id", payload["claims"][0])
         self.assertEqual(claims["changed_section_ids"], [])
+
+    async def test_claim_generation_passes_all_section_studies_in_one_call(self):
+        studies = [
+            {"paper_id": paper_id, "main_discussion": "x" * 7000}
+            for paper_id in ("1", "2")
+        ]
+        model = Model({"claims": []})
+        claims, reason = await GenerateClaimsNode(model=model)._generate_for_section(
+            self.state, FRAMEWORK["sections"][0], studies, [], []
+        )
+
+        self.assertEqual(claims, [])
+        self.assertEqual(reason, "")
+        self.assertEqual(len(model.inputs), 1)
+        self.assertEqual(model.inputs[0]["studies"], studies)
 
     async def test_framework_cache_does_not_depend_on_claim_changes(self):
         first = Model(FRAMEWORK)
@@ -403,21 +500,226 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result["stage"], "generating_claims")
 
-    def test_reflection_splits_large_evidence_without_dropping_relations(self):
-        checks = ReflectReviewNode()._claim_checks(
-            CLAIM,
-            {
-                "status": "supported",
-                "reason": "",
-                "evidence": [
-                    {"evidence_id": "support", "paper_id": "1", "chunk_id": "a", "relation": "supports", "text": "a" * 14000},
-                    {"evidence_id": "oppose", "paper_id": "2", "chunk_id": "b", "relation": "opposes", "text": "b" * 14000},
-                ],
-            },
-            [{"text": "body" * 2000, "claim_ids": ["claim_001"], "evidence_ids": ["support"]}],
+    async def test_writing_reflection_uses_one_compact_review_input(self):
+        await self.seed_review_draft()
+        model = Model(writing_review())
+
+        update = await ReflectReviewNode(artifact_store=self.store, model=model)(self.state)
+
+        self.assertEqual(update["stage"], "finalizing_handoff")
+        self.assertEqual(len(model.inputs), 1)
+        payload = model.inputs[0]
+        self.assertEqual(
+            payload["supported_claims"],
+            [{"claim_id": "claim_001", "section_id": "results", "text": CLAIM["text"]}],
         )
-        self.assertGreater(len(checks), 1)
-        self.assertEqual({item["relation"] for check in checks for item in check["verification"]["evidence"]}, {"supports", "opposes"})
+        self.assertEqual(payload["review_mode"], "initial")
+        self.assertNotIn("study_profiles", payload)
+        self.assertNotIn("evidence", payload)
+        report = await self.store.read_json_uri(update["reflection_report_artifact_ref"])
+        self.assertEqual(report["effective_decision"], "pass")
+        self.assertEqual(report["hard_issues"], [])
+
+    async def test_writing_reflection_saves_plan_for_targeted_revision(self):
+        await self.seed_review_draft()
+        revision_item = writing_revision()
+
+        update = await ReflectReviewNode(
+            artifact_store=self.store,
+            model=Model(writing_review("revise", [revision_item])),
+        )(self.state)
+
+        self.assertEqual(update["stage"], "rendering_sections")
+        self.assertEqual(update["writing_revision_round"], 1)
+        self.assertEqual(update["revision_items"], [revision_item])
+        plan = await self.store.read_json_uri(update["writing_review_plan_ref"])
+        self.assertEqual(plan["review_draft_artifact_ref"], self.state["review_draft_artifact_ref"])
+        self.assertEqual(plan["writing_revision_round"], 1)
+        self.assertEqual(plan["revisions"], [revision_item])
+
+    async def test_writing_reflection_stops_when_budget_is_exhausted(self):
+        await self.seed_review_draft()
+        self.state["max_writing_revision_rounds"] = 0
+
+        update = await ReflectReviewNode(
+            artifact_store=self.store,
+            model=Model(writing_review("revise", [writing_revision()])),
+        )(self.state)
+
+        self.assertEqual(update["stage"], "failed")
+        self.assertEqual(update["error_code"], "WRITING_REVISION_LIMIT_REACHED")
+        report = await self.store.read_json_uri(update["reflection_report_artifact_ref"])
+        self.assertEqual(report["stop_reason"], "writing_revision_limit_reached")
+
+    async def test_writing_reflection_uses_two_revision_rounds_then_accepts(self):
+        await self.seed_review_draft()
+        self.state["max_writing_revision_rounds"] = 2
+        model = Model(
+            writing_review("revise", [writing_revision()]),
+            writing_review("revise", [writing_revision()]),
+            writing_review("pass"),
+        )
+        node = ReflectReviewNode(artifact_store=self.store, model=model)
+
+        self.state.update(await node(self.state))
+        self.state["revision_items"] = []
+        await self.renew_review_draft()
+        self.state.update(await node(self.state))
+        self.state["revision_items"] = []
+        await self.renew_review_draft()
+        update = await node(self.state)
+
+        self.assertEqual(update["stage"], "finalizing_handoff")
+        self.assertEqual(self.state["writing_revision_round"], 2)
+        self.assertEqual(len(model.inputs), 3)
+        self.assertEqual(model.inputs[1]["review_mode"], "acceptance")
+        self.assertIsNotNone(model.inputs[1]["previous_plan"])
+
+    async def test_synthesis_revision_skips_section_rendering(self):
+        await self.seed_review_draft()
+
+        update = await ReflectReviewNode(
+            artifact_store=self.store,
+            model=Model(writing_review("revise", [writing_revision("synthesis", "review")])),
+        )(self.state)
+
+        self.assertEqual(update["stage"], "assembling_review")
+
+    async def test_writing_revision_rerenders_only_its_target_section(self):
+        framework = copy.deepcopy(FRAMEWORK)
+        framework["sections"].append(
+            {
+                "section_id": "methods",
+                "title": "Methods",
+                "description": "How were the results obtained?",
+                "relevant_paper_ids": ["1", "2"],
+            }
+        )
+        await self.seed_framework(framework)
+        self.state["claims_artifact_ref"] = await save(
+            self.store, self.state, "claims", {"claims": [CLAIM], "unanswered": []}
+        )
+        self.state["claim_verification_artifact_ref"] = await save(
+            self.store,
+            self.state,
+            "verification",
+            {
+                "claims": [
+                    {
+                        "claim_id": CLAIM["claim_id"],
+                        "claim_hash": CLAIM["claim_hash"],
+                        "status": "supported",
+                        "reason": "Supported.",
+                        "evidence": [
+                            {
+                                "evidence_id": "support_1",
+                                "paper_id": "1",
+                                "chunk_id": "chunk1",
+                                "relation": "supports",
+                                "text": "The result is conditional.",
+                            },
+                            {
+                                "evidence_id": "support_2",
+                                "paper_id": "2",
+                                "chunk_id": "chunk2",
+                                "relation": "supports",
+                                "text": "The result is conditional.",
+                            },
+                        ],
+                    }
+                ]
+            },
+        )
+        old_results = await save(
+            self.store,
+            self.state,
+            "section_draft",
+            {"section_id": "results", "summary": "Old results.", "input_hash": "old"},
+        )
+        old_methods = await save(
+            self.store,
+            self.state,
+            "section_draft",
+            {"section_id": "methods", "summary": "Old methods.", "input_hash": "old"},
+        )
+        self.state["section_draft_artifact_refs"] = {
+            "results": old_results,
+            "methods": old_methods,
+        }
+        self.state["revision_items"] = [writing_revision()]
+        model = Model(
+            {
+                "arguments": [
+                    {
+                        "text": "The results depend on conditions [[REF_1]] [[REF_2]].",
+                        "claim_ids": ["claim_001"],
+                        "evidence_ids": ["support_1", "support_2"],
+                    }
+                ],
+                "summary": "Updated results.",
+            }
+        )
+
+        update = await RenderSectionsNode(artifact_store=self.store, model=model)(self.state)
+
+        self.assertEqual(update["stage"], "assembling_review")
+        self.assertNotEqual(update["section_draft_artifact_refs"]["results"], old_results)
+        self.assertEqual(update["section_draft_artifact_refs"]["methods"], old_methods)
+        self.assertEqual(update["revision_items"], [])
+        self.assertEqual(len(model.inputs), 1)
+
+    async def test_writing_reflection_rejects_research_stage_revisions(self):
+        await self.seed_review_draft()
+        invalid = writing_revision()
+        invalid["target_type"] = "claim"
+
+        update = await ReflectReviewNode(
+            artifact_store=self.store,
+            model=Model(writing_review("revise", [invalid])),
+        )(self.state)
+
+        self.assertEqual(update["stage"], "failed")
+        self.assertEqual(update["error_code"], "REFLECTION_FAILED")
+
+    def test_writing_review_contract_rejects_invalid_decision(self):
+        with self.assertRaises(ValueError):
+            WritingReviewResult.model_validate(writing_review("pass", [writing_revision()]))
+
+    def test_writing_revision_budget_default_and_bounds(self):
+        self.assertEqual(TaskReviewDelegation(task_id=1, topic="topic").max_writing_revision_rounds, 1)
+        for value in (0, 5):
+            self.assertEqual(
+                TaskReviewDelegation(
+                    task_id=1,
+                    topic="topic",
+                    max_writing_revision_rounds=value,
+                ).max_writing_revision_rounds,
+                value,
+            )
+        with self.assertRaises(ValueError):
+            TaskReviewDelegation(task_id=1, topic="topic", max_writing_revision_rounds=6)
+
+    async def test_initialize_passes_writing_revision_budget_to_state(self):
+        update = await initialize_review_node(
+            {
+                "run_id": "review-test",
+                "active_tool_call": {
+                    "args": {
+                        "task_id": 1,
+                        "topic": "topic",
+                        "max_writing_revision_rounds": 2,
+                    }
+                },
+            }
+        )
+
+        self.assertEqual(update["max_writing_revision_rounds"], 2)
+        self.assertEqual(update["writing_revision_round"], 0)
+        self.assertIsNone(update["writing_review_plan_ref"])
+
+    def test_writing_reflection_route_cannot_return_to_research(self):
+        for stage in ("generating_framework", "generating_claims", "retrieving_evidence"):
+            self.assertEqual(_route_after_writing_review({"stage": stage}), "finalize")
 
     def test_reflection_allows_an_uncited_material_insufficiency_review(self):
         issues = ReflectReviewNode()._check_hard_constraints(
@@ -425,8 +727,10 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
                 "body_markdown": "Current material is insufficient.",
                 "abstract": "Current material is insufficient.",
                 "conclusion": "Current material is insufficient.",
+                "sections": [{"section_id": "results"}],
             },
             corpus_payload={"papers": []},
+            framework=FRAMEWORK,
             require_citations=False,
         )
         self.assertNotIn("review has no citation anchors", issues)

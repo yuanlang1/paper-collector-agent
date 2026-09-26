@@ -36,13 +36,21 @@ def _route(expected_stage: str, target: str):
     return route
 
 
-def _route_after_reflection(state: TaskReviewWorkflowState,) -> str:
+def _route_after_verification(state: TaskReviewWorkflowState,) -> str:
     return {
         "finalizing_handoff": "finalizing_handoff",
         "generating_claims": "generate_claims",
         "retrieving_evidence": "retrieve_evidence",
         "rendering_sections": "render_sections",
         "generating_framework": "generate_framework",
+        "assembling_review": "assemble_review",
+    }.get(state.get("stage"), "finalize")
+
+
+def _route_after_writing_review(state: TaskReviewWorkflowState,) -> str:
+    return {
+        "finalizing_handoff": "finalizing_handoff",
+        "rendering_sections": "render_sections",
         "assembling_review": "assemble_review",
     }.get(state.get("stage"), "finalize")
 
@@ -57,7 +65,7 @@ def build_task_review_workflow(
     node_overrides = node_overrides or {}
     chat = chat or ChatClient()
 
-    def node(name: str, factory):
+    def node(name: str, factory, *, round_key="reflection_round"):
         if name in node_overrides:
             target = node_overrides[name]
         else:
@@ -67,7 +75,7 @@ def build_task_review_workflow(
             node_name=name,
             node=target,
             timeline=TASK_REVIEW_TIMELINE,
-            round_key="reflection_round",
+            round_key=round_key,
         )
 
     builder = StateGraph(TaskReviewWorkflowState)
@@ -96,7 +104,12 @@ def build_task_review_workflow(
         "assemble_review", node("assemble_review", lambda: AssembleReviewNode(chat=chat)),
     )
     builder.add_node(
-        "reflect_review", node("reflect_review", lambda: ReflectReviewNode(chat=chat)),
+        "reflect_review",
+        node(
+            "reflect_review",
+            lambda: ReflectReviewNode(chat=chat),
+            round_key="writing_revision_round",
+        ),
     )
     builder.add_node(
         "finalizing_handoff", node("finalizing_handoff", FinalizingHandoffNode),
@@ -136,7 +149,7 @@ def build_task_review_workflow(
     )
     builder.add_conditional_edges(
         "verify_claims",
-        _route_after_reflection,
+        _route_after_verification,
         {
             "generate_framework": "generate_framework",
             "generate_claims": "generate_claims",
@@ -162,13 +175,10 @@ def build_task_review_workflow(
     )
     builder.add_conditional_edges(
         "reflect_review",
-        _route_after_reflection,
+        _route_after_writing_review,
         {
             "finalizing_handoff": "finalizing_handoff",
-            "generate_framework": "generate_framework",
             "assemble_review": "assemble_review",
-            "generate_claims": "generate_claims",
-            "retrieve_evidence": "retrieve_evidence",
             "render_sections": "render_sections",
             "finalize": "finalize_result",
         },

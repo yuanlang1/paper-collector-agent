@@ -1,243 +1,221 @@
-import json
-from typing import Any
+from __future__ import annotations
 
-from pydantic import BaseModel, Field
+import asyncio
+from typing import Literal
+
+from pydantic import BaseModel, Field, model_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.citations import (
     citation_anchor_ids,
     unsupported_synthesis_anchor_ids,
 )
-from app.llm.graph.workflows.review_generate.contracts import (
-    RevisionItem,
-    batches,
-    invoke,
-    save,
-    text_windows,
-)
+from app.llm.graph.workflows.review_generate.contracts import invoke, save
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
-from app.llm.graph.workflows.review_generate.revisions import schedule_revision
 from app.llm.provider import ChatClient, ModelOptions
 
 
-CLAIM_REFLECTION_PROMPT = (
-    "检查论点在本章节中的真实论证。arguments 是正文实际使用的摘录；verification.evidence 是该论点的核验证据片段。"
-    "当 evidence_fragment 为 true 时，只判断该片段和正文片段的忠实性，不重新判断整体来源数量。"
-    "核对引用绑定、适用范围、数值、比较条件、反证和扩大论断。发现问题时提出 claim、retrieval 或 section 修订。"
-)
-
-SECTION_REFLECTION_PROMPT = (
-    "检查本章节是否回答讨论问题，是否遗漏画像中已经呈现的重要发现、分歧或局限，并检查结构、重复和衔接。"
-    "画像只能指出需要补查的方向，不能直接当作正文证据。遗漏论点使用 add_claim，target_id 使用 section_id。"
-    "章节文本问题使用 section，结构问题使用 framework。"
-)
-
-REVIEW_REFLECTION_PROMPT = (
-    "审核真实 body_markdown 中的新增事实、章节覆盖、重复和矛盾，并检查摘要结论是否扩大正文结论。"
-    "正文为分批输入，不因其他批次内容缺席判断遗漏。摘要结论修改目标为 synthesis/review；结构修改为 framework/review。"
-    "硬检查问题必须解决。不允许虚构系统综述执行过程。"
+WRITING_REVIEW_PROMPT = (
+    "你是学术综述写作编辑。依据既定框架和已核验论点，检查草稿的综合表达、"
+    "组织连贯、限定条件及摘要结论一致性。只提出影响理解或结论准确性的必要修改。"
+    "修改目标只能是 section 或 synthesis；保持已有研究范围、论点和证据基础，"
+    "不得要求新增论点、重建框架或补充检索。一般润色写入 suggestions，不触发修改。"
+    "review_mode 为 acceptance 时，重点验收 previous_plan 中的问题是否解决，"
+    "并检查修改是否引入明显不一致。"
 )
 
 
-class ReflectionIssue(BaseModel):
-    severity: str
-    category: str
-    description: str
+class WritingRevision(BaseModel):
+    target_type: Literal["section", "synthesis"]
+    target_id: str = Field(min_length=1)
+    issue: str = Field(min_length=1)
+    required_change: str = Field(min_length=1)
+    acceptance_criteria: str = Field(min_length=1)
 
 
-class ReflectionResult(BaseModel):
-    satisfied: bool
-    summary: str = ""
-    issues: list[ReflectionIssue] = Field(default_factory=list)
-    revisions: list[RevisionItem] = Field(default_factory=list)
+class WritingReviewResult(BaseModel):
+    decision: Literal["pass", "revise", "blocked"]
+    summary: str = Field(min_length=1)
+    revisions: list[WritingRevision] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_decision(self):
+        if (self.decision == "revise") != bool(self.revisions):
+            raise ValueError("only revise may include required writing revisions")
+        return self
 
 
 class ReflectReviewNode:
     def __init__(self, *, artifact_store=None, model=None, chat: ChatClient | None = None):
         self.artifact_store = artifact_store or LocalArtifactStore()
         self.model = model or (chat or ChatClient()).structured(
-            ReflectionResult, options=ModelOptions(temperature=0)
+            WritingReviewResult, options=ModelOptions(temperature=0)
         )
-
-    def _claim_checks(self, claim, verification, arguments):
-        base = {
-            "claim": claim,
-            "verification": {
-                "status": verification["status"],
-                "reason": verification["reason"],
-            },
-        }
-        argument_windows = [
-            {**argument, "text": window["text"], "char_start": window["char_start"]}
-            for argument in arguments
-            for window in text_windows(argument["text"])
-        ] or [{}]
-        evidence_fragments = []
-        for evidence in verification["evidence"]:
-            if len(json.dumps(evidence, ensure_ascii=False)) <= 6000:
-                evidence_fragments.append(evidence)
-                continue
-            evidence_fragments.extend(
-                {
-                    key: evidence[key]
-                    for key in ("evidence_id", "paper_id", "chunk_id", "relation")
-                }
-                | {"text": window["text"]}
-                for window in text_windows(evidence["text"], size=5000, overlap=0)
-            )
-        checks = []
-        for argument_group in batches(argument_windows, budget=8000):
-            payload = {**base, "arguments": argument_group}
-            evidence_budget = 24000 - len(json.dumps(payload, ensure_ascii=False))
-            for evidence_group in batches(evidence_fragments, budget=evidence_budget):
-                checks.append(
-                    {
-                        **payload,
-                        "verification": {**payload["verification"], "evidence": evidence_group},
-                        "evidence_fragment": len(evidence_fragments) != len(evidence_group),
-                    }
-                )
-        return checks
 
     async def __call__(self, state):
         try:
-            draft = await self.artifact_store.read_json_uri(state["review_draft_artifact_ref"])
-            corpus = await self.artifact_store.read_json_uri(state["corpus_artifact_ref"])
-            studies = (
-                await self.artifact_store.read_json_uri(state["study_records_artifact_ref"])
-            )["studies"]
-            claims = (await self.artifact_store.read_json_uri(state["claims_artifact_ref"]))[
-                "claims"
-            ]
-            verification = (
-                await self.artifact_store.read_json_uri(state["claim_verification_artifact_ref"])
-            )["claims"]
-            framework = (await self.artifact_store.read_json_uri(state["framework_artifact_ref"]))[
-                "framework"
-            ]
-            claims_by_id = {claim["claim_id"]: claim for claim in claims}
-            verification_by_id = {item["claim_id"]: item for item in verification}
-            reports = []
-            for section in draft["sections"]:
-                for claim_id in section["used_claim_ids"]:
-                    reports.extend(
-                        await self._reflect_claim_checks(
-                            section["section_id"],
-                            self._claim_checks(
-                                claims_by_id[claim_id],
-                                verification_by_id[claim_id],
-                                [
-                                    argument
-                                    for argument in section["arguments"]
-                                    if claim_id in argument["claim_ids"]
-                                ],
-                            ),
-                            state,
-                        )
-                    )
-                framework_section = next(
-                    item for item in framework["sections"] if item["section_id"] == section["section_id"]
+            draft, corpus, claims_payload, verification_payload, framework_payload = (
+                await asyncio.gather(
+                    self.artifact_store.read_json_uri(state["review_draft_artifact_ref"]),
+                    self.artifact_store.read_json_uri(state["corpus_artifact_ref"]),
+                    self.artifact_store.read_json_uri(state["claims_artifact_ref"]),
+                    self.artifact_store.read_json_uri(state["claim_verification_artifact_ref"]),
+                    self.artifact_store.read_json_uri(state["framework_artifact_ref"]),
                 )
-                profiles = [
-                    study
-                    for study in studies
-                    if study["paper_id"] in framework_section["relevant_paper_ids"]
-                ]
-                section_claims = [
-                    claim for claim in claims if claim["section_id"] == section["section_id"]
-                ]
-                for window in text_windows(section["text"]):
-                    reports.append(
-                        await invoke(
-                            self.model,
-                            ReflectionResult,
-                            SECTION_REFLECTION_PROMPT,
-                            {
-                                "section": framework_section,
-                                "actual_text": window,
-                                "section_summary": section["summary"],
-                                "study_profiles": profiles,
-                                "section_claims": section_claims,
-                                "previous_revisions": state.get("revision_items", []),
-                            },
-                        )
-                    )
+            )
+            previous_plan = (
+                await self.artifact_store.read_json_uri(state["writing_review_plan_ref"])
+                if state.get("writing_review_plan_ref")
+                else None
+            )
+            framework = framework_payload["framework"]
+            supported_claims = self._supported_claims(
+                claims_payload["claims"], verification_payload["claims"]
+            )
             hard_issues = self._check_hard_constraints(
                 review_draft=draft,
                 corpus_payload=corpus,
-                require_citations=any(item["status"] == "supported" for item in verification),
+                framework=framework,
+                require_citations=bool(supported_claims),
             )
-            for group in batches(list(text_windows(draft["body_markdown"])), budget=24000):
-                reports.append(
-                    await invoke(
-                        self.model,
-                        ReflectionResult,
-                        REVIEW_REFLECTION_PROMPT,
-                        {
-                            "framework": framework,
-                            "body_sections": group,
-                            "verified_claims": [
-                                claim for claim in claims if not claim["withdrawn_reason"]
-                            ],
-                            "abstract": draft["abstract"],
-                            "conclusion": draft["conclusion"],
-                            "system_hard_issues": hard_issues,
-                            "previous_revisions": state.get("revision_items", []),
-                        },
-                    )
-                )
-            satisfied = not hard_issues and all(
-                report["satisfied"]
-                and not any(
-                    issue["severity"] in {"critical", "major"} for issue in report["issues"]
-                )
-                for report in reports
-            )
-            items = [item for report in reports for item in report["revisions"]]
-            ref = await save(
-                self.artifact_store,
-                state,
-                "reflection_report",
-                {"satisfied": satisfied, "hard_issues": hard_issues, "reports": reports},
-            )
-            update = {"reflection_report_artifact_ref": ref}
-            if satisfied and not items:
-                return {**update, "stage": "finalizing_handoff", "status": "running"}
-            result = await schedule_revision(
-                self.artifact_store,
-                {**state, **update},
-                items,
-                claim_ids=[claim["claim_id"] for claim in claims],
-                section_ids=[section["section_id"] for section in framework["sections"]],
-            )
-            return {**update, **result}
-        except Exception as exc:
-            return failed(
-                f"review reflection failed: {exc}", error_code="REFLECTION_FAILED", retryable=True
-            )
-
-    async def _reflect_claim_checks(self, section_id, checks, state):
-        return [
-            await invoke(
+            result = await invoke(
                 self.model,
-                ReflectionResult,
-                CLAIM_REFLECTION_PROMPT,
+                WritingReviewResult,
+                WRITING_REVIEW_PROMPT,
                 {
-                    "section_id": section_id,
-                    "claim_checks": [check],
-                    "previous_revisions": state.get("revision_items", []),
+                    "review_mode": "acceptance" if previous_plan else "initial",
+                    "framework": {
+                        "title": framework["title"],
+                        "scope": framework["scope"],
+                        "sections": [
+                            {
+                                key: section[key]
+                                for key in ("section_id", "title", "description")
+                            }
+                            for section in framework["sections"]
+                        ],
+                    },
+                    "abstract": draft["abstract"],
+                    "body_markdown": draft["body_markdown"],
+                    "conclusion": draft["conclusion"],
+                    "supported_claims": supported_claims,
+                    "previous_plan": previous_plan,
+                    "hard_issues": hard_issues,
                 },
             )
-            for check in checks
-        ]
+            self._validate_targets(result["revisions"], framework)
+            return await self._complete_reflection(state, result, hard_issues)
+        except Exception as exc:
+            return failed(
+                f"review reflection failed: {exc}",
+                error_code="REFLECTION_FAILED",
+                retryable=True,
+            )
+
+    @staticmethod
+    def _supported_claims(claims, verification):
+        claims_by_id = {claim["claim_id"]: claim for claim in claims}
+        supported = []
+        for verdict in verification:
+            claim = claims_by_id.get(verdict["claim_id"])
+            if (
+                claim
+                and not claim["withdrawn_reason"]
+                and verdict["claim_hash"] == claim["claim_hash"]
+                and verdict["status"] == "supported"
+            ):
+                supported.append(
+                    {key: claim[key] for key in ("claim_id", "section_id", "text")}
+                )
+        return supported
+
+    @staticmethod
+    def _validate_targets(revisions, framework):
+        section_ids = {section["section_id"] for section in framework["sections"]}
+        for revision in revisions:
+            if revision["target_type"] == "section":
+                if revision["target_id"] not in section_ids:
+                    raise ValueError("writing revision targets an unknown section")
+            elif revision["target_id"] != "review":
+                raise ValueError("synthesis revision must target review")
+
+    async def _complete_reflection(self, state, result, hard_issues):
+        decision = result["decision"]
+        stop_reason = None
+        if decision == "blocked":
+            effective_decision = "blocked"
+            stop_reason = "model_blocked"
+        elif decision == "pass" and hard_issues:
+            effective_decision = "blocked"
+            stop_reason = "hard_constraints_failed"
+        elif (
+            decision == "revise"
+            and state["writing_revision_round"] >= state["max_writing_revision_rounds"]
+        ):
+            effective_decision = "blocked"
+            stop_reason = "writing_revision_limit_reached"
+        else:
+            effective_decision = decision
+
+        report = await save(
+            self.artifact_store,
+            state,
+            "reflection_report",
+            {
+                "review_draft_artifact_ref": state["review_draft_artifact_ref"],
+                "writing_revision_round": state["writing_revision_round"],
+                "previous_plan_ref": state.get("writing_review_plan_ref"),
+                "model_result": result,
+                "hard_issues": hard_issues,
+                "effective_decision": effective_decision,
+                "stop_reason": stop_reason,
+            },
+        )
+        update = {"reflection_report_artifact_ref": report}
+        if effective_decision == "pass":
+            return {**update, "stage": "finalizing_handoff", "status": "running"}
+        if effective_decision == "blocked":
+            error_code = (
+                "WRITING_REVISION_LIMIT_REACHED"
+                if stop_reason == "writing_revision_limit_reached"
+                else "WRITING_REVIEW_BLOCKED"
+            )
+            return failed(result["summary"], **update, error_code=error_code)
+
+        next_round = state["writing_revision_round"] + 1
+        plan = await save(
+            self.artifact_store,
+            state,
+            "writing_review_plan",
+            {
+                "review_draft_artifact_ref": state["review_draft_artifact_ref"],
+                "writing_revision_round": next_round,
+                "revisions": result["revisions"],
+            },
+        )
+        stage = (
+            "rendering_sections"
+            if any(item["target_type"] == "section" for item in result["revisions"])
+            else "assembling_review"
+        )
+        return {
+            **update,
+            "writing_review_plan_ref": plan,
+            "writing_revision_round": next_round,
+            "revision_items": result["revisions"],
+            "stage": stage,
+            "status": "running",
+        }
 
     def _check_hard_constraints(
         self,
         *,
-        review_draft: dict[str, Any],
-        corpus_payload: dict[str, Any],
-        require_citations: bool = True,
-    ) -> list[str]:
+        review_draft,
+        corpus_payload,
+        framework,
+        require_citations=True,
+    ):
         text = "\n".join(
             [
                 review_draft.get("abstract", ""),
@@ -247,6 +225,7 @@ class ReflectReviewNode:
         )
         anchors = citation_anchor_ids(text)
         known_paper_ids = {str(paper["paper_id"]) for paper in corpus_payload["papers"]}
+        section_ids = {section["section_id"] for section in review_draft["sections"]}
         issues = []
         if not review_draft.get("body_markdown", "").strip():
             issues.append("review body is empty")
@@ -256,6 +235,9 @@ class ReflectReviewNode:
             issues.append("review conclusion is empty")
         if require_citations and not anchors:
             issues.append("review has no citation anchors")
+        for section in framework["sections"]:
+            if section["section_id"] not in section_ids:
+                issues.append(f"review omits framework section: {section['section_id']}")
         for paper_id in sorted(
             unsupported_synthesis_anchor_ids(
                 body_markdown=review_draft.get("body_markdown", ""),
@@ -264,7 +246,8 @@ class ReflectReviewNode:
             )
         ):
             issues.append(
-                "synthesis cites a paper outside the evidence-backed body: " f"REF_{paper_id}"
+                "synthesis cites a paper outside the evidence-backed body: "
+                f"REF_{paper_id}"
             )
         for paper_id in anchors:
             if not paper_id.isdigit():

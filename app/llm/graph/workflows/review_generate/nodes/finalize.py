@@ -36,9 +36,16 @@ async def finalize_task_review_node(state: Mapping[str, Any],) -> dict[str, Any]
             for key, value in state.get("section_draft_artifact_refs", {}).items()
         }
     )
+    if state.get("writing_review_plan_ref"):
+        artifacts["writing_review_plan"] = state["writing_review_plan_ref"]
     summary = "学术综述已生成并通过反思审核。" if success else "学术综述未能完成。"
     if blocked:
         summary = "RAG 尚未完成，暂时无法生成综述。"
+    elif state.get("error_code") in {
+        "WRITING_REVISION_LIMIT_REACHED",
+        "WRITING_REVIEW_BLOCKED",
+    }:
+        summary = "综述写作质量审核未通过，已保留草稿和审核记录。"
     return build_action_result_update(
         call=call,
         status="success" if success else "error",

@@ -65,6 +65,11 @@ class RenderSectionsNode:
                 for key, ref in refs.items()
                 if key in {section["section_id"] for section in framework["sections"]}
             }
+            revision_targets = {
+                item["target_id"]
+                for item in state.get("revision_items", [])
+                if item["target_type"] == "section"
+            }
             previous_summary = ""
             for section in framework["sections"]:
                 section_claims = [
@@ -91,7 +96,9 @@ class RenderSectionsNode:
                 )
                 old_ref = state.get("section_draft_artifact_refs", {}).get(section["section_id"])
                 old = await self.artifact_store.read_json_uri(old_ref) if old_ref else None
-                if old and old.get("input_hash") == signature and not revisions:
+                if old and section["section_id"] not in revision_targets and (
+                    revision_targets or old.get("input_hash") == signature
+                ):
                     refs[section["section_id"]] = old_ref
                     previous_summary = old["summary"]
                     continue

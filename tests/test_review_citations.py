@@ -6,6 +6,9 @@ from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.nodes.assemble_review import (
     AssembleReviewNode,
 )
+from app.llm.graph.workflows.review_generate.nodes.finalizing_handoff import (
+    FinalizingHandoffNode,
+)
 from app.llm.graph.workflows.review_generate.nodes.reflect_review import (
     ReflectReviewNode,
 )
@@ -109,14 +112,55 @@ class ReviewCitationTests(unittest.IsolatedAsyncioTestCase):
                 "abstract": "Summary [[REF_2]]",
                 "body_markdown": "Evidence [[REF_1]].",
                 "conclusion": "Conclusion [[REF_1]]",
+                "sections": [{"section_id": "evidence"}],
             },
             corpus_payload={"papers": [{"paper_id": 1}, {"paper_id": 2}]},
+            framework={**FRAMEWORK, "sections": [FRAMEWORK["sections"][0]]},
         )
 
         self.assertIn(
             "synthesis cites a paper outside the evidence-backed body: REF_2",
             issues,
         )
+
+    async def test_stale_reflection_report_cannot_approve_a_new_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = LocalArtifactStore(base_dir=directory)
+            draft = await store.write_json(
+                run_id="review-test",
+                step_key="draft",
+                source="test",
+                kind="draft",
+                payload={},
+            )
+            report = await store.write_json(
+                run_id="review-test",
+                step_key="report",
+                source="test",
+                kind="report",
+                payload={
+                    "effective_decision": "pass",
+                    "hard_issues": [],
+                    "review_draft_artifact_ref": "artifact://old-draft",
+                },
+            )
+            corpus = await store.write_json(
+                run_id="review-test",
+                step_key="corpus",
+                source="test",
+                kind="corpus",
+                payload={"papers": []},
+            )
+
+            update = await FinalizingHandoffNode(artifact_store=store)(
+                {
+                    "reflection_report_artifact_ref": report.artifact_uri,
+                    "review_draft_artifact_ref": draft.artifact_uri,
+                    "corpus_artifact_ref": corpus.artifact_uri,
+                }
+            )
+
+        self.assertEqual(update["stage"], "failed")
 
 
 if __name__ == "__main__":

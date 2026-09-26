@@ -27,6 +27,7 @@ class TaskReviewDelegation(BaseModel):
         "critical",
     ] = "narrative"
     max_reflection_rounds: int = Field(default=5, ge=1, le=5)
+    max_writing_revision_rounds: int = Field(default=1, ge=0, le=5)
 
 def build_task_review_runtime(*, chat: ChatClient) -> SubAgentRuntime:
     from app.llm.graph.workflows.review_generate.workflow import (

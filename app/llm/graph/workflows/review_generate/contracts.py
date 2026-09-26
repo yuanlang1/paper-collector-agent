@@ -37,6 +37,10 @@ async def save(store, state, name, payload):
     return artifact.artifact_uri
 
 
+async def read_optional_json(store, artifact_ref):
+    return await store.read_json_uri(artifact_ref) if artifact_ref else None
+
+
 def batches(records, budget=12000):
     batch, size = [], 0
     for record in records:

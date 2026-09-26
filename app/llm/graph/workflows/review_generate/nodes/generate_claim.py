@@ -3,7 +3,6 @@ from pydantic import BaseModel, Field
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import (
     CandidateClaim,
-    batches,
     claim_hash,
     invoke,
     revisions_for,
@@ -18,11 +17,6 @@ CLAIM_GENERATION_PROMPT = (
     "围绕当前章节的讨论问题比较论文，生成具体、可核验的候选综合论点，不按论文罗列。"
     "论文画像不是原文证据，不预设一致性或优越性；不可新增论文。"
     "跨论文比较必须要求 multiple_fulltext。保留分歧、条件和局限；检索查询应同时寻找支持、相反结果和适用条件；使用输出语言。"
-)
-
-CLAIM_MERGE_PROMPT = (
-    "跨批次综合已有候选论点，合并重复，保留一致、差异与条件。"
-    "不得引入输入之外的事实；所有结论仍须原文核验。"
 )
 
 CLAIM_REVISION_PROMPT = (
@@ -53,39 +47,19 @@ class GenerateClaimsNode:
         relevant = [
             study for study in studies if study["paper_id"] in section["relevant_paper_ids"]
         ]
-        candidates = []
-        reason = ""
-        groups = list(batches(relevant))
-        for group in groups:
-            result = await invoke(
-                self.model,
-                ClaimsPlan,
-                CLAIM_GENERATION_PROMPT,
-                {
-                    "section": section,
-                    "studies": group,
-                    "existing_candidates": [claim["text"] for claim in existing + candidates],
-                    "revisions": additions,
-                    "output_language": state["language"],
-                },
-            )
-            candidates.extend(result["claims"])
-            if result["unanswered_reason"]:
-                reason = result["unanswered_reason"]
-        if len(groups) > 1 and candidates:
-            result = await invoke(
-                self.model,
-                ClaimsPlan,
-                CLAIM_MERGE_PROMPT,
-                {
-                    "section": section,
-                    "candidates": candidates,
-                    "output_language": state["language"],
-                },
-            )
-            candidates = result["claims"]
-            reason = result["unanswered_reason"]
-        return candidates, reason
+        result = await invoke(
+            self.model,
+            ClaimsPlan,
+            CLAIM_GENERATION_PROMPT,
+            {
+                "section": section,
+                "studies": relevant,
+                "existing_candidates": [claim["text"] for claim in existing],
+                "revisions": additions,
+                "output_language": state["language"],
+            },
+        )
+        return result["claims"], result["unanswered_reason"]
 
     async def __call__(self, state):
         try:

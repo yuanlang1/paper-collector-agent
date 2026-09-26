@@ -18,6 +18,8 @@ class TaskReviewWorkflowState(TypedDict, total=False):
     allow_abstract_evidence: bool
     max_reflection_rounds: int
     reflection_round: int
+    max_writing_revision_rounds: int
+    writing_revision_round: int
 
     stage: str
     status: str
@@ -40,6 +42,7 @@ class TaskReviewWorkflowState(TypedDict, total=False):
     review_draft_artifact_ref: str | None
 
     reflection_report_artifact_ref: str | None
+    writing_review_plan_ref: str | None
     revision_plan_artifact_ref: str | None
 
     final_review_artifact_ref: str | None

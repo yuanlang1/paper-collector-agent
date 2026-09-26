@@ -36,7 +36,12 @@ class FinalizingHandoffNode:
             ),
         )
 
-        if not reflection_report["satisfied"]:
+        if (
+            reflection_report["effective_decision"] != "pass"
+            or reflection_report["hard_issues"]
+            or reflection_report["review_draft_artifact_ref"]
+            != state["review_draft_artifact_ref"]
+        ):
             return failed("review was not approved by reflection")
 
         final_review = self._build_final_review(
