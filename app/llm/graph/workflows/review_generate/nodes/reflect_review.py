@@ -15,29 +15,102 @@ from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
 
 
-WRITING_REVIEW_PROMPT = (
-    "你是学术综述写作编辑。依据既定框架和已核验论点，检查草稿的综合表达、"
-    "组织连贯、限定条件及摘要结论一致性。只提出影响理解或结论准确性的必要修改。"
-    "修改目标只能是 section 或 synthesis；保持已有研究范围、论点和证据基础，"
-    "不得要求新增论点、重建框架或补充检索。一般润色写入 suggestions，不触发修改。"
-    "review_mode 为 acceptance 时，重点验收 previous_plan 中的问题是否解决，"
-    "并检查修改是否引入明显不一致。"
-)
+WRITING_REVIEW_PROMPT = """
+    你是学术综述写作质量控制编辑。依据既定 Framework、已核验 Claim 与当前草稿，
+    检查章节是否回应 discussion_questions、跨研究综合是否清楚、衔接和术语是否一致、
+    限定条件是否被保留，以及摘要、正文和结论是否一致。
+
+    只提出影响理解或结论准确性的必要写作修改。修改目标只能是 section 或 synthesis；
+    保持已有研究范围、论点和证据基础，不得要求新增 Claim、重建 Framework 或补充检索。
+    证据本身不足应说明为受阻原因，不能伪装成可由写作解决的问题。一般润色写入 suggestions，
+    不触发修改。程序提供的 hard_issues 未解决时不得 decision=pass。
+
+    review_mode 为 initial 时进行一次全文检查；为 acceptance 时，重点验收 previous_plan 的问题是否解决，并检查修改是否引入明显不一致。
+
+    以下仅为格式示例；使用实际 section_id 和问题，勿照抄：
+    pass：
+    ```json
+    {
+    "decision": "pass",
+    "summary": "必要写作问题已解决。",
+    "revisions": [],
+    "suggestions": ["可统一术语表述。"]
+    }
+    ```
+    revise：
+    ```json
+    {
+    "decision": "revise",
+    "summary": "章节衔接与摘要结论仍不一致。",
+    "revisions": [
+        {
+        "target_type": "section",
+        "target_id": "methods",
+        "issue": "未回应章节讨论问题。",
+        "required_change": "补充对已核验条件差异的综合。",
+        "acceptance_criteria": "正文明确比较已核验的条件差异且不新增结论。"
+        },
+        {
+        "target_type": "synthesis",
+        "target_id": "review",
+        "issue": "摘要扩大了正文结论。",
+        "required_change": "收缩为正文已有的限定表述。",
+        "acceptance_criteria": "摘要与正文的范围和强度一致。"
+        }
+    ],
+    "suggestions": []
+    }
+    ```
+    blocked：
+    ```json
+    {
+    "decision": "blocked",
+    "summary": "正文缺少可支撑必要结论的已核验证据，无法仅靠写作解决。",
+    "revisions": [],
+    "suggestions": []
+    }
+    ```
+""".strip()
 
 
 class WritingRevision(BaseModel):
-    target_type: Literal["section", "synthesis"]
-    target_id: str = Field(min_length=1)
-    issue: str = Field(min_length=1)
-    required_change: str = Field(min_length=1)
-    acceptance_criteria: str = Field(min_length=1)
+    target_type: Literal["section", "synthesis"] = Field(
+        description="修改目标类型：section 重写指定章节，synthesis 修改摘要和结论。",
+    )
+    target_id: str = Field(
+        min_length=1,
+        description="section 类型为现有 section_id；synthesis 类型固定为 review。",
+    )
+    issue: str = Field(
+        min_length=1,
+        description="当前草稿中影响理解或结论准确性的具体写作问题。",
+    )
+    required_change: str = Field(
+        min_length=1,
+        description="节点必须执行的定向写作修改，不涉及新增证据、Claim 或 Framework。",
+    )
+    acceptance_criteria: str = Field(
+        min_length=1,
+        description="复查时用于判断该写作问题已解决的明确标准。",
+    )
 
 
 class WritingReviewResult(BaseModel):
-    decision: Literal["pass", "revise", "blocked"]
-    summary: str = Field(min_length=1)
-    revisions: list[WritingRevision] = Field(default_factory=list)
-    suggestions: list[str] = Field(default_factory=list)
+    decision: Literal["pass", "revise", "blocked"] = Field(
+        description="审核决定：pass 可交付，revise 执行修改，blocked 表示问题无法仅靠写作解决。",
+    )
+    summary: str = Field(
+        min_length=1,
+        description="概括审核结论、主要问题或受阻原因。",
+    )
+    revisions: list[WritingRevision] = Field(
+        default_factory=list,
+        description="必须执行的写作修改项；仅 decision 为 revise 时非空，pass 或 blocked 时为空。",
+    )
+    suggestions: list[str] = Field(
+        default_factory=list,
+        description="不影响交付的一般润色建议，不触发下一轮修改。",
+    )
 
     @model_validator(mode="after")
     def validate_decision(self):
@@ -91,7 +164,12 @@ class ReflectReviewNode:
                         "sections": [
                             {
                                 key: section[key]
-                                for key in ("section_id", "title", "description")
+                                for key in (
+                                    "section_id",
+                                    "title",
+                                    "description",
+                                    "discussion_questions",
+                                )
                             }
                             for section in framework["sections"]
                         ],

@@ -38,12 +38,8 @@ def _route(expected_stage: str, target: str):
 
 def _route_after_verification(state: TaskReviewWorkflowState,) -> str:
     return {
-        "finalizing_handoff": "finalizing_handoff",
         "generating_claims": "generate_claims",
-        "retrieving_evidence": "retrieve_evidence",
         "rendering_sections": "render_sections",
-        "generating_framework": "generate_framework",
-        "assembling_review": "assemble_review",
     }.get(state.get("stage"), "finalize")
 
 
@@ -151,9 +147,7 @@ def build_task_review_workflow(
         "verify_claims",
         _route_after_verification,
         {
-            "generate_framework": "generate_framework",
             "generate_claims": "generate_claims",
-            "retrieve_evidence": "retrieve_evidence",
             "render_sections": "render_sections",
             "finalize": "finalize_result",
         },
@@ -183,7 +177,11 @@ def build_task_review_workflow(
             "finalize": "finalize_result",
         },
     )
-    builder.add_edge("finalizing_handoff", "persist_review")
+    builder.add_conditional_edges(
+        "finalizing_handoff",
+        _route("persisting_review", "persist_review"),
+        {"persist_review": "persist_review", "finalize": "finalize_result"},
+    )
     builder.add_edge("persist_review", "finalize_result")
     builder.add_edge("finalize_result", END)
 

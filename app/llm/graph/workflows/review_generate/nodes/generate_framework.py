@@ -1,6 +1,3 @@
-from dataclasses import dataclass
-from typing import Any
-
 from pydantic import BaseModel, Field, model_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
@@ -9,44 +6,104 @@ from app.llm.graph.workflows.review_generate.contracts import (
     framework_input_hash,
     invoke,
     read_optional_json,
-    revisions_for,
     save,
 )
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
 
 
-FRAMEWORK_PROMPT = (
-    "依据论文画像规划综述框架。章节标题应表示讨论对象，不预设未经原文核验的结论。"
-    "每节给出需要回答的讨论问题和相关论文 ID；同一论文可以属于多个章节。"
-    "未使用的论文必须说明排除原因。保持固定论文集，不得虚构系统综述检索、筛选或质量评价流程。"
-    "重规划时，未改变的章节保留原 section_id；新章节使用新 ID。"
-    "对每个待处理的旧章节修订，在 section_revision_targets 中给出承接它的新 section_id；"
-    "仅当框架层已处理该意见时才使用 null。"
-    "识别明显的语料与主题不匹配；使用输出语言。"
-)
+FRAMEWORK_PROMPT = """
+你是一名学术综述规划者。依据输入的论文画像规划综述框架；
+论文画像只用于组织议题，不是已经核验的原文结论。
+
+章节标题表示讨论对象，description 说明本节覆盖范围，
+discussion_questions 列出后续可由论文原文证据回答的比较、条件或局限问题。
+章节按主题组织且尽量避免重叠；同一论文可服务于多个章节。每篇输入论文必须归入至少一个章节，
+或在 excluded_papers 中给出具体排除理由。保持固定论文集，不得虚构系统综述检索、筛选或质量评价流程。
+识别明显的语料与主题不匹配，并使用 output_language。
+
+以下仅为格式示例；使用实际输入中的论文 ID 和输出语言，勿照抄内容：
+```json
+{
+  "title": "主题的研究综述",
+  "scope": "比较给定论文中的方法、结果与适用条件。",
+  "adjustment_reason": "",
+  "corpus_scope_mismatch": false,
+  "sections": [
+    {
+      "section_id": "methods",
+      "title": "研究方法与适用条件",
+      "description": "比较不同研究设计及其适用范围。",
+      "discussion_questions": ["不同方法在何种条件下得到可比结果？"],
+      "relevant_paper_ids": ["paper_001", "paper_002"]
+    }
+  ],
+  "excluded_papers": []
+}
+```
+""".strip()
 
 
 class ExcludedPaper(BaseModel):
-    paper_id: str
-    reason: str = Field(min_length=1)
+    """未纳入任一综述章节的输入论文及其理由。"""
+
+    paper_id: str = Field(description="被排除的当前任务论文 ID。")
+    reason: str = Field(min_length=1, description="该论文不适合当前综述范围的具体原因。")
 
 
 class FrameworkSection(BaseModel):
-    section_id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
-    title: str = Field(min_length=1)
-    description: str = Field(min_length=1)
-    relevant_paper_ids: list[str] = Field(min_length=1)
+    """综述 Framework 中一个按主题组织的章节。"""
+
+    section_id: str = Field(
+        pattern=r"^[a-z][a-z0-9_]*$",
+        description="稳定的章节标识，只能使用小写字母、数字和下划线，并以字母开头。",
+    )
+    title: str = Field(
+        min_length=1,
+        description="面向读者的章节标题，应描述讨论对象而非预设结论。",
+    )
+    description: str = Field(
+        min_length=1,
+        description="章节覆盖范围及与其他章节的边界说明。",
+    )
+    discussion_questions: list[str] = Field(
+        min_length=1,
+        max_length=4,
+        description="本章节需要回答的研究问题，围绕比较、条件或局限展开，不预设未经证据核验的结论。",
+    )
+    relevant_paper_ids: list[str] = Field(
+        min_length=1,
+        description="与本章节相关的当前任务论文 ID；同一论文可出现在多个章节。",
+    )
 
 
 class ReviewFramework(BaseModel):
-    title: str = Field(min_length=2)
-    scope: str = Field(min_length=10)
-    adjustment_reason: str = ""
-    corpus_scope_mismatch: bool = False
-    sections: list[FrameworkSection] = Field(min_length=1)
-    excluded_papers: list[ExcludedPaper] = Field(default_factory=list)
-    section_revision_targets: dict[str, str | None] = Field(default_factory=dict)
+    """由论文画像生成、供 Claim 和章节写作使用的综述框架。"""
+
+    title: str = Field(
+        min_length=2,
+        description="综述标题，概括主题而不把待核验结论写成事实。",
+    )
+    scope: str = Field(
+        min_length=10,
+        description="综述覆盖对象、比较维度和边界的简要说明。",
+    )
+    adjustment_reason: str = Field(
+        default="",
+        description="语料与主题不匹配时说明需要调整任务范围的原因；无不匹配时为空。",
+    )
+    corpus_scope_mismatch: bool = Field(
+        default=False,
+        description="是否发现当前论文集与综述主题存在明显范围不匹配。",
+    )
+    sections: list[FrameworkSection] = Field(
+        min_length=1,
+        description="按主题组织的非空章节列表。",
+    )
+    excluded_papers: list[ExcludedPaper] = Field(
+        default_factory=list,
+        description="未映射到任何章节的输入论文及排除理由。",
+    )
 
     @model_validator(mode="after")
     def unique_sections(self):
@@ -54,16 +111,6 @@ class ReviewFramework(BaseModel):
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate section IDs")
         return self
-
-
-@dataclass
-class FrameworkInputs:
-    studies: list[dict[str, Any]]
-    claims: list[dict[str, Any]]
-    verification: list[dict[str, Any]]
-    old_payload: dict[str, Any] | None
-    revisions: list[dict[str, Any]]
-    section_revisions: list[dict[str, Any]]
 
 
 class GenerateFrameworkNode:
@@ -75,71 +122,39 @@ class GenerateFrameworkNode:
 
     async def __call__(self, state):
         try:
-            inputs = await self._load_inputs(state)
+            studies = (
+                await self.artifact_store.read_json_uri(state["study_records_artifact_ref"])
+            )["studies"]
+            old_payload = await read_optional_json(
+                self.artifact_store, state.get("framework_artifact_ref")
+            )
             input_hash = framework_input_hash(
-                state["topic"], state["language"], state["review_type"], inputs.studies
+                state["topic"], state["language"], state["review_type"], studies
             )
             if (
-                inputs.old_payload
-                and inputs.old_payload.get("framework_input_hash") == input_hash
-                and not inputs.revisions
+                old_payload
+                and old_payload.get("framework_input_hash") == input_hash
             ):
                 return {"stage": "generating_claims", "status": "running"}
 
-            framework = await self._generate_framework(state, inputs)
-            return await self._save_framework(state, inputs, framework, input_hash)
+            framework = await invoke(
+                self.model,
+                ReviewFramework,
+                FRAMEWORK_PROMPT,
+                {
+                    "topic": state["topic"],
+                    "output_language": state["language"],
+                    "review_type": state["review_type"],
+                    "overview": studies,
+                },
+            )
+            return await self._save_framework(state, old_payload, framework, input_hash)
         except Exception as exc:
             return failed(
                 f"framework generation failed: {exc}", error_code="FRAMEWORK_FAILED", retryable=True
             )
 
-    async def _load_inputs(self, state) -> FrameworkInputs:
-        studies = (
-            await self.artifact_store.read_json_uri(state["study_records_artifact_ref"])
-        )["studies"]
-        claims_payload = await read_optional_json(
-            self.artifact_store, state.get("claims_artifact_ref")
-        )
-        verification_payload = await read_optional_json(
-            self.artifact_store, state.get("claim_verification_artifact_ref")
-        )
-        return FrameworkInputs(
-            studies=studies,
-            claims=claims_payload["claims"] if claims_payload else [],
-            verification=verification_payload["claims"] if verification_payload else [],
-            old_payload=await read_optional_json(
-                self.artifact_store, state.get("framework_artifact_ref")
-            ),
-            revisions=revisions_for(state, "framework"),
-            section_revisions=[
-                item
-                for item in state.get("revision_items", [])
-                if item["target_type"] in {"section", "add_claim"}
-            ],
-        )
-
-    async def _generate_framework(self, state, inputs: FrameworkInputs):
-        return await invoke(
-            self.model,
-            ReviewFramework,
-            FRAMEWORK_PROMPT,
-            {
-                "topic": state["topic"],
-                "output_language": state["language"],
-                "review_type": state["review_type"],
-                "overview": inputs.studies,
-                "old_framework": inputs.old_payload and inputs.old_payload["framework"],
-                "claims": inputs.claims,
-                "verification": [
-                    {key: item[key] for key in ("claim_id", "status", "reason")}
-                    for item in inputs.verification
-                ],
-                "revisions": inputs.revisions + inputs.section_revisions,
-            },
-        )
-
-    async def _save_framework(self, state, inputs: FrameworkInputs, framework, input_hash):
-        section_revision_targets = framework.pop("section_revision_targets")
+    async def _save_framework(self, state, old_payload, framework, input_hash):
         paper_ids = set(state["paper_ids_snapshot"])
         mapped = {
             paper_id
@@ -149,50 +164,22 @@ class GenerateFrameworkNode:
         excluded = {item["paper_id"] for item in framework["excluded_papers"]}
         if not mapped <= paper_ids or not excluded <= paper_ids:
             raise ValueError("framework references papers outside task")
-        if not framework["corpus_scope_mismatch"] and (mapped | excluded != paper_ids or mapped & excluded):
+        if not framework["corpus_scope_mismatch"] and (
+            mapped | excluded != paper_ids or mapped & excluded
+        ):
             raise ValueError("each paper must be assigned to a section or excluded")
         if framework["corpus_scope_mismatch"]:
             return failed(framework["adjustment_reason"], error_code="CORPUS_SCOPE_MISMATCH")
 
         old_sections = {
             section["section_id"]: section
-            for section in (inputs.old_payload or {}).get("framework", {}).get("sections", [])
+            for section in (old_payload or {}).get("framework", {}).get("sections", [])
         }
         changed_sections = [
             section["section_id"]
             for section in framework["sections"]
             if old_sections.get(section["section_id"]) != section
         ]
-        section_ids = {section["section_id"] for section in framework["sections"]}
-        if inputs.revisions and set(section_revision_targets) != {
-            item["target_id"] for item in inputs.section_revisions
-        }:
-            raise ValueError("framework must route every pending section revision")
-        if any(
-            target is not None and target not in section_ids
-            for target in section_revision_targets.values()
-        ):
-            raise ValueError("framework routed a revision to an unknown section")
-
-        stale_claim_ids = {
-            claim["claim_id"]
-            for claim in inputs.claims
-            if claim["section_id"] in changed_sections
-            or claim["section_id"] not in section_ids
-        }
-        remaining_revisions = []
-        for item in state.get("revision_items", []):
-            if item["target_type"] == "framework":
-                continue
-            if item["target_type"] in {"claim", "retrieval"} and item["target_id"] in stale_claim_ids:
-                continue
-            if item["target_type"] in {"section", "add_claim"}:
-                target = section_revision_targets.get(item["target_id"], item["target_id"])
-                if target is None:
-                    continue
-                remaining_revisions.append({**item, "target_id": target})
-            else:
-                remaining_revisions.append(item)
         digest = content_hash(framework)
         ref = await save(
             self.artifact_store,
@@ -209,7 +196,6 @@ class GenerateFrameworkNode:
             "framework_artifact_ref": ref,
             "framework_hash": digest,
             "changed_section_ids": changed_sections,
-            "revision_items": remaining_revisions,
             "stage": "generating_claims",
             "status": "running",
         }

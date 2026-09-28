@@ -15,7 +15,6 @@ from app.llm.graph.workflows.review_generate.nodes.extract_studies import (
 from app.llm.graph.workflows.review_generate.nodes.finalize import finalize_task_review_node
 from app.llm.graph.workflows.review_generate.nodes.load import LoadTaskCorpusNode
 from app.protos.paper.v1 import paper_pb2
-from app.llm.graph.workflows.review_generate.contracts import batches
 
 
 def _document(chunk_id: str, index: int, page: int, section_path: str, text: str,) -> Document:
@@ -359,12 +358,6 @@ class ExtractStudiesNodeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [item.metadata["chunk_id"] for item in opening], ["chunk-a", "chunk-b", "chunk-c"]
         )
-
-    def test_profile_batches_preserve_full_content_and_paper_ids(self):
-        records = [{"paper_id": str(index), "core_problem": "x" * 2400} for index in range(50)]
-        groups = list(batches(records))
-        self.assertGreater(len(groups), 1)
-        self.assertEqual([item for group in groups for item in group], records)
 
     async def test_model_failure_blocks_review_and_returns_report(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

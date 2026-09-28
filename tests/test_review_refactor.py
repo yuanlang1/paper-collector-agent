@@ -1,5 +1,6 @@
 import copy
 import json
+import re
 import tempfile
 import unittest
 from unittest.mock import AsyncMock
@@ -8,25 +9,65 @@ from langchain_core.documents import Document
 
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import (
+    CandidateClaim,
     claim_hash,
     save,
     validate_claims,
 )
-from app.llm.graph.workflows.review_generate.nodes.generate_claim import GenerateClaimsNode
-from app.llm.graph.workflows.review_generate.nodes.generate_framework import GenerateFrameworkNode
+from app.llm.graph.workflows.review_generate.nodes.assemble_review import (
+    ASSEMBLE_REVIEW_PROMPT,
+    REPAIR_SYNTHESIS_PROMPT,
+    ReviewSynthesis,
+)
+from app.llm.graph.workflows.review_generate.nodes.extract_studies import (
+    ARTICLE_PROFILE_PROMPT,
+    ARTICLE_PROFILE_TOOLS,
+    PROFILE_SUBMISSION_PROMPT,
+    ProfileField,
+    SearchCurrentPaperArgs,
+    SubmittedArticleProfile,
+)
+from app.llm.graph.workflows.review_generate.nodes.generate_claim import (
+    CLAIM_GENERATION_PROMPT,
+    CLAIM_REVISION_PROMPT,
+    ClaimRevisionPlan,
+    ClaimsPlan,
+    GenerateClaimsNode,
+)
+from app.llm.graph.workflows.review_generate.nodes.generate_framework import (
+    FRAMEWORK_PROMPT,
+    ExcludedPaper,
+    FrameworkSection,
+    GenerateFrameworkNode,
+    ReviewFramework,
+)
 from app.llm.graph.workflows.review_generate.nodes.initialize import initialize_review_node
 from app.llm.graph.workflows.review_generate.nodes.reflect_review import (
     ReflectReviewNode,
+    WRITING_REVIEW_PROMPT,
     WritingReviewResult,
+    WritingRevision,
 )
-from app.llm.graph.workflows.review_generate.nodes.render_section import RenderSectionsNode
+from app.llm.graph.workflows.review_generate.nodes.render_section import (
+    SECTION_DRAFT_PROMPT,
+    Argument,
+    RenderSectionsNode,
+    SectionDraft,
+)
 from app.llm.graph.workflows.review_generate.nodes.retrieve_evidence import RetrieveEvidenceNode
-from app.llm.graph.workflows.review_generate.nodes.verify_claims import VerifyClaimsNode
-from app.llm.graph.workflows.review_generate.revisions import schedule_revision
+from app.llm.graph.workflows.review_generate.nodes.verify_claims import (
+    CLAIM_VERIFICATION_PROMPT,
+    ClaimRevision,
+    EvidenceQuote,
+    Verdict,
+    VerifyClaimsNode,
+)
 from app.llm.graph.workflows.review_generate.workflow import (
+    _route_after_verification,
     _route_after_writing_review,
     build_task_review_workflow,
 )
+from app.llm.provider.structured_output import build_json_mode_instruction
 from app.llm.subagents.task_review import TaskReviewDelegation
 
 
@@ -61,6 +102,7 @@ FRAMEWORK = {
             "section_id": "results",
             "title": "Results",
             "description": "How do reported study conditions affect outcomes?",
+            "discussion_questions": ["How do study conditions affect outcomes?"],
             "relevant_paper_ids": ["1", "2"],
         }
     ],
@@ -78,7 +120,7 @@ CLAIM = dict(CANDIDATE, claim_id="claim_001", section_id="results")
 CLAIM["claim_hash"] = claim_hash(CLAIM)
 
 
-def revision(kind="retrieval", target="claim_001"):
+def revision(kind="claim", target="claim_001"):
     return {
         "target_type": kind,
         "target_id": target,
@@ -260,14 +302,34 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
         self.state.update(update)
         self.assertEqual(update["stage"], "generating_claims")
         self.assertEqual(model.inputs[0]["overview"][0]["main_discussion"], "Conditional result")
+        framework = await self.store.read_json_uri(update["framework_artifact_ref"])
+        self.assertEqual(
+            framework["framework"]["sections"][0]["discussion_questions"],
+            ["How do study conditions affect outcomes?"],
+        )
 
+        claim_model = Model({"claims": [CANDIDATE]})
         claims = await GenerateClaimsNode(
-            artifact_store=self.store, model=Model({"claims": [CANDIDATE]})
+            artifact_store=self.store, model=claim_model
         )(self.state)
         payload = await self.store.read_json_uri(claims["claims_artifact_ref"])
         self.assertEqual(payload["claims"][0]["section_id"], "results")
         self.assertNotIn("question_id", payload["claims"][0])
+        self.assertEqual(
+            claim_model.inputs[0]["section"]["discussion_questions"],
+            ["How do study conditions affect outcomes?"],
+        )
         self.assertEqual(claims["changed_section_ids"], [])
+
+    async def test_framework_requires_discussion_questions(self):
+        framework = copy.deepcopy(FRAMEWORK)
+        del framework["sections"][0]["discussion_questions"]
+
+        update = await GenerateFrameworkNode(
+            artifact_store=self.store, model=Model(framework)
+        )(self.state)
+
+        self.assertEqual(update["error_code"], "FRAMEWORK_FAILED")
 
     async def test_claim_generation_passes_all_section_studies_in_one_call(self):
         studies = [
@@ -310,12 +372,17 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
             dict(CANDIDATE, text="Results depend on sample size."),
             dict(CANDIDATE, text="Results depend on intervention duration."),
         ]
+        revision_model = Model({"claims": children})
         update = await GenerateClaimsNode(
-            artifact_store=self.store, model=Model(), revision_model=Model({"claims": children})
+            artifact_store=self.store, model=Model(), revision_model=revision_model
         )(self.state)
         payload = await self.store.read_json_uri(update["claims_artifact_ref"])
         self.assertEqual([claim["claim_id"] for claim in payload["claims"]], ["claim_001_1", "claim_001_2"])
         self.assertEqual({claim["section_id"] for claim in payload["claims"]}, {"results"})
+        self.assertEqual(
+            revision_model.inputs[0]["section"]["discussion_questions"],
+            ["How do study conditions affect outcomes?"],
+        )
         self.state.update(update)
         await self.retrieve()
         result = await VerifyClaimsNode(
@@ -334,14 +401,127 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([claim["claim_id"] for claim in payload["claims"]], ["claim_001", "claim_002"])
         self.assertEqual(payload["claims"][1]["section_id"], "results")
 
-    async def test_supported_comparison_with_one_source_reenters_retrieval(self):
+    async def test_supported_comparison_with_one_source_revises_the_claim(self):
         await self.seed_claim()
         await self.retrieve()
+        self.state["reflection_round"] = self.state["max_reflection_rounds"] - 2
         result = verdict()
         result["evidence"] = result["evidence"][:1]
         update = await self.verify(result)
-        self.assertEqual(update["stage"], "retrieving_evidence")
-        self.assertEqual(update["revision_items"][0]["target_type"], "retrieval")
+        self.assertEqual(update["stage"], "generating_claims")
+        self.assertEqual(update["revision_items"][0]["target_type"], "claim")
+        self.assertEqual(update["reflection_round"], self.state["max_reflection_rounds"] - 1)
+
+    async def test_exhausted_evidence_revision_renders_material_insufficiency(self):
+        await self.seed_claim()
+        await self.retrieve()
+        self.state.update(max_reflection_rounds=1, reflection_round=0)
+
+        update = await self.verify(verdict("insufficient"))
+
+        self.assertEqual(update["stage"], "rendering_sections")
+        self.assertEqual(update["revision_items"], [])
+        self.assertIn("revision limit reached", update["warnings"][-1])
+        verification = await self.store.read_json_uri(
+            update["claim_verification_artifact_ref"]
+        )
+        self.assertEqual(verification["claims"][0]["status"], "insufficient")
+
+    async def test_supported_claim_can_add_a_claim_in_its_section(self):
+        await self.seed_claim()
+        await self.retrieve()
+        result = verdict()
+        result["revisions"] = [revision("add_claim", "results")]
+        model = Model(result, result)
+        node = VerifyClaimsNode(artifact_store=self.store, model=model)
+
+        first = await node(self.state)
+        self.state.update(first)
+        second = await node(self.state)
+
+        self.assertEqual(first["stage"], "generating_claims")
+        self.assertEqual(len(model.inputs), 2)
+        self.assertEqual(second["error_code"], "REVIEW_NO_PROGRESS")
+        self.assertEqual(model.inputs[0]["section"]["section_id"], "results")
+        self.assertEqual(model.inputs[0]["section_claims"][0]["claim_id"], "claim_001")
+
+    async def test_verify_rejects_invalid_revision_targets(self):
+        await self.seed_claim()
+        await self.retrieve()
+        result = verdict("insufficient")
+        result["revisions"] = [revision("claim", "other_claim")]
+        update = await self.verify(result)
+        self.assertEqual(update["error_code"], "VERIFICATION_FAILED")
+
+        result = verdict()
+        result["revisions"] = [revision("add_claim", "other_section")]
+        update = await self.verify(result)
+        self.assertEqual(update["error_code"], "VERIFICATION_FAILED")
+
+    async def test_verify_rejects_non_claim_revision_types(self):
+        await self.seed_claim()
+        await self.retrieve()
+        result = verdict("insufficient")
+        result["revisions"] = [revision("framework", "review")]
+        update = await self.verify(result)
+        self.assertEqual(update["error_code"], "VERIFICATION_FAILED")
+
+    async def test_verify_rejects_an_added_claim_without_a_claim_revision(self):
+        await self.seed_claim()
+        await self.retrieve()
+        result = verdict("insufficient")
+        result["revisions"] = [revision("add_claim", "results")]
+        update = await self.verify(result)
+        self.assertEqual(update["error_code"], "VERIFICATION_FAILED")
+
+    async def test_retrieval_reuses_unchanged_claims_and_refreshes_changed_claims(self):
+        await self.seed_claim()
+        await self.retrieve()
+
+        cached_retriever = AsyncMock()
+        await RetrieveEvidenceNode(
+            artifact_store=self.store, content_retrieval=cached_retriever
+        )(self.state)
+        cached_retriever.search.assert_not_awaited()
+
+        changed = dict(CLAIM, text="The results depend on intervention duration.")
+        changed["claim_hash"] = claim_hash(changed)
+        self.state["claims_artifact_ref"] = await save(
+            self.store, self.state, "claims", {"claims": [changed], "unanswered": []}
+        )
+        refreshed_retriever = AsyncMock()
+        refreshed_retriever.search.return_value = [document(), document("2", "chunk2")]
+        await RetrieveEvidenceNode(
+            artifact_store=self.store, content_retrieval=refreshed_retriever
+        )(self.state)
+        refreshed_retriever.search.assert_awaited_once()
+
+    async def test_retrieval_uses_each_claim_query_once(self):
+        await self.seed_claim()
+        claim = dict(
+            CLAIM,
+            candidate_paper_ids=["1"],
+            retrieval_queries=["first query", "second query"],
+        )
+        self.state["claims_artifact_ref"] = await save(
+            self.store, self.state, "claims", {"claims": [claim], "unanswered": []}
+        )
+        retriever = AsyncMock()
+        retriever.search.return_value = [document(), document("2", "chunk2")]
+
+        await RetrieveEvidenceNode(artifact_store=self.store, content_retrieval=retriever)(
+            self.state
+        )
+
+        self.assertEqual(retriever.search.await_count, 2)
+        self.assertEqual(
+            [call.kwargs["query"] for call in retriever.search.await_args_list],
+            ["first query", "second query"],
+        )
+        self.assertEqual(
+            [call.kwargs["paper_ids"] for call in retriever.search.await_args_list],
+            [["1"], ["1"]],
+        )
 
     async def test_no_claims_continue_to_material_insufficiency_sections(self):
         await self.seed_framework()
@@ -352,14 +532,6 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
         update = await VerifyClaimsNode(artifact_store=self.store, model=Model())(self.state)
         self.assertEqual(update["stage"], "rendering_sections")
         self.assertIn("material insufficiency", update["warnings"][-1])
-
-    async def test_exhausted_evidence_revision_renders_without_the_claim(self):
-        await self.seed_claim()
-        await self.retrieve()
-        self.state["reflection_round"] = self.state["max_reflection_rounds"] - 1
-        update = await self.verify(verdict("insufficient"))
-        self.assertEqual(update["stage"], "rendering_sections")
-        self.assertEqual(update["revision_items"], [])
 
     async def test_shared_quote_uses_the_current_claim_relation(self):
         framework = copy.deepcopy(FRAMEWORK)
@@ -440,65 +612,51 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(draft["used_claim_ids"], [])
         self.assertEqual(draft["text"], "The current material is insufficient.")
 
-    async def test_framework_revision_marks_only_changed_sections(self):
+    async def test_section_writes_all_evidence_in_one_call(self):
         await self.seed_claim()
-        changed = copy.deepcopy(FRAMEWORK)
-        changed["sections"][0]["description"] = "Which conditions change outcomes?"
-        framework_revision = revision("framework", "review")
-        claim_revision = revision("claim", "claim_001")
-        self.state["revision_items"] = [framework_revision, claim_revision]
-        model = Model(changed)
-        update = await GenerateFrameworkNode(artifact_store=self.store, model=model)(self.state)
-        payload = await self.store.read_json_uri(update["framework_artifact_ref"])
-        self.assertEqual(payload["changed_section_ids"], ["results"])
-        self.assertNotIn(claim_revision, update["revision_items"])
-        self.assertIn(framework_revision, model.inputs[0]["revisions"])
-
-    async def test_framework_replan_remaps_pending_section_revisions(self):
-        await self.seed_claim()
-        changed = copy.deepcopy(FRAMEWORK)
-        changed["sections"][0]["section_id"] = "conditions"
-        changed["section_revision_targets"] = {"results": "conditions"}
-        framework_revision = revision("framework", "review")
-        section_revision = revision("section", "results")
-        add_claim_revision = revision("add_claim", "results")
-        self.state["revision_items"] = [
-            framework_revision,
-            section_revision,
-            add_claim_revision,
+        evidence = [
+            {
+                "evidence_id": evidence_id,
+                "paper_id": paper_id,
+                "chunk_id": f"chunk_{paper_id}",
+                "relation": "supports",
+                "text": "e" * 25_000,
+            }
+            for evidence_id, paper_id in (("evidence_1", "1"), ("evidence_2", "2"))
         ]
-        model = Model(changed)
-        update = await GenerateFrameworkNode(artifact_store=self.store, model=model)(self.state)
-        routed = {
-            item["target_type"]: item["target_id"] for item in update["revision_items"]
-        }
-        self.assertEqual(routed, {"section": "conditions", "add_claim": "conditions"})
-        self.assertIn(section_revision, model.inputs[0]["revisions"])
-        self.assertIn(add_claim_revision, model.inputs[0]["revisions"])
-
-    async def test_framework_replan_consumes_a_handled_section_revision(self):
-        await self.seed_claim()
-        changed = copy.deepcopy(FRAMEWORK)
-        changed["sections"][0]["section_id"] = "conditions"
-        changed["section_revision_targets"] = {"results": None}
-        self.state["revision_items"] = [
-            revision("framework", "review"),
-            revision("section", "results"),
-        ]
-        update = await GenerateFrameworkNode(
-            artifact_store=self.store, model=Model(changed)
-        )(self.state)
-        self.assertEqual(update["revision_items"], [])
-
-    async def test_schedule_accepts_add_claim(self):
-        result = await schedule_revision(
+        self.state["claim_verification_artifact_ref"] = await save(
             self.store,
             self.state,
-            [revision("add_claim", "results")],
-            claim_ids=[],
-            section_ids=["results"],
+            "verification",
+            {
+                "claims": [
+                    {
+                        "claim_id": CLAIM["claim_id"],
+                        "claim_hash": CLAIM["claim_hash"],
+                        "status": "supported",
+                        "reason": "Supported.",
+                        "evidence": evidence,
+                    }
+                ]
+            },
         )
-        self.assertEqual(result["stage"], "generating_claims")
+        model = Model(
+            {
+                "arguments": [
+                    {
+                        "text": "Conditional outcome [[REF_1]] [[REF_2]].",
+                        "claim_ids": ["claim_001"],
+                        "evidence_ids": ["evidence_1", "evidence_2"],
+                    }
+                ],
+                "summary": "Conditional outcome.",
+            }
+        )
+
+        update = await RenderSectionsNode(artifact_store=self.store, model=model)(self.state)
+
+        self.assertEqual(update["stage"], "assembling_review")
+        self.assertEqual(len(model.inputs), 1)
 
     async def test_writing_reflection_uses_one_compact_review_input(self):
         await self.seed_review_draft()
@@ -514,6 +672,10 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
             [{"claim_id": "claim_001", "section_id": "results", "text": CLAIM["text"]}],
         )
         self.assertEqual(payload["review_mode"], "initial")
+        self.assertEqual(
+            payload["framework"]["sections"][0]["discussion_questions"],
+            ["How do study conditions affect outcomes?"],
+        )
         self.assertNotIn("study_profiles", payload)
         self.assertNotIn("evidence", payload)
         report = await self.store.read_json_uri(update["reflection_report_artifact_ref"])
@@ -592,6 +754,7 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
                 "section_id": "methods",
                 "title": "Methods",
                 "description": "How were the results obtained?",
+                "discussion_questions": ["How were the results obtained?"],
                 "relevant_paper_ids": ["1", "2"],
             }
         )
@@ -685,6 +848,25 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             WritingReviewResult.model_validate(writing_review("pass", [writing_revision()]))
 
+    def test_claim_reflection_budget_default_and_bounds(self):
+        self.assertEqual(TaskReviewDelegation(task_id=1, topic="topic").max_reflection_rounds, 5)
+        for value in (1, 5):
+            self.assertEqual(
+                TaskReviewDelegation(
+                    task_id=1,
+                    topic="topic",
+                    max_reflection_rounds=value,
+                ).max_reflection_rounds,
+                value,
+            )
+        for value in (0, 6):
+            with self.assertRaises(ValueError):
+                TaskReviewDelegation(
+                    task_id=1,
+                    topic="topic",
+                    max_reflection_rounds=value,
+                )
+
     def test_writing_revision_budget_default_and_bounds(self):
         self.assertEqual(TaskReviewDelegation(task_id=1, topic="topic").max_writing_revision_rounds, 1)
         for value in (0, 5):
@@ -720,6 +902,10 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
     def test_writing_reflection_route_cannot_return_to_research(self):
         for stage in ("generating_framework", "generating_claims", "retrieving_evidence"):
             self.assertEqual(_route_after_writing_review({"stage": stage}), "finalize")
+
+    def test_claim_verification_route_cannot_return_to_framework_or_retrieval(self):
+        for stage in ("generating_framework", "retrieving_evidence", "assembling_review"):
+            self.assertEqual(_route_after_verification({"stage": stage}), "finalize")
 
     def test_reflection_allows_an_uncited_material_insufficiency_review(self):
         issues = ReflectReviewNode()._check_hard_constraints(
@@ -767,6 +953,113 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["stage"], "completed")
         self.assertLess(order.index("generate_framework"), order.index("generate_claims"))
         self.assertNotIn("resolve_review_focus", order)
+
+    async def test_workflow_skips_persistence_after_failed_handoff(self):
+        order = []
+        transitions = {
+            "initialize": "loading_corpus",
+            "load_task_corpus": "extracting_studies",
+            "extract_studies": "generating_framework",
+            "generate_framework": "generating_claims",
+            "generate_claims": "retrieving_evidence",
+            "retrieve_evidence": "verifying_claims",
+            "verify_claims": "rendering_sections",
+            "render_sections": "assembling_review",
+            "assemble_review": "reflecting_review",
+            "reflect_review": "finalizing_handoff",
+            "persist_review": "completed",
+            "finalize_result": "completed",
+        }
+
+        def node(name):
+            async def run(state):
+                order.append(name)
+                if name == "finalizing_handoff":
+                    return {
+                        "stage": "failed",
+                        "error": "review was not approved by reflection",
+                    }
+                return {"stage": transitions[name]}
+
+            return run
+
+        graph = build_task_review_workflow(
+            node_overrides={name: node(name) for name in [
+                *transitions,
+                "finalizing_handoff",
+            ]}
+        )
+        result = await graph.ainvoke({})
+
+        self.assertEqual(result["error"], "review was not approved by reflection")
+        self.assertNotIn("persist_review", order)
+
+
+class ReviewPromptSchemaTests(unittest.TestCase):
+    schemas = (
+        SearchCurrentPaperArgs,
+        ProfileField,
+        SubmittedArticleProfile,
+        ExcludedPaper,
+        FrameworkSection,
+        ReviewFramework,
+        CandidateClaim,
+        ClaimsPlan,
+        ClaimRevisionPlan,
+        EvidenceQuote,
+        ClaimRevision,
+        Verdict,
+        Argument,
+        SectionDraft,
+        ReviewSynthesis,
+        WritingRevision,
+        WritingReviewResult,
+    )
+
+    @staticmethod
+    def json_examples(prompt):
+        pattern = r"```json\s*(\{.*?\})\s*```"
+        return [json.loads(value) for value in re.findall(pattern, prompt, re.DOTALL)]
+
+    def test_model_visible_fields_have_descriptions(self):
+        for schema_model in self.schemas:
+            with self.subTest(schema=schema_model.__name__):
+                schema = schema_model.model_json_schema()
+                for model in (schema, *schema.get("$defs", {}).values()):
+                    for name, field in model.get("properties", {}).items():
+                        self.assertTrue(
+                            field.get("description"),
+                            f"{schema_model.__name__}.{name}",
+                        )
+
+    def test_schema_descriptions_and_prompt_examples(self):
+        instruction = build_json_mode_instruction(SectionDraft)
+        self.assertIn("章节正文中绑定 Claim 与证据引用的一个论证单元", instruction)
+        self.assertIn("本节 arguments 的简短衔接性概述", instruction)
+
+        search_parameters = ARTICLE_PROFILE_TOOLS[0]["function"]["parameters"]
+        submit_parameters = ARTICLE_PROFILE_TOOLS[1]["function"]["parameters"]
+        self.assertTrue(search_parameters["properties"]["query"].get("description"))
+        self.assertTrue(submit_parameters["properties"]["core_problem"].get("description"))
+
+        extract_examples = self.json_examples(ARTICLE_PROFILE_PROMPT)
+        SearchCurrentPaperArgs.model_validate(extract_examples[0])
+        SubmittedArticleProfile.model_validate(extract_examples[1])
+        SubmittedArticleProfile.model_validate(
+            self.json_examples(PROFILE_SUBMISSION_PROMPT)[0]
+        )
+        for prompt, model in (
+            (FRAMEWORK_PROMPT, ReviewFramework),
+            (CLAIM_GENERATION_PROMPT, ClaimsPlan),
+            (CLAIM_REVISION_PROMPT, ClaimRevisionPlan),
+            (CLAIM_VERIFICATION_PROMPT, Verdict),
+            (SECTION_DRAFT_PROMPT, SectionDraft),
+            (ASSEMBLE_REVIEW_PROMPT, ReviewSynthesis),
+            (REPAIR_SYNTHESIS_PROMPT, ReviewSynthesis),
+            (WRITING_REVIEW_PROMPT, WritingReviewResult),
+        ):
+            for example in self.json_examples(prompt):
+                model.model_validate(example)
 
 
 if __name__ == "__main__":

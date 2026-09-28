@@ -32,6 +32,7 @@ FRAMEWORK = {
             "section_id": section_id,
             "title": section_id.title(),
             "description": "A sufficiently detailed section description.",
+            "discussion_questions": ["What does the evidence show?"],
             "relevant_paper_ids": ["1", "2"],
         }
         for section_id in ("evidence", "methods", "findings", "synthesis")
@@ -104,6 +105,7 @@ class ReviewCitationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(model.messages), 2)
         self.assertEqual(draft["citation_paper_ids"], ["1"])
+        self.assertEqual(draft["sections"][0]["discussion_questions"], ["What does the evidence show?"])
         self.assertNotIn("[[REF_2]]", draft["abstract"] + draft["conclusion"])
 
     def test_reflection_flags_synthesis_citations_outside_body(self) -> None:

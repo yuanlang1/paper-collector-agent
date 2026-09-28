@@ -96,7 +96,7 @@ python -m venv .venv-rag-eval
 - 缓存按论文 ID 精确命中；命中时不读取正文，也不调用阅读模型。论文正文替换或需要按新规则重新阅读时，删除该论文的缓存记录。
 - 缓存保存失败最多尝试三次，不重新调用阅读模型；最终失败则返回失败论文信息。
 - 原文证据和核验摘录独立保存在任务 artifact。只有 supported 的当前 Claim 措辞可写入；mixed/contradicted/insufficient 进入修订。
-- 核验和全文审核共用 max_reflection_rounds - 1 次修订。失败时返回已有产物引用，不保存为审核通过的综述。
+- Claim 核验最多执行 max_reflection_rounds 次（默认 5 次，包含首次核验），因此最多进行 max_reflection_rounds - 1 次 Claim 修订；预算耗尽时保留已核验内容，并将未支持内容写为材料不足。全文写作修订使用独立的 max_writing_revision_rounds。失败时返回已有产物引用，不保存为审核通过的综述。
 - 部署新版前排空运行中的旧综述任务。旧 artifact 文件仍可读取，旧中间 checkpoint 不支持恢复到新版流程。综述子图递归限制独立为 128。
 
 离线回归测试（假模型、假存储）：

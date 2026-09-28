@@ -13,29 +13,133 @@ from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
 
 
-CLAIM_GENERATION_PROMPT = (
-    "围绕当前章节的讨论问题比较论文，生成具体、可核验的候选综合论点，不按论文罗列。"
-    "论文画像不是原文证据，不预设一致性或优越性；不可新增论文。"
-    "跨论文比较必须要求 multiple_fulltext。保留分歧、条件和局限；检索查询应同时寻找支持、相反结果和适用条件；使用输出语言。"
-)
+CLAIM_GENERATION_PROMPT = """
+    你是一名学术综述论点设计者。围绕当前 section 的 discussion_questions 比较和综合 studies，
+    生成具体、可核验的候选论点，不按论文逐篇罗列。每个论点应服务于至少一个讨论问题，
+    且不得与 existing_candidates 重复。论文画像不是原文证据，不得预设一致性、优越性或因果结论，
+    也不可新增论文。
 
-CLAIM_REVISION_PROMPT = (
-    "根据原文和修订要求调整当前论点。收缩范围或明确分歧；条件、对象或结论不可兼容时拆分为多个独立论点。"
-    "不能成立的非核心候选可填写 withdrawn_reason。不可换章节，不得虚构。每条论点可改写查询以寻找支持或反证。"
-)
+    保留分歧、条件和局限。comparative 论点必须使用 multiple_fulltext；
+    每条 retrieval_queries 独立表达该论点的检索意图，合起来覆盖支持、反证和适用条件。
+    revisions 非空时，只执行其中针对当前章节的新增要求。使用 output_language。
+
+    以下仅为格式示例；使用实际论文 ID 和章节内容，勿照抄：
+    ```json
+    {
+    "claims": [
+        {
+        "text": "在给定研究条件下，两种方法的结果差异可能与测量设置有关。",
+        "candidate_paper_ids": ["paper_001", "paper_002"],
+        "retrieval_queries": [
+            "方法 A 与方法 B 的结果比较",
+            "测量设置对结果的影响",
+            "方法比较中的相反结果"
+        ],
+        "claim_type": "comparative",
+        "evidence_requirement": "multiple_fulltext",
+        "withdrawn_reason": "",
+        "section_id": ""
+        }
+    ],
+    "unanswered_reason": ""
+    }
+    ```
+    无法基于论文画像形成候选时，返回：
+    ```json
+    {"claims": [], "unanswered_reason": "说明缺少哪类信息"}
+    ```
+""".strip()
+
+CLAIM_REVISION_PROMPT = """
+    你是一名学术综述论点修订者。根据 old_claim 的原文 evidence 和 revisions 调整当前论点，
+    必须落实 required_change 和 acceptance_criteria。收缩范围、补充条件或降低强度；
+    条件、对象或结论不可兼容时拆分为多个独立论点。不能成立的非核心候选填写 withdrawn_reason。
+    不可改变 section，不得虚构；ID、section_id 和哈希由程序处理。
+
+    每条检索查询独立表达修改后的论点，并可面向支持、反证或条件改写。
+    以下仅为格式示例，使用实际输入内容：
+    替换：
+    ```json
+    {
+    "claims": [{
+        "text": "在特定条件下观察到相关性。",
+        "candidate_paper_ids": ["paper_001"],
+        "retrieval_queries": ["特定条件下的相关性"],
+        "claim_type": "descriptive",
+        "evidence_requirement": "fulltext",
+        "withdrawn_reason": "",
+        "section_id": ""
+    }]
+    }
+    ```
+    拆分：
+    ```json
+    {
+    "claims": [
+        {
+        "text": "条件甲下结果呈现关联。",
+        "candidate_paper_ids": ["paper_001"],
+        "retrieval_queries": ["条件甲 结果关联"],
+        "claim_type": "descriptive",
+        "evidence_requirement": "fulltext",
+        "withdrawn_reason": "",
+        "section_id": ""
+        },
+        {
+        "text": "条件乙下结果存在差异。",
+        "candidate_paper_ids": ["paper_002"],
+        "retrieval_queries": ["条件乙 结果差异"],
+        "claim_type": "descriptive",
+        "evidence_requirement": "fulltext",
+        "withdrawn_reason": "",
+        "section_id": ""
+        }
+    ]
+    }
+    ```
+    撤回：
+    ```json
+    {
+    "claims": [{
+        "text": "当前证据不足以支持原比较结论。",
+        "candidate_paper_ids": ["paper_001"],
+        "retrieval_queries": ["原比较结论的直接证据"],
+        "claim_type": "critical",
+        "evidence_requirement": "fulltext",
+        "withdrawn_reason": "现有原文无法支持该候选论点。",
+        "section_id": ""
+    }]
+    }
+    ```
+""".strip()
 
 
 class ClaimsPlan(BaseModel):
-    claims: list[CandidateClaim]
-    unanswered_reason: str = ""
+    claims: list[CandidateClaim] = Field(
+        description="围绕当前章节问题生成、尚待原文证据核验的候选论点列表。",
+    )
+    unanswered_reason: str = Field(
+        default="",
+        description="无法形成候选论点时说明缺失信息；有候选论点时通常为空。",
+    )
 
 
 class ClaimRevisionPlan(BaseModel):
-    claims: list[CandidateClaim] = Field(min_length=1)
+    claims: list[CandidateClaim] = Field(
+        min_length=1,
+        description="替换原论点的一条或多条候选论点；撤回也用一条带 withdrawn_reason 的论点表达。",
+    )
 
 
 class GenerateClaimsNode:
-    def __init__(self, *, artifact_store=None, model=None, revision_model=None, chat: ChatClient | None = None):
+    def __init__(
+        self,
+        *,
+        artifact_store=None,
+        model=None,
+        revision_model=None,
+        chat: ChatClient | None = None,
+    ):
         self.artifact_store = artifact_store or LocalArtifactStore()
         client = chat or ChatClient()
         self.model = model or client.structured(ClaimsPlan, options=ModelOptions(temperature=0))
@@ -67,6 +171,7 @@ class GenerateClaimsNode:
                 state["framework_artifact_ref"]
             )
             framework = framework_payload["framework"]
+            sections = {section["section_id"]: section for section in framework["sections"]}
             studies = (
                 await self.artifact_store.read_json_uri(state["study_records_artifact_ref"])
             )["studies"]
@@ -75,7 +180,7 @@ class GenerateClaimsNode:
                 if state.get("claims_artifact_ref")
                 else {"claims": [], "unanswered": []}
             )
-            section_ids = {section["section_id"] for section in framework["sections"]}
+            section_ids = set(sections)
             changed = set(state.get("changed_section_ids", []))
             claims = [
                 claim
@@ -97,17 +202,22 @@ class GenerateClaimsNode:
                 if claim["claim_id"] not in targets:
                     revised.append(claim)
                     continue
-                evidence = await self.artifact_store.read_json_uri(state["evidence_ledger_artifact_ref"])
+                evidence = await self.artifact_store.read_json_uri(
+                    state["evidence_ledger_artifact_ref"]
+                )
                 result = await invoke(
                     self.revision_model,
                     ClaimRevisionPlan,
                     CLAIM_REVISION_PROMPT,
                     {
                         "old_claim": claim,
+                        "section": sections[claim["section_id"]],
                         "output_language": state["language"],
                         "revisions": revisions_for(state, "claim", claim["claim_id"]),
                         "evidence": next(
-                            item for item in evidence["claims"] if item["claim_id"] == claim["claim_id"]
+                            item
+                            for item in evidence["claims"]
+                            if item["claim_id"] == claim["claim_id"]
                         ),
                     },
                 )
@@ -115,7 +225,10 @@ class GenerateClaimsNode:
                 ids = (
                     [claim["claim_id"]]
                     if len(replacements) == 1
-                    else [f'{claim["claim_id"]}_{index}' for index in range(1, len(replacements) + 1)]
+                    else [
+                        f'{claim["claim_id"]}_{index}'
+                        for index in range(1, len(replacements) + 1)
+                    ]
                 )
                 for replacement, claim_id in zip(replacements, ids):
                     replacement.update(claim_id=claim_id, section_id=claim["section_id"])

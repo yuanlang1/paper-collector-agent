@@ -41,33 +41,9 @@ async def read_optional_json(store, artifact_ref):
     return await store.read_json_uri(artifact_ref) if artifact_ref else None
 
 
-def batches(records, budget=12000):
-    batch, size = [], 0
-    for record in records:
-        length = len(json.dumps(record, ensure_ascii=False))
-        if length > budget:
-            raise ValueError("one input exceeds its context budget; split the claim or evidence")
-        if batch and size + length > budget:
-            yield batch
-            batch, size = [], 0
-        batch.append(record)
-        size += length
-    if batch:
-        yield batch
-
-
 def text_windows(text, size=6000, overlap=1000):
     for offset in range(0, len(text), size):
         yield {"char_start": offset, "text": text[offset : offset + size + overlap]}
-
-
-class RevisionItem(BaseModel):
-    target_type: Literal["claim", "add_claim", "retrieval", "framework", "section", "synthesis"]
-    target_id: str
-    issue: str = Field(min_length=1)
-    required_change: str = Field(min_length=1)
-    acceptance_criteria: str = Field(min_length=1)
-    queries: list[str] = Field(default_factory=list, max_length=3)
 
 
 def revisions_for(state, kind, target_id=None):
@@ -79,13 +55,36 @@ def revisions_for(state, kind, target_id=None):
 
 
 class CandidateClaim(BaseModel):
-    text: str = Field(min_length=10, max_length=700)
-    candidate_paper_ids: list[str] = Field(min_length=1)
-    retrieval_queries: list[str] = Field(min_length=1, max_length=3)
-    claim_type: Literal["descriptive", "comparative", "critical", "gap"]
-    evidence_requirement: Literal["fulltext", "multiple_fulltext"]
-    withdrawn_reason: str = ""
-    section_id: str = ""
+    """一个待检索并由原文证据核验的综述候选论点。"""
+
+    text: str = Field(
+        min_length=10,
+        max_length=700,
+        description="候选论点的完整表述，应包含适用范围和必要限定，供后续原文证据核验。",
+    )
+    candidate_paper_ids: list[str] = Field(
+        min_length=1,
+        description="可用于检索该论点证据的当前任务论文 ID；不得包含任务外论文。",
+    )
+    retrieval_queries: list[str] = Field(
+        min_length=1,
+        max_length=3,
+        description="围绕该论点分别检索支持、反证或适用条件的独立查询语句。",
+    )
+    claim_type: Literal["descriptive", "comparative", "critical", "gap"] = Field(
+        description="论点类型：descriptive 描述发现，comparative 比较研究，critical 讨论局限，gap 指出证据缺口。",
+    )
+    evidence_requirement: Literal["fulltext", "multiple_fulltext"] = Field(
+        description="最低原文支持要求：fulltext 需一篇支持论文，multiple_fulltext 需不同论文的多篇支持。",
+    )
+    withdrawn_reason: str = Field(
+        default="",
+        description="撤回该候选论点的原因；未撤回时为空字符串。",
+    )
+    section_id: str = Field(
+        default="",
+        description="该论点所属 Framework 章节 ID；由工作流在生成或修订后写入。",
+    )
 
     @model_validator(mode="after")
     def require_multiple_sources_for_comparison(self):
@@ -109,12 +108,11 @@ def claim_hash(claim):
     )
 
 
-def retrieval_plan_hash(claim, section_description):
+def retrieval_plan_hash(claim):
     return content_hash(
         {
             "candidate_paper_ids": claim["candidate_paper_ids"],
             "retrieval_queries": claim["retrieval_queries"],
-            "section_description": section_description,
         }
     )
 

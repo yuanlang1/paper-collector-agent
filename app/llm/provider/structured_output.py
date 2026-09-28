@@ -70,16 +70,27 @@ class ValidatedJsonInvoker(Generic[StructuredOutputT]):
         self, 
         messages: Sequence[BaseMessage]
     ) -> StructuredOutputT:
+        schema_index = next(
+            (
+                index
+                for index, message in enumerate(messages)
+                if not isinstance(message, SystemMessage)
+            ),
+            len(messages),
+        )
         current_messages = [
-            SystemMessage(content=build_json_mode_instruction(self.schema)), 
-            *messages
+            *messages[:schema_index],
+            SystemMessage(content=build_json_mode_instruction(self.schema)),
+            *messages[schema_index:],
         ]
 
         for attempt in range(1, self.max_attempts + 1):
             result = await self.model.ainvoke(current_messages)
             parsed = result["parsed"]
             if parsed is not None:
-                return self.schema.model_validate(parsed)
+                if not isinstance(parsed, self.schema):
+                    return self.schema.model_validate(parsed)
+                return parsed
                 
             error = result["parsing_error"] or ValueError(f"{self.schema.__name__} 输出为空")
             if attempt == self.max_attempts:
