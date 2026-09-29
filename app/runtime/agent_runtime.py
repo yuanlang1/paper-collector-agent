@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 
 from sqlalchemy import delete, select
 from app.database import SessionLocal
-from app.core.exceptions import ConflictException
-from app.history.store import ChatHistoryStore, ConversationDeletionJob
+from app.history import chat_log, stream_events, transactions
+from app.history.sqlite import HistoryDatabase
+from app.history.stream_events import AgentStreamEvent
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.provider import ChatClient
 from app.memory.consolidation import Consolidator
@@ -17,19 +19,20 @@ from app.models.memory import (
     MemoryEpisode,
     MemoryFact,
 )
-from collections.abc import AsyncIterator, Awaitable
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Callable, Optional
 from uuid import uuid4
 from sqlalchemy.orm import Session as DbSession
 from app.llm.artifacts.access import ArtifactAccessService
 from app.runtime.session import Session
-from app.runtime.threaded_stream import DetachedStreamRun
 from app.services.llm_profile_service import (
     LlmRuntimeConfig,
     resolve_runtime_config,
     resolve_small_model_runtime_config,
 )
 from app.services.setting_service import get_source_limits
+from app.llm.streaming.notify import EventEnvelope, build_event
+from app.llm.streaming.utils import to_jsonable
 
 if TYPE_CHECKING:
     from app.llm.agent import AgentService
@@ -39,24 +42,27 @@ logger = logging.getLogger(__name__)
 DEFAULT_USER_ID = "0"
 
 
+@dataclass(frozen=True)
+class AgentStreamSubscription:
+    run_id: str
+    events: AsyncIterator[AgentStreamEvent]
+
+
 class AgentRuntime:
     def __init__(
         self,
         agent_service: AgentService,
-        history_store: ChatHistoryStore,
+        history_db: HistoryDatabase,
         db_factory: Callable[[], DbSession] = SessionLocal,
         artifact_store: LocalArtifactStore | None = None,
     ) -> None:
         self.agent_service = agent_service
-        self.history_store = history_store
+        self.history_db = history_db
         self.db_factory = db_factory
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self._active_stream_runs: set[DetachedStreamRun] = set()
-        self._active_stream_tasks: set[asyncio.Task[None]] = set()
         self._active_consolidation_scopes: set[tuple[str, str]] = set()
         self._active_consolidation_tasks: set[asyncio.Task[None]] = set()
-        self._active_conversation_runs: dict[str, int] = {}
-        self._deleting_conversations: set[str] = set()
+        self._active_stream_tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
         
     async def chat(
         self,
@@ -70,51 +76,56 @@ class AgentRuntime:
         memory_llm_config = resolve_small_model_runtime_config(db)
         resolved_conversation_id = self.resolve_conversation_id(conversation_id)
         source_limits = get_source_limits(db)
-        await self._claim_conversation_run(resolved_conversation_id)
-        try:
-            session = Session.create(
-                message=message,
-                conversation_id=resolved_conversation_id,
-                db=db,
-                user_id=DEFAULT_USER_ID,
-                llm_profile=llm_config.snapshot() if llm_config else None,
-                memory_llm_profile=self._memory_llm_profile_snapshot(
-                    llm_config,
-                    memory_llm_config,
-                ),
-                paper_search_source_limits=source_limits,
-            )
+        session = Session.create(
+            message=message,
+            conversation_id=resolved_conversation_id,
+            db=db,
+            user_id=DEFAULT_USER_ID,
+            llm_profile=llm_config.snapshot() if llm_config else None,
+            memory_llm_profile=self._memory_llm_profile_snapshot(
+                llm_config,
+                memory_llm_config,
+            ),
+            paper_search_source_limits=source_limits,
+        )
 
-            assistant_message_id = await self.history_store.start_turn(
+        assistant_message_id = await self.history_db.run(
+            chat_log.start_turn,
+            user_id=session.user_id,
+            conversation_id=session.conversation_id,
+            run_id=str(session.run_id),
+            user_content=message,
+        )
+        started_at = time.perf_counter()
+
+        try:
+            response = await self._service_for_config(
+                llm_config,
+                memory_llm_config,
+            ).invoke(session)
+        except Exception:
+            await self.history_db.run(
+                chat_log.mark_interrupted,
                 user_id=session.user_id,
                 conversation_id=session.conversation_id,
                 run_id=str(session.run_id),
-                user_content=message,
-            )
-            started_at = time.perf_counter()
-
-            try:
-                response = await self._service_for_config(
-                    llm_config,
-                    memory_llm_config,
-                ).invoke(session)
-            except Exception:
-                await self.history_store.mark_interrupted(
-                    message_id=assistant_message_id,
-                )
-                raise
-
-            await self.history_store.complete_assistant_message(
                 message_id=assistant_message_id,
-                response=response,
-                latency_ms=self._elapsed_ms(started_at),
-                extra_meta=self._llm_profile_meta(session),
             )
-            self._schedule_consolidation(session=session, response=response)
+            raise
 
-            return response
-        finally:
-            self._finish_conversation_run(resolved_conversation_id)
+        await self.history_db.run(
+            chat_log.complete_assistant_message,
+            user_id=session.user_id,
+            conversation_id=session.conversation_id,
+            run_id=str(session.run_id),
+            message_id=assistant_message_id,
+            response=response,
+            latency_ms=self._elapsed_ms(started_at),
+            extra_meta=self._llm_profile_meta(session),
+        )
+        self._schedule_consolidation(session=session, response=response)
+
+        return response
 
     async def chat_stream(
         self,
@@ -123,50 +134,57 @@ class AgentRuntime:
         conversation_id: str | None,
         db: DbSession,
         llm_profile_id: int | None = None,
-    ) -> AsyncIterator[str]:
+    ) -> AgentStreamSubscription:
         llm_config = resolve_runtime_config(db, llm_profile_id)
         memory_llm_config = resolve_small_model_runtime_config(db)
         resolved_conversation_id = self.resolve_conversation_id(conversation_id)
         source_limits = get_source_limits(db)
         run_id = f"run_{uuid4().hex}"
-        await self._claim_conversation_run(resolved_conversation_id)
+        service = self._service_for_config(llm_config, memory_llm_config)
+        llm_profile = llm_config.snapshot() if llm_config else None
+        memory_llm_profile = self._memory_llm_profile_snapshot(
+            llm_config,
+            memory_llm_config,
+        )
+        db.rollback()
+        assistant_message_id: int | None = None
         try:
-            assistant_message_id = await self.history_store.start_turn(
+            assistant_message_id = await self.history_db.run(
+                chat_log.start_turn,
                 user_id=DEFAULT_USER_ID,
                 conversation_id=resolved_conversation_id,
                 run_id=run_id,
                 user_content=message,
             )
-
-            stream_run = DetachedStreamRun(run_id)
-            self._register_stream_run(stream_run)
             self._start_stream_task(
-                self._run_stream_task(
-                    stream_run=stream_run,
-                    message=message,
-                    conversation_id=resolved_conversation_id,
-                    run_id=run_id,
-                    resume_payload=None,
-                    resume_action_id=None,
-                    assistant_message_id=assistant_message_id,
-                    service=self._service_for_config(
-                        llm_config,
-                        memory_llm_config,
-                    ),
-                    llm_profile=llm_config.snapshot() if llm_config else None,
-                    memory_llm_profile=self._memory_llm_profile_snapshot(
-                        llm_config,
-                        memory_llm_config,
-                    ),
-                    paper_search_source_limits=source_limits,
-                ),
+                message=message,
+                user_id=DEFAULT_USER_ID,
+                conversation_id=resolved_conversation_id,
                 run_id=run_id,
+                resume_payload=None,
+                assistant_message_id=assistant_message_id,
+                service=service,
+                llm_profile=llm_profile,
+                memory_llm_profile=memory_llm_profile,
+                paper_search_source_limits=source_limits,
+                extra_meta=None,
             )
-        except Exception:
-            self._finish_conversation_run(resolved_conversation_id)
+            return AgentStreamSubscription(
+                run_id=run_id,
+                events=self._stream_events(
+                    user_id=DEFAULT_USER_ID,
+                    run_id=run_id,
+                    after_id=None,
+                ),
+            )
+        except BaseException:
+            await self._abort_stream_setup(
+                user_id=DEFAULT_USER_ID,
+                conversation_id=resolved_conversation_id,
+                run_id=run_id,
+                assistant_message_id=assistant_message_id,
+            )
             raise
-
-        return stream_run.subscribe()
 
     async def resume_chat(
         self,
@@ -177,50 +195,55 @@ class AgentRuntime:
         requested_action_id: str | None = None,
         db: DbSession,
     ) -> dict[str, Any]:
-        await self._claim_conversation_run(conversation_id)
+        session, action_id, service = await self._resume_session(
+            conversation_id=conversation_id,
+            resume_payload=resume_payload,
+            requested_run_id=requested_run_id,
+            requested_action_id=requested_action_id,
+            db=db,
+        )
+        claim = await self.history_db.run(
+            chat_log.claim_pending_action,
+            user_id=session.user_id,
+            conversation_id=conversation_id,
+            run_id=str(session.run_id),
+            action_id=action_id,
+            decision=str(resume_payload["decision"]),
+            comment=resume_payload.get("comment"),
+        )
+        if not claim.claimed:
+            raise ValueError("The requested approval is already being processed")
+        assistant_message_id = claim.message_id
+        started_at = time.perf_counter()
+
         try:
-            session, action_id, service = await self._resume_session(
-                conversation_id=conversation_id,
-                resume_payload=resume_payload,
-                requested_run_id=requested_run_id,
-                requested_action_id=requested_action_id,
-                db=db,
-            )
-            claim = await self.history_store.claim_pending_action(
+            response = await service.invoke(session)
+        except Exception:
+            await self.history_db.run(
+                chat_log.mark_interrupted,
                 user_id=session.user_id,
-                conversation_id=conversation_id,
+                conversation_id=session.conversation_id,
                 run_id=str(session.run_id),
-                action_id=action_id,
-                decision=str(resume_payload["decision"]),
-                comment=resume_payload.get("comment"),
-            )
-            if not claim.claimed:
-                raise ValueError("The requested approval is already being processed")
-            assistant_message_id = claim.message_id
-            started_at = time.perf_counter()
-
-            try:
-                response = await service.invoke(session)
-            except Exception:
-                await self.history_store.mark_interrupted(
-                    message_id=assistant_message_id,
-                )
-                raise
-
-            await self.history_store.complete_assistant_message(
                 message_id=assistant_message_id,
-                response=response,
-                latency_ms=self._elapsed_ms(started_at),
-                extra_meta={
-                    **self._resume_meta(resume_payload, action_id),
-                    **self._llm_profile_meta(session),
-                },
             )
-            self._schedule_consolidation(session=session, response=response)
+            raise
 
-            return response
-        finally:
-            self._finish_conversation_run(conversation_id)
+        await self.history_db.run(
+            chat_log.complete_assistant_message,
+            user_id=session.user_id,
+            conversation_id=session.conversation_id,
+            run_id=str(session.run_id),
+            message_id=assistant_message_id,
+            response=response,
+            latency_ms=self._elapsed_ms(started_at),
+            extra_meta={
+                **self._resume_meta(resume_payload, action_id),
+                **self._llm_profile_meta(session),
+            },
+        )
+        self._schedule_consolidation(session=session, response=response)
+
+        return response
 
     async def resume_chat_stream(
         self,
@@ -230,8 +253,9 @@ class AgentRuntime:
         requested_run_id: str | None = None,
         requested_action_id: str | None = None,
         db: DbSession,
-    ) -> AsyncIterator[str]:
-        await self._claim_conversation_run(conversation_id)
+    ) -> AgentStreamSubscription:
+        assistant_message_id: int | None = None
+        run_id = requested_run_id or "resume-pending"
         try:
             session, action_id, service = await self._resume_session(
                 conversation_id=conversation_id,
@@ -240,8 +264,10 @@ class AgentRuntime:
                 requested_action_id=requested_action_id,
                 db=db,
             )
+            db.rollback()
             run_id = str(session.run_id)
-            claim = await self.history_store.claim_pending_action(
+            claim = await self.history_db.run(
+                chat_log.claim_pending_action,
                 user_id=session.user_id,
                 conversation_id=conversation_id,
                 run_id=run_id,
@@ -252,30 +278,35 @@ class AgentRuntime:
             if not claim.claimed:
                 raise ValueError("The requested approval is already being processed")
             assistant_message_id = claim.message_id
-
-            stream_run = DetachedStreamRun(run_id)
-            self._register_stream_run(stream_run)
             self._start_stream_task(
-                self._run_stream_task(
-                    stream_run=stream_run,
-                    message=None,
-                    conversation_id=conversation_id,
-                    run_id=run_id,
-                    resume_payload=resume_payload,
-                    resume_action_id=action_id,
-                    assistant_message_id=assistant_message_id,
-                    service=service,
-                    llm_profile=session.llm_profile,
-                    memory_llm_profile=session.memory_llm_profile,
-                    paper_search_source_limits=None,
-                ),
+                message=None,
+                user_id=session.user_id,
+                conversation_id=conversation_id,
                 run_id=run_id,
+                resume_payload=resume_payload,
+                assistant_message_id=assistant_message_id,
+                service=service,
+                llm_profile=session.llm_profile,
+                memory_llm_profile=session.memory_llm_profile,
+                paper_search_source_limits=None,
+                extra_meta=self._resume_meta(resume_payload, action_id),
             )
-        except Exception:
-            self._finish_conversation_run(conversation_id)
+            return AgentStreamSubscription(
+                run_id=run_id,
+                events=self._stream_events(
+                    user_id=session.user_id,
+                    run_id=run_id,
+                    after_id=None,
+                ),
+            )
+        except BaseException:
+            await self._abort_stream_setup(
+                user_id=DEFAULT_USER_ID,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                assistant_message_id=assistant_message_id,
+            )
             raise
-
-        return stream_run.subscribe()
 
     async def delete_conversation(
         self,
@@ -283,131 +314,62 @@ class AgentRuntime:
         conversation_id: str,
         db: DbSession,
     ) -> dict[str, Any]:
-        if self._is_conversation_busy(conversation_id):
-            raise ConflictException("会话正在执行，暂不能删除")
-        if conversation_id in self._deleting_conversations:
-            raise ConflictException("会话正在删除，请稍后重试")
-
-        self._deleting_conversations.add(conversation_id)
-        job: ConversationDeletionJob | None = None
-        try:
-            job = await self.history_store.prepare_conversation_deletion(
-                user_id=DEFAULT_USER_ID,
-                conversation_id=conversation_id,
-            )
-            await self._run_conversation_deletion(job=job, db=db)
-        except Exception as exc:
-            if job is not None:
-                try:
-                    await self.history_store.record_conversation_deletion_error(
-                        job_id=job.job_id,
-                        error=str(exc),
-                    )
-                except Exception:
-                    logger.exception("Failed to record conversation deletion error")
-            raise
-        finally:
-            self._deleting_conversations.discard(conversation_id)
+        await self._run_conversation_deletion(
+            user_id=DEFAULT_USER_ID,
+            conversation_id=conversation_id,
+            db=db,
+        )
 
         return {
             "conversation_id": conversation_id,
             "deleted": True,
         }
 
-    def _register_stream_run(self, stream_run: DetachedStreamRun) -> None:
-        self._active_stream_runs.add(stream_run)
-
-    def _unregister_stream_run(self, stream_run: DetachedStreamRun) -> None:
-        self._active_stream_runs.discard(stream_run)
-
-    def _start_stream_task(
-        self,
-        coroutine: Awaitable[None],
-        *,
-        run_id: str,
-    ) -> None:
-        task = asyncio.create_task(coroutine, name=f"agent-stream:{run_id}")
-        self._active_stream_tasks.add(task)
-        task.add_done_callback(self._active_stream_tasks.discard)
-
-    def _begin_conversation_run(self, conversation_id: str) -> None:
-        if conversation_id in self._deleting_conversations:
-            raise ConflictException("会话正在删除，暂不能执行")
-        self._active_conversation_runs[conversation_id] = (
-            self._active_conversation_runs.get(conversation_id, 0) + 1
-        )
-
-    async def _claim_conversation_run(self, conversation_id: str) -> None:
-        if await self.history_store.has_pending_conversation_deletion(
-            user_id=DEFAULT_USER_ID,
-            conversation_id=conversation_id,
-        ):
-            raise ConflictException("会话正在删除，暂不能执行")
-        self._begin_conversation_run(conversation_id)
-
     async def _run_conversation_deletion(
         self,
         *,
-        job: ConversationDeletionJob,
+        user_id: str,
+        conversation_id: str,
         db: DbSession,
     ) -> None:
-        stage = job.stage
-        if stage == "prepared":
-            await self.artifact_store.stage_run_directories(
-                run_ids=job.run_ids,
-                deletion_id=job.job_id,
+        async def delete_artifacts() -> None:
+            run_ids = await self.history_db.run(
+                chat_log.list_run_ids,
+                user_id=user_id,
+                conversation_id=conversation_id,
             )
-            await self.history_store.advance_conversation_deletion(
-                job_id=job.job_id,
-                stage="artifacts_staged",
-            )
-            stage = "artifacts_staged"
-        if stage == "artifacts_staged":
-            await self.agent_service.checkpointer.adelete_thread(job.conversation_id)
-            await self.history_store.advance_conversation_deletion(
-                job_id=job.job_id,
-                stage="checkpoints_deleted",
-            )
-            stage = "checkpoints_deleted"
-        if stage == "checkpoints_deleted":
-            await self._delete_conversation_memory(
-                db=db,
-                conversation_id=job.conversation_id,
-            )
-            await self.history_store.advance_conversation_deletion(
-                job_id=job.job_id,
-                stage="memory_deleted",
-            )
-            stage = "memory_deleted"
-        if stage == "memory_deleted":
-            await self.history_store.delete_conversation(
-                user_id=job.user_id,
-                conversation_id=job.conversation_id,
-            )
-            await self.history_store.advance_conversation_deletion(
-                job_id=job.job_id,
-                stage="history_deleted",
-            )
-            stage = "history_deleted"
-        if stage == "history_deleted":
-            await self.artifact_store.purge_staged_directories(
-                deletion_id=job.job_id,
-            )
-            await self.history_store.finish_conversation_deletion(job_id=job.job_id)
+            await self.artifact_store.delete_run_directories(run_ids)
 
-    def _finish_conversation_run(self, conversation_id: str) -> None:
-        active_count = self._active_conversation_runs.get(conversation_id, 0)
-        if active_count <= 1:
-            self._active_conversation_runs.pop(conversation_id, None)
-            return
-        self._active_conversation_runs[conversation_id] = active_count - 1
-
-    def _is_conversation_busy(self, conversation_id: str) -> bool:
-        return (
-            self._active_conversation_runs.get(conversation_id, 0) > 0
-            or (DEFAULT_USER_ID, conversation_id)
-            in self._active_consolidation_scopes
-        )
+        for resource, operation in (
+            ("artifacts", delete_artifacts()),
+            (
+                "checkpoints",
+                self.agent_service.checkpointer.adelete_thread(conversation_id),
+            ),
+            (
+                "memory",
+                self._delete_conversation_memory(
+                    db=db,
+                    conversation_id=conversation_id,
+                ),
+            ),
+            (
+                "history",
+                self.history_db.run(
+                    transactions.delete_conversation,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                ),
+            ),
+        ):
+            try:
+                await operation
+            except Exception:
+                logger.exception(
+                    "Failed to delete conversation %s: conversation_id=%s",
+                    resource,
+                    conversation_id,
+                )
 
     @staticmethod
     async def _delete_conversation_memory(
@@ -463,6 +425,13 @@ class AgentRuntime:
             db.rollback()
             raise
 
+    async def shutdown(self) -> None:
+        tasks = list(self._active_stream_tasks.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     def _schedule_consolidation(
         self,
         *,
@@ -514,7 +483,7 @@ class AgentRuntime:
             result = await Consolidator(
                 db,
                 user_id=user_id,
-                history_reader=self.history_store,
+                history_db=self.history_db,
                 extraction_model=LangChainMemoryExtractor(
                     chat=ChatClient(memory_llm_config),
                 ),
@@ -537,71 +506,164 @@ class AgentRuntime:
         finally:
             db.close()
 
-    async def _run_stream_task(
+    async def _abort_stream_setup(
         self,
         *,
-        stream_run: DetachedStreamRun,
+        user_id: str,
+        conversation_id: str,
+        run_id: str,
+        assistant_message_id: int | None,
+    ) -> None:
+        try:
+            if assistant_message_id is not None:
+                await self.history_db.run(
+                    chat_log.mark_interrupted,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    message_id=assistant_message_id,
+                )
+        except Exception:
+            logger.exception(
+                "Failed to interrupt prepared stream: user_id=%s, conversation_id=%s",
+                user_id,
+                conversation_id,
+            )
+
+    async def subscribe_stream(
+        self,
+        *,
+        run_id: str,
+        last_event_id: int | None,
+        user_id: str = DEFAULT_USER_ID,
+    ) -> AgentStreamSubscription:
+        scope = await self.history_db.run(chat_log.get_run_scope, run_id)
+        if scope is None or scope.user_id != user_id:
+            raise LookupError("run not found")
+        if last_event_id is not None:
+            event = await self.history_db.run(
+                stream_events.get,
+                user_id=user_id,
+                run_id=run_id,
+                event_id=last_event_id,
+            )
+            if event is None:
+                raise ValueError("Last-Event-ID does not belong to this run")
+        return AgentStreamSubscription(
+            run_id=run_id,
+            events=self._stream_events(
+                user_id=user_id,
+                run_id=run_id,
+                after_id=last_event_id,
+            ),
+        )
+
+    def _start_stream_task(
+        self,
+        *,
         message: str | None,
+        user_id: str,
         conversation_id: str,
         run_id: str,
         resume_payload: dict[str, Any] | None,
-        resume_action_id: str | None,
         assistant_message_id: int,
         service: AgentService,
         llm_profile: dict[str, Any] | None,
         memory_llm_profile: dict[str, Any] | None,
         paper_search_source_limits: dict[str, int] | None,
+        extra_meta: dict[str, Any] | None,
     ) -> None:
-        try:
-            await self._run_stream_worker(
-                stream_run=stream_run,
+        key = (user_id, run_id)
+        task = asyncio.create_task(
+            self._run_stream_task(
                 message=message,
+                user_id=user_id,
                 conversation_id=conversation_id,
                 run_id=run_id,
                 resume_payload=resume_payload,
-                resume_action_id=resume_action_id,
                 assistant_message_id=assistant_message_id,
                 service=service,
                 llm_profile=llm_profile,
                 memory_llm_profile=memory_llm_profile,
                 paper_search_source_limits=paper_search_source_limits,
-            )
-        except Exception:
-            logger.exception(
-                "Detached Agent task crashed: conversation_id=%s, run_id=%s",
-                conversation_id,
-                run_id,
-            )
-        finally:
-            stream_run.finish()
-            self._unregister_stream_run(stream_run)
-            self._finish_conversation_run(conversation_id)
+                extra_meta=extra_meta,
+            ),
+            name=f"agent-stream:{user_id}:{run_id}",
+        )
+        self._active_stream_tasks[key] = task
 
-    async def _run_stream_worker(
+    async def _run_stream_task(
         self,
         *,
-        stream_run: DetachedStreamRun,
         message: str | None,
+        user_id: str,
         conversation_id: str,
         run_id: str,
         resume_payload: dict[str, Any] | None,
-        resume_action_id: str | None,
         assistant_message_id: int,
         service: AgentService,
         llm_profile: dict[str, Any] | None,
         memory_llm_profile: dict[str, Any] | None,
         paper_search_source_limits: dict[str, int] | None,
+        extra_meta: dict[str, Any] | None,
     ) -> None:
         started_at = time.perf_counter()
+        terminal_persisted = False
+        stream_session: Session | None = None
+        terminal_event: EventEnvelope | None = None
         db: DbSession | None = None
+
+        async def persist_terminal(
+            response: dict[str, Any],
+            card_meta: dict[str, Any],
+            event: EventEnvelope,
+        ) -> None:
+            nonlocal terminal_persisted, terminal_event
+            if terminal_persisted:
+                return
+            await self.history_db.run(
+                transactions.complete_assistant_message_with_event,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                message_id=assistant_message_id,
+                response=response,
+                latency_ms=self._elapsed_ms(started_at),
+                extra_meta={
+                    **card_meta,
+                    **(
+                        self._llm_profile_meta(stream_session)
+                        if stream_session is not None
+                        else {}
+                    ),
+                    **(extra_meta or {}),
+                },
+                event_name=str(event["event"]),
+                event_data=self._event_data(event),
+            )
+            terminal_persisted = True
+            terminal_event = event
+            if stream_session is not None:
+                try:
+                    self._schedule_consolidation(
+                        session=stream_session,
+                        response=response,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to schedule memory consolidation: run_id=%s",
+                        run_id,
+                    )
+
         try:
             db = self.db_factory()
-            session = (
+            stream_session = (
                 Session.resume(
                     conversation_id=conversation_id,
                     run_id=run_id,
                     resume_payload=resume_payload,
                     db=db,
+                    user_id=user_id,
                     assistant_message_id=assistant_message_id,
                     llm_profile=llm_profile,
                     memory_llm_profile=memory_llm_profile,
@@ -612,135 +674,139 @@ class AgentRuntime:
                     conversation_id=conversation_id,
                     run_id=run_id,
                     db=db,
-                    user_id=DEFAULT_USER_ID,
+                    user_id=user_id,
                     assistant_message_id=assistant_message_id,
                     llm_profile=llm_profile,
                     memory_llm_profile=memory_llm_profile,
                     paper_search_source_limits=paper_search_source_limits,
                 )
             )
-            await self._consume_detached_stream(
-                stream_run=stream_run,
-                session=session,
-                assistant_message_id=assistant_message_id,
-                started_at=started_at,
-                extra_meta=(
-                    self._resume_meta(resume_payload, resume_action_id)
-                    if resume_payload is not None
-                    else self._llm_profile_meta(session)
-                ),
-                service=service,
-            )
+            async for event in service.stream(
+                stream_session,
+                on_terminal=persist_terminal,
+            ):
+                if event is terminal_event:
+                    continue
+                await self.history_db.run(
+                    stream_events.append,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    event_name=str(event["event"]),
+                    data=self._event_data(event),
+                )
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             logger.exception(
-                "Detached Agent task failed: conversation_id=%s, run_id=%s",
+                "Agent stream failed: user_id=%s, conversation_id=%s, run_id=%s",
+                user_id,
                 conversation_id,
                 run_id,
             )
-            response = await self._persist_detached_failure(
-                assistant_message_id=assistant_message_id,
-                conversation_id=conversation_id,
-                run_id=run_id,
-                latency_ms=self._elapsed_ms(started_at),
-                error=str(exc),
-                extra_meta=(
-                    self._resume_meta(resume_payload, resume_action_id)
-                    if resume_payload is not None
-                    else None
-                ),
-            )
-            stream_run.publish(
-                Session(
+            if not terminal_persisted:
+                response = self._failed_stream_response(
                     conversation_id=conversation_id,
                     run_id=run_id,
-                    assistant_message_id=assistant_message_id,
-                    db=db,
-                ).encode_sse("run_failed", response)
-            )
+                    error=str(exc),
+                )
+                event = build_event("run_failed", response)
+                try:
+                    await persist_terminal(response, {"schema_version": 1, "card": {}}, event)
+                except Exception:
+                    logger.exception(
+                        "Failed to persist stream failure: user_id=%s, run_id=%s",
+                        user_id,
+                        run_id,
+                    )
         finally:
-            if db is not None:
-                db.close()
+            try:
+                if not terminal_persisted:
+                    await asyncio.shield(
+                        self.history_db.run(
+                            chat_log.mark_interrupted,
+                            user_id=user_id,
+                            conversation_id=conversation_id,
+                            run_id=run_id,
+                            message_id=assistant_message_id,
+                        )
+                    )
+            except Exception:
+                logger.exception("Failed to clean up agent stream: run_id=%s", run_id)
+            finally:
+                if db is not None:
+                    try:
+                        db.close()
+                    except Exception:
+                        logger.exception(
+                            "Failed to close stream session: run_id=%s",
+                            run_id,
+                        )
+                self._active_stream_tasks.pop((user_id, run_id), None)
 
-    async def _consume_detached_stream(
+    async def _stream_events(
         self,
         *,
-        stream_run: DetachedStreamRun,
-        session: Session,
-        assistant_message_id: int,
-        started_at: float,
-        extra_meta: dict[str, Any] | None,
-        service: AgentService,
-    ) -> None:
-        terminal_persisted = False
+        user_id: str,
+        run_id: str,
+        after_id: int | None,
+    ) -> AsyncIterator[AgentStreamEvent]:
+        cursor = after_id
+        while True:
+            status = await self.history_db.run(
+                chat_log.get_run_status,
+                user_id=user_id,
+                run_id=run_id,
+            )
+            events = await self.history_db.run(
+                stream_events.list_after,
+                user_id=user_id,
+                run_id=run_id,
+                after_id=cursor,
+                limit=100,
+            )
+            for event in events:
+                cursor = event.id
+                yield event
+            if events:
+                continue
 
-        async def persist_terminal(
-            response: dict[str, Any],
-            card_meta: dict[str, Any],
-        ) -> None:
-            nonlocal terminal_persisted
-            if terminal_persisted:
+            if status in {
+                "completed",
+                "confirmation_required",
+                "failed",
+                "blocked",
+                "interrupted",
+            } or (user_id, run_id) not in self._active_stream_tasks:
                 return
+            await asyncio.sleep(0.25)
 
-            await self.history_store.complete_assistant_message(
-                message_id=assistant_message_id,
-                response=response,
-                latency_ms=self._elapsed_ms(started_at),
-                extra_meta={**card_meta, **(extra_meta or {})},
-            )
-            terminal_persisted = True
-            self._schedule_consolidation(session=session, response=response)
+    @staticmethod
+    def _event_data(event: EventEnvelope) -> dict[str, Any]:
+        hidden_fields = {
+            "event",
+            "event_id",
+            "sequence",
+            "conversation_id",
+            "run_id",
+            "llm_profile",
+            "assistant_message_id",
+            "timestamp",
+        }
+        return {
+            key: to_jsonable(value)
+            for key, value in event.items()
+            if key not in hidden_fields
+        }
 
-        try:
-            await self._stream_with_service(
-                service=service,
-                stream_run=stream_run,
-                session=session,
-                persist_terminal=persist_terminal,
-            )
-        except Exception as exc:
-            logger.exception(
-                "Detached Agent stream failed: conversation_id=%s, run_id=%s",
-                session.conversation_id,
-                session.run_id,
-            )
-            if terminal_persisted:
-                return
-
-            response = await self._persist_detached_failure(
-                assistant_message_id=assistant_message_id,
-                conversation_id=session.conversation_id,
-                run_id=str(session.run_id),
-                latency_ms=self._elapsed_ms(started_at),
-                error=str(exc),
-                extra_meta=extra_meta,
-            )
-            stream_run.publish(session.encode_sse("run_failed", response))
-
-    async def _stream_with_service(
-        self,
+    @staticmethod
+    def _failed_stream_response(
         *,
-        service: AgentService,
-        stream_run: DetachedStreamRun,
-        session: Session,
-        persist_terminal,
-    ) -> None:
-        async for event in service.stream(
-            session,
-            on_terminal=persist_terminal,
-        ):
-            stream_run.publish(event)
-
-    async def _persist_detached_failure(
-        self,
-        *,
-        assistant_message_id: int,
         conversation_id: str,
         run_id: str,
-        latency_ms: int,
         error: str,
-        extra_meta: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        response = {
+        return {
             "conversation_id": conversation_id,
             "run_id": run_id,
             "status": "failed",
@@ -751,24 +817,6 @@ class AgentRuntime:
             "interrupt": None,
             "error": error,
         }
-        await self.history_store.complete_assistant_message(
-            message_id=assistant_message_id,
-            response=response,
-            latency_ms=latency_ms,
-            extra_meta={
-                "schema_version": 1,
-                "card": {
-                    "status": "failed",
-                    "reasoning": [],
-                    "tools": [],
-                    "subagents": [],
-                    "memory": None,
-                    "error": error,
-                },
-                **(extra_meta or {}),
-            },
-        )
-        return response
 
     async def _resume_session(
         self,
@@ -911,7 +959,7 @@ _agent_runtime: AgentRuntime | None = None
 
 def initialize_agent_runtime(
     checkpointer,
-    history_store: ChatHistoryStore,
+    history_db: HistoryDatabase,
 ) -> None:
     global _agent_runtime
 
@@ -920,9 +968,9 @@ def initialize_agent_runtime(
     _agent_runtime = AgentRuntime(
         agent_service=AgentService(
             checkpointer=checkpointer,
-            artifact_access_service=ArtifactAccessService(history_store),
+            artifact_access_service=ArtifactAccessService(history_db),
         ),
-        history_store=history_store,
+        history_db=history_db,
     )
 
 def get_agent_runtime() -> AgentRuntime:

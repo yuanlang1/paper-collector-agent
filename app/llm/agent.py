@@ -1,4 +1,6 @@
+import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import UTC, datetime
 import logging
 from typing import Any
 
@@ -37,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 TerminalCallback = Callable[
-    [dict[str, Any], dict[str, Any]],
+    [dict[str, Any], dict[str, Any], EventEnvelope],
     Awaitable[None],
 ]
 
@@ -112,24 +114,34 @@ class AgentService:
         session: Session,
         *,
         on_terminal: TerminalCallback | None = None,
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[EventEnvelope]:
         adapter = AgentStreamAdapter(self.subagent_registry)
         card_meta = CardMetaAccumulator(
             model=(getattr(self, "llm_config", None).model if getattr(self, "llm_config", None) else settings.OPENAI_MODEL),
             provider=(getattr(self, "llm_config", None).provider if getattr(self, "llm_config", None) else getattr(settings, "LLM_PROVIDER", None)),
         )
         latest_root_state: dict[str, Any] = {}
+        event_sequence = 0
 
-        def encode_sse_event(event: EventEnvelope) -> str:
-            envelope = session.build_sse_envelope(
-                str(event["event"]),
-                {key: value for key, value in event.items() if key != "event"},
+        def observe_event(event: EventEnvelope) -> EventEnvelope:
+            nonlocal event_sequence
+            event_sequence += 1
+            card_meta.observe(
+                {
+                    "event": str(event["event"]),
+                    "data": {
+                        key: value
+                        for key, value in event.items()
+                        if key != "event"
+                    },
+                    "sequence": event_sequence,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
             )
-            card_meta.observe(envelope)
-            return session.encode_sse_envelope(envelope)
+            return event
 
         try:
-            yield encode_sse_event(build_event("run_started", {"status": "running"}))
+            yield observe_event(build_event("run_started", {"status": "running"}))
 
             async for namespace, stream_type, chunk in self.graph.astream(
                 session.graph_input,
@@ -148,12 +160,12 @@ class AgentService:
                         getattr(message_chunk, "content", ""),
                     )
                     if text:
-                        yield encode_sse_event(build_event("message", {"content": text}))
+                        yield observe_event(build_event("message", {"content": text}))
                     continue
 
                 if stream_type == "custom":
                     for event in adapter.handle_custom(chunk):
-                        yield encode_sse_event(event)
+                        yield observe_event(event)
                     continue
 
                 if stream_type != "updates":
@@ -170,16 +182,10 @@ class AgentService:
                         conversation_id=session.conversation_id,
                         run_id=str(session.run_id),
                     )
-                    terminal_event = encode_sse_event(
+                    terminal_event = observe_event(
                         adapter.confirmation_required(interrupt_payload),
                     )
-                    await self._notify_terminal(
-                        on_terminal,
-                        response,
-                        card_meta.snapshot(response),
-                    )
-                    yield terminal_event
-                    return
+                    break
 
                 if not isinstance(chunk, dict):
                     continue
@@ -195,30 +201,27 @@ class AgentService:
                         node_name=node_name,
                         update=update,
                     ):
-                        yield encode_sse_event(event)
+                        yield observe_event(event)
 
-            final_state = await self._read_final_state(
-                config=session.graph_config,
-                fallback=latest_root_state,
-            )
-            response = build_done_payload(
-                state=final_state,
-                conversation_id=session.conversation_id,
-                run_id=str(session.run_id),
-            )
-            event_name = (
-                "run_failed"
-                if response["status"] == "failed"
-                else "run_completed"
-            )
-            terminal_event = encode_sse_event(build_event(event_name, response))
-            await self._notify_terminal(
-                on_terminal,
-                response,
-                card_meta.snapshot(response),
-            )
-            yield terminal_event
+            else:
+                final_state = await self._read_final_state(
+                    config=session.graph_config,
+                    fallback=latest_root_state,
+                )
+                response = build_done_payload(
+                    state=final_state,
+                    conversation_id=session.conversation_id,
+                    run_id=str(session.run_id),
+                )
+                event_name = (
+                    "run_failed"
+                    if response["status"] == "failed"
+                    else "run_completed"
+                )
+                terminal_event = observe_event(build_event(event_name, response))
 
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             logger.exception(
                 "Agent stream failed: conversation_id=%s, run_id=%s",
@@ -238,31 +241,27 @@ class AgentService:
                 "error": str(exc),
             }
 
-            terminal_event = encode_sse_event(build_event("run_failed", response))
-            await self._notify_terminal(
-                on_terminal,
-                response,
-                card_meta.snapshot(response),
-            )
-            yield terminal_event
+            terminal_event = observe_event(build_event("run_failed", response))
+
+        await self._notify_terminal(
+            on_terminal,
+            response,
+            card_meta.snapshot(response),
+            terminal_event,
+        )
+        yield terminal_event
 
     async def _notify_terminal(
         self,
         callback: TerminalCallback | None,
         payload: dict[str, Any],
         card_meta: dict[str, Any],
+        event: EventEnvelope,
     ) -> None:
         if callback is None:
             return
 
-        try:
-            await callback(payload, card_meta)
-        except Exception:
-            logger.exception(
-                "Terminal callback failed: conversation_id=%s, run_id=%s",
-                payload.get("conversation_id"),
-                payload.get("run_id"),
-            )
+        await callback(payload, card_meta, event)
 
     async def _read_final_state(
         self,

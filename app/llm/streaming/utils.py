@@ -1,4 +1,3 @@
-import json
 from enum import Enum
 from typing import Any
 
@@ -22,22 +21,6 @@ def to_jsonable(value: Any) -> Any:
         ]
 
     return value
-
-
-def encode_sse(
-    event: str,
-    data: dict[str, Any],
-) -> str:
-    payload = json.dumps(
-        to_jsonable(data),
-        ensure_ascii=False,
-        default=str,
-    )
-
-    return (
-        f"event: {event}\n"
-        f"data: {payload}\n\n"
-    )
 
 
 def content_to_text(content: Any) -> str:

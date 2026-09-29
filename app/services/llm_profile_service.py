@@ -65,10 +65,6 @@ def resolve_runtime_config(
     db: Session,
     profile_id: int | None,
 ) -> LlmRuntimeConfig | None:
-    if db is None:
-        if profile_id is None:
-            return None
-        raise ValueError("A database session is required to resolve an LLM profile")
     if profile_id is None:
         profile = db.query(LlmProfile).filter(
             LlmProfile.is_default.is_(True), LlmProfile.enabled.is_(True)

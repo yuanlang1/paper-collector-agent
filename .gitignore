@@ -49,6 +49,7 @@ tests/*
 !tests/test_review_citations.py
 !tests/test_review_refactor.py
 !tests/test_export_test_videos.py
+!tests/test_agent_stream_lifecycle.py
 !app/models/
 !app/models/*.py
 scripts/

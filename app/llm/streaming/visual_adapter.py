@@ -8,9 +8,6 @@ from app.llm.streaming.utils import (
     to_jsonable,
 )
 
-
-StreamEvent = EventEnvelope
-
 class AgentStreamAdapter:
     def __init__(
         self,
@@ -25,8 +22,8 @@ class AgentStreamAdapter:
         *,
         node_name: str,
         update: dict[str, Any],
-    ) -> list[StreamEvent]:
-        events: list[StreamEvent] = []
+    ) -> list[EventEnvelope]:
+        events: list[EventEnvelope] = []
 
         active_call = to_jsonable(update.get("active_tool_call"))
         if isinstance(active_call, dict):
@@ -97,7 +94,7 @@ class AgentStreamAdapter:
     def handle_custom(
         self,
         payload: Any,
-    ) -> list[StreamEvent]:
+    ) -> list[EventEnvelope]:
         normalized = to_jsonable(payload)
 
         if not isinstance(normalized, dict):
@@ -108,7 +105,7 @@ class AgentStreamAdapter:
     def confirmation_required(
         self,
         payload: Any,
-    ) -> StreamEvent:
+    ) -> EventEnvelope:
         return build_event(
             "confirmation_required",
             {"interrupt": to_jsonable(payload)},

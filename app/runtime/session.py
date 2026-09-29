@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -7,8 +6,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 from sqlalchemy.orm import Session as DbSession
 
-from app.history.store import validate_run_id
-from app.llm.streaming.utils import encode_sse
+from app.history.chat_log import validate_run_id
 
 
 @dataclass
@@ -23,7 +21,6 @@ class Session:
     llm_profile: dict[str, Any] | None = None
     memory_llm_profile: dict[str, Any] | None = None
     paper_search_source_limits: dict[str, int] | None = None
-    event_sequence: int = 0
 
     @classmethod
     def create(
@@ -137,40 +134,3 @@ class Session:
             "run_status": "running",
             "error": None,
         }
-
-    def build_sse_envelope(
-        self,
-        event: str,
-        data: dict[str, Any],
-    ) -> dict[str, Any]:
-        self.event_sequence += 1
-
-        return {
-            "event_id": f"{self.run_id}:{self.event_sequence}",
-            "sequence": self.event_sequence,
-            "event": event,
-            "conversation_id": self.conversation_id,
-            "run_id": self.run_id,
-            "llm_profile": self.llm_profile,
-            "assistant_message_id": self.assistant_message_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "data": data,
-        }
-
-    @staticmethod
-    def encode_sse_envelope(
-        envelope: dict[str, Any],
-    ) -> str:
-        return encode_sse(
-            str(envelope["event"]),
-            envelope,
-        )
-
-    def encode_sse(
-        self,
-        event: str,
-        data: dict[str, Any],
-    ) -> str:
-        return self.encode_sse_envelope(
-            self.build_sse_envelope(event, data),
-        )

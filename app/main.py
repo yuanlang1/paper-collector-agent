@@ -10,9 +10,9 @@ from app.infrastructure.nacos_registry import nacos_registry
 from app.core.exceptions import register_exception_handlers
 from app.rag.index_construction.base import close_index_resources
 from app.rag.processing.task_rag_batch_runner import close_task_rag_batch_runner
-from app.runtime.agent_runtime import initialize_agent_runtime
+from app.runtime.agent_runtime import get_agent_runtime, initialize_agent_runtime
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from app.history.store import initialize_history_store
+from app.history.sqlite import initialize_history_database
 from app.database import engine
 from app.models.llm_profile import LlmProfile
 from app.models.memory import MemoryConsolidationCursor, MemoryEpisode, MemoryFact
@@ -63,19 +63,20 @@ async def lifespan(app: FastAPI):
     ) as checkpointer:
         await checkpointer.setup()
 
-        history_store = initialize_history_store(
+        history_db = initialize_history_database(
             settings.CHAT_HISTORY_DB_PATH,
         )
 
         initialize_agent_runtime(
             checkpointer=checkpointer,
-            history_store=history_store,
+            history_db=history_db,
         )
 
         await nacos_registry.start()
         try:
             yield
         finally:
+            await get_agent_runtime().shutdown()
             await close_task_rag_batch_runner()
             await paper_service_grpc_channel_pool.close()
             await nacos_registry.stop()

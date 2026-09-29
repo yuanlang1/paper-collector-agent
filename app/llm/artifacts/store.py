@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 import shutil
 import uuid
@@ -12,7 +11,7 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from app.config import settings
-from app.history.store import InvalidRunIdError, validate_run_id
+from app.history.chat_log import InvalidRunIdError, validate_run_id
 from app.llm.artifacts.schemas import ArtifactRef
 
 
@@ -103,65 +102,20 @@ class LocalArtifactStore:
         except InvalidRunIdError as exc:
             raise ArtifactUriError("invalid artifact run ID") from exc
 
-    async def stage_run_directories(
-        self,
-        *,
-        run_ids: tuple[str, ...],
-        deletion_id: str,
-    ) -> None:
-        await asyncio.to_thread(
-            self._stage_run_directories,
-            run_ids,
-            deletion_id,
-        )
+    async def delete_run_directories(self, run_ids: tuple[str, ...]) -> None:
+        await asyncio.to_thread(self._delete_run_directories, run_ids)
 
-    async def purge_staged_directories(self, *, deletion_id: str) -> None:
-        await asyncio.to_thread(self._purge_staged_directories, deletion_id)
-
-    def _stage_run_directories(
-        self,
-        run_ids: tuple[str, ...],
-        deletion_id: str,
-    ) -> None:
+    def _delete_run_directories(self, run_ids: tuple[str, ...]) -> None:
         for run_id in run_ids:
-            source = self._run_directory(run_id)
-            target = self._staged_run_directory(deletion_id, run_id)
-            if target.exists():
-                if target.is_symlink() or not target.is_dir():
-                    raise ArtifactUriError("invalid staged artifact directory")
+            directory = self._run_directory(run_id)
+            if not directory.exists():
                 continue
-            if not source.exists():
-                continue
-            if source.is_symlink() or not source.is_dir():
+            if directory.is_symlink() or not directory.is_dir():
                 raise ArtifactUriError("invalid artifact directory")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(source, target)
-
-    def _purge_staged_directories(self, deletion_id: str) -> None:
-        staged_directory = self._staged_directory(deletion_id)
-        if not staged_directory.exists():
-            return
-        if staged_directory.is_symlink() or not staged_directory.is_dir():
-            raise ArtifactUriError("invalid staged artifact directory")
-        shutil.rmtree(staged_directory)
+            shutil.rmtree(directory)
 
     def _run_directory(self, run_id: str) -> Path:
         return self._safe_directory(self.base_dir / self._path_part(run_id), run_id)
-
-    def _staged_directory(self, deletion_id: str) -> Path:
-        return self._safe_directory(
-            self.base_dir / ".trash" / self._path_part(deletion_id),
-            deletion_id,
-        )
-
-    def _staged_run_directory(self, deletion_id: str, run_id: str) -> Path:
-        return self._safe_directory(
-            self.base_dir
-            / ".trash"
-            / self._path_part(deletion_id)
-            / self._path_part(run_id),
-            run_id,
-        )
 
     def _safe_directory(self, raw_path: Path, value: str) -> Path:
         if raw_path.is_symlink():

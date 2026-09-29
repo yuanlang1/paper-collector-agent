@@ -7,7 +7,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
-from app.history.store import ChatHistoryStore
+from app.history import chat_log
+from app.history.sqlite import HistoryDatabase
 from app.llm.artifacts.store import ArtifactUriError, LocalArtifactStore
 
 
@@ -31,10 +32,10 @@ class ArtifactAccessService:
 
     def __init__(
         self,
-        history_store: ChatHistoryStore,
+        history_db: HistoryDatabase,
         artifact_store: LocalArtifactStore | None = None,
     ) -> None:
-        self.history_store = history_store
+        self.history_db = history_db
         self.artifact_store = artifact_store or LocalArtifactStore()
 
     async def read(
@@ -57,7 +58,7 @@ class ArtifactAccessService:
         except ArtifactUriError as exc:
             raise ArtifactAccessError("artifact is unavailable") from exc
 
-        scope = await self.history_store.get_run_scope(run_id)
+        scope = await self.history_db.run(chat_log.get_run_scope, run_id)
         if scope is None or scope.user_id != user_id:
             raise ArtifactAccessError("artifact is unavailable")
 
