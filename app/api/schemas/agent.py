@@ -55,12 +55,15 @@ class ActionResultView(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    user_id: str = Field(..., min_length=1)
+    conversation_id: str = Field(..., min_length=1)
+    run_id: str = Field(..., min_length=1)
     message: str = Field(..., min_length = 1)
-    conversation_id: str | None = None
     llm_profile_id: int | None = Field(default=None, gt=0)
 
 
 class ChatResumeRequest(BaseModel):
+    user_id: str = Field(..., min_length=1)
     conversation_id: str = Field(..., min_length = 1)
     run_id: str = Field(..., min_length=1)
     action_id: str = Field(..., min_length=1)

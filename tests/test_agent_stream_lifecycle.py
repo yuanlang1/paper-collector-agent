@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,6 +14,9 @@ from fastapi import FastAPI
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from app.api import agent as agent_api
+from app.events.adapter import now
+from app.events.delivery import TerminalUpdate
+from app.events.models import RunStartedEvent, RunTerminalEvent
 from app.history import chat_log, stream_events, transactions
 from app.history.sqlite import HistoryDatabase
 from app.llm.agent import AgentService
@@ -37,16 +41,15 @@ class _StreamingService:
         self.closed = asyncio.Event()
         self.sessions: list[Session] = []
 
-    async def stream(self, session: Session, *, on_terminal):
+    async def stream(self, session: Session):
         self.sessions.append(session)
         self.started.set()
         try:
-            yield {
-                "event": "run_started",
-                "status": "running",
-                "conversation_id": session.conversation_id,
-                "run_id": session.run_id,
-            }
+            yield RunStartedEvent(
+                run_id=str(session.run_id),
+                ts=now(),
+                payload={"status": "running"},
+            )
             if self.block:
                 await self.release.wait()
 
@@ -61,14 +64,21 @@ class _StreamingService:
                 "interrupt": None,
                 "error": None,
             }
-            event_name = (
-                "confirmation_required"
-                if self.status == "confirmation_required"
-                else "run_completed"
+            yield RunTerminalEvent(
+                type=(
+                    "run.waiting_for_confirmation"
+                    if self.status == "confirmation_required"
+                    else "run.finished"
+                ),
+                run_id=str(session.run_id),
+                ts=now(),
+                status=self.status,
+                payload={"reply": "done"},
+                terminal=TerminalUpdate(
+                    response=response,
+                    card_meta={"schema_version": 1, "card": {}},
+                ),
             )
-            terminal = {"event": event_name, **response}
-            await on_terminal(response, {"schema_version": 1, "card": {}}, terminal)
-            yield terminal
         finally:
             self.closed.set()
 
@@ -113,6 +123,7 @@ class AgentStreamLifecycleTests(unittest.TestCase):
         self.history_db = HistoryDatabase(Path(self.temp_dir.name) / "history.db")
         self.history_db.initialize()
         self.db_sessions: list[_TrackingDb] = []
+        self._run_number = 0
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -136,8 +147,12 @@ class AgentStreamLifecycleTests(unittest.TestCase):
         runtime: AgentRuntime,
         *,
         conversation_id: str,
+        user_id: str = "0",
+        run_id: str | None = None,
         message: str = "hello",
     ):
+        self._run_number += 1
+        run_id = run_id or f"run_{conversation_id}_{self._run_number}"
         with (
             patch(
                 "app.runtime.agent_runtime.resolve_runtime_config",
@@ -151,7 +166,9 @@ class AgentStreamLifecycleTests(unittest.TestCase):
         ):
             return await runtime.chat_stream(
                 message=message,
+                user_id=user_id,
                 conversation_id=conversation_id,
+                run_id=run_id,
                 db=Mock(),
             )
 
@@ -179,11 +196,12 @@ class AgentStreamLifecycleTests(unittest.TestCase):
                 stream_events.list_after,
                 user_id="0",
                 run_id=subscription.run_id,
-                after_id=None,
+                after_sequence=None,
                 limit=100,
             )
 
             self.assertEqual([event.event_name for event in events], ["run_started", "run_completed"])
+            self.assertEqual([event.sequence for event in events], [1, 2])
             self.assertEqual(await self._assistant_status("conv-background"), "completed")
             self.assertTrue(self.db_sessions[0].closed)
             await subscription.events.aclose()
@@ -234,13 +252,15 @@ class AgentStreamLifecycleTests(unittest.TestCase):
 
             all_events = await self._collect(started.events)
             replay = await runtime.subscribe_stream(
+                user_id="0",
+                conversation_id="conv-replay",
                 run_id=started.run_id,
-                last_event_id=all_events[0].id,
+                last_event_sequence=all_events[0].sequence,
             )
             missing_events = await self._collect(replay.events)
 
             self.assertEqual([event.event_name for event in missing_events], ["run_completed"])
-            self.assertNotIn("run_id", missing_events[0].data)
+            self.assertEqual(missing_events[0].data["run_id"], started.run_id)
             self.assertNotIn("conversation_id", missing_events[0].data)
             await runtime.shutdown()
 
@@ -306,7 +326,7 @@ class AgentStreamLifecycleTests(unittest.TestCase):
                     stream_events.list_after,
                     user_id="0",
                     run_id="run_atomic",
-                    after_id=None,
+                    after_sequence=None,
                     limit=100,
                 ),
                 [],
@@ -335,26 +355,101 @@ class AgentStreamLifecycleTests(unittest.TestCase):
 
             with self.assertRaises(LookupError):
                 await runtime.subscribe_stream(
-                    run_id="run-a",
-                    last_event_id=None,
                     user_id="user-b",
+                    conversation_id="same-conversation",
+                    run_id="run-a",
+                    last_event_sequence=None,
                 )
             with self.assertRaises(ValueError):
                 await runtime.subscribe_stream(
-                    run_id="run-a",
-                    last_event_id=event.id + 1,
                     user_id="user-a",
+                    conversation_id="same-conversation",
+                    run_id="run-a",
+                    last_event_sequence=event.sequence + 1,
                 )
             self.assertEqual(
                 await self.history_db.run(
                     stream_events.list_after,
                     user_id="user-b",
                     run_id="run-a",
-                    after_id=None,
+                    after_sequence=None,
                     limit=100,
                 ),
                 [],
             )
+
+        asyncio.run(scenario())
+
+    def test_existing_events_are_backfilled_with_run_sequences(self) -> None:
+        database_path = Path(self.temp_dir.name) / "legacy-history.db"
+        connection = sqlite3.connect(database_path)
+        connection.executescript(
+            """
+            CREATE TABLE agent_stream_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                conversation_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                event_name TEXT NOT NULL,
+                data TEXT NOT NULL
+            );
+            INSERT INTO agent_stream_events (
+                user_id, conversation_id, run_id, event_name, data
+            ) VALUES
+                ('user-1', 'conv-1', 'run-1', 'run_started', '{}'),
+                ('user-1', 'conv-2', 'run-2', 'run_started', '{}'),
+                ('user-1', 'conv-1', 'run-1', 'run_completed', '{}');
+            """
+        )
+        connection.close()
+
+        legacy_db = HistoryDatabase(database_path)
+        legacy_db.initialize()
+
+        async def scenario() -> None:
+            first_run = await legacy_db.run(
+                stream_events.list_after,
+                user_id="user-1",
+                run_id="run-1",
+                after_sequence=None,
+                limit=100,
+            )
+            second_run = await legacy_db.run(
+                stream_events.list_after,
+                user_id="user-1",
+                run_id="run-2",
+                after_sequence=None,
+                limit=100,
+            )
+            self.assertEqual([event.sequence for event in first_run], [1, 2])
+            self.assertEqual([event.sequence for event in second_run], [1])
+
+        asyncio.run(scenario())
+        legacy_db.initialize()
+
+    def test_concurrent_writes_allocate_distinct_run_sequences(self) -> None:
+        async def scenario() -> None:
+            await self.history_db.run(
+                chat_log.start_turn,
+                user_id="user-1",
+                conversation_id="conv-concurrent",
+                run_id="run-concurrent",
+                user_content="hello",
+            )
+            events = await asyncio.gather(
+                *(
+                    self.history_db.run(
+                        stream_events.append,
+                        user_id="user-1",
+                        conversation_id="conv-concurrent",
+                        run_id="run-concurrent",
+                        event_name="content_delta",
+                        data={"delta": str(index)},
+                    )
+                    for index in range(2)
+                )
+            )
+            self.assertEqual(sorted(event.sequence for event in events), [1, 2])
 
         asyncio.run(scenario())
 
@@ -381,6 +476,22 @@ class AgentStreamLifecycleTests(unittest.TestCase):
                 [message["status"] for message in messages if message["role"] == "assistant"],
                 ["completed", "completed"],
             )
+            first_events = await self.history_db.run(
+                stream_events.list_after,
+                user_id="0",
+                run_id=first.run_id,
+                after_sequence=None,
+                limit=100,
+            )
+            second_events = await self.history_db.run(
+                stream_events.list_after,
+                user_id="0",
+                run_id=second.run_id,
+                after_sequence=None,
+                limit=100,
+            )
+            self.assertEqual([event.sequence for event in first_events], [1, 2])
+            self.assertEqual([event.sequence for event in second_events], [1, 2])
             await second.events.aclose()
             await first.events.aclose()
             await runtime.shutdown()
@@ -402,6 +513,21 @@ class AgentStreamLifecycleTests(unittest.TestCase):
 
 
 class NativeSseResponseTests(unittest.TestCase):
+    def test_agent_api_requires_request_context(self) -> None:
+        app = FastAPI()
+        app.include_router(agent_api.router)
+
+        async def scenario() -> None:
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post(
+                    "/api/agent/chat/stream",
+                    json={"message": "hello"},
+                )
+            self.assertEqual(response.status_code, 422)
+
+        asyncio.run(scenario())
+
     def test_server_sent_event_uses_id_event_and_json_data(self) -> None:
         app = FastAPI()
 
@@ -466,25 +592,42 @@ class NativeSseResponseTests(unittest.TestCase):
                     ) as client:
                         response = await client.post(
                             "/api/agent/chat/stream",
-                            json={"message": "hello", "conversation_id": "conv-api"},
+                            json={
+                                "message": "hello",
+                                "user_id": "user-api",
+                                "conversation_id": "conv-api",
+                                "run_id": "run-api",
+                            },
+                        )
+                        duplicate = await client.post(
+                            "/api/agent/chat/stream",
+                            json={
+                                "message": "hello",
+                                "user_id": "user-api",
+                                "conversation_id": "conv-api",
+                                "run_id": "run-api",
+                            },
                         )
                         run_id = response.headers["x-agent-run-id"]
                         events = await history_db.run(
                             stream_events.list_after,
-                            user_id="0",
+                            user_id="user-api",
                             run_id=run_id,
-                            after_id=None,
+                            after_sequence=None,
                             limit=100,
                         )
                         replay = await client.get(
-                            f"/api/agent/runs/{run_id}/events",
-                            headers={"Last-Event-ID": str(events[0].id)},
+                            f"/api/agent/runs/{run_id}/events"
+                            "?user_id=user-api&conversation_id=conv-api",
+                            headers={"Last-Event-ID": str(events[0].sequence)},
                         )
 
                 self.assertEqual(response.status_code, 200)
+                self.assertEqual(duplicate.status_code, 409)
                 self.assertEqual(response.headers["access-control-expose-headers"], "X-Agent-Run-ID")
                 self.assertIn("event: run_started", response.text)
                 self.assertIn("event: run_completed", response.text)
+                self.assertIn("id: 1", response.text)
                 self.assertIn("event: run_completed", replay.text)
                 self.assertNotIn("event: run_started", replay.text)
                 await runtime.shutdown()
@@ -492,8 +635,8 @@ class NativeSseResponseTests(unittest.TestCase):
         asyncio.run(scenario())
 
 
-class AgentServicePersistenceTests(unittest.TestCase):
-    def test_terminal_persistence_error_propagates(self) -> None:
+class AgentServiceStreamTests(unittest.TestCase):
+    def test_stream_exposes_terminal_persistence_data(self) -> None:
         async def scenario() -> None:
             service = AgentService.__new__(AgentService)
             service.subagent_registry = Mock()
@@ -506,12 +649,10 @@ class AgentServicePersistenceTests(unittest.TestCase):
                 db=Mock(),
             )
 
-            async def fail_terminal(*_args) -> None:
-                raise RuntimeError("persistence failed")
+            events = [event async for event in service.stream(session)]
 
-            with self.assertRaisesRegex(RuntimeError, "persistence failed"):
-                async for _event in service.stream(session, on_terminal=fail_terminal):
-                    pass
+            self.assertIsInstance(events[-1], RunTerminalEvent)
+            self.assertEqual(events[-1].terminal.response["status"], "completed")
 
         asyncio.run(scenario())
 
@@ -527,27 +668,19 @@ class AgentServicePersistenceTests(unittest.TestCase):
                 run_id="run_subagent_stream",
                 db=Mock(),
             )
-            terminal_cards = []
-
-            async def save_terminal(_response, card_meta, _event) -> None:
-                terminal_cards.append(card_meta)
-
-            events = [
-                event
-                async for event in service.stream(session, on_terminal=save_terminal)
-            ]
+            events = [event async for event in service.stream(session)]
 
             self.assertEqual(
-                [event["event"] for event in events],
+                [event.type for event in events],
                 [
-                    "run_started",
-                    "subagent_started",
-                    "subagent_completed",
-                    "run_completed",
+                    "run.started",
+                    "subagent.progress",
+                    "subagent.progress",
+                    "run.finished",
                 ],
             )
             self.assertEqual(
-                terminal_cards[0]["card"]["subagents"][0]["workflow"],
+                events[-1].terminal.card_meta["card"]["subagents"][0]["workflow"],
                 "paper_search",
             )
 

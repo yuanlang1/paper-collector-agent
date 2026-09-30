@@ -36,12 +36,17 @@ async def _start_chat_stream(
     response: Response,
     db: Session = Depends(get_db),
 ) -> AgentStreamSubscription:
-    subscription = await get_agent_runtime().chat_stream(
-        message=payload.message,
-        conversation_id=payload.conversation_id,
-        llm_profile_id=payload.llm_profile_id,
-        db=db,
-    )
+    try:
+        subscription = await get_agent_runtime().chat_stream(
+            message=payload.message,
+            user_id=payload.user_id,
+            conversation_id=payload.conversation_id,
+            run_id=payload.run_id,
+            llm_profile_id=payload.llm_profile_id,
+            db=db,
+        )
+    except chat_log.RunAlreadyExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     response.headers["X-Agent-Run-ID"] = subscription.run_id
     response.headers["Access-Control-Expose-Headers"] = "X-Agent-Run-ID"
     return subscription
@@ -53,9 +58,10 @@ async def _start_resume_stream(
     db: Session = Depends(get_db),
 ) -> AgentStreamSubscription:
     subscription = await get_agent_runtime().resume_chat_stream(
+        user_id=payload.user_id,
         conversation_id=payload.conversation_id,
         resume_payload=payload.model_dump(
-            exclude={"conversation_id", "run_id", "action_id"},
+            exclude={"user_id", "conversation_id", "run_id", "action_id"},
             exclude_none=True,
         ),
         requested_run_id=payload.run_id,
@@ -69,6 +75,8 @@ async def _start_resume_stream(
 
 async def _subscribe_to_run(
     run_id: str,
+    user_id: Annotated[str, Query(min_length=1)],
+    conversation_id: Annotated[str, Query(min_length=1)],
     last_event_id: Annotated[str | None, Header()] = None,
 ) -> AgentStreamSubscription:
     cursor: int | None = None
@@ -78,8 +86,10 @@ async def _subscribe_to_run(
         cursor = int(last_event_id)
     try:
         return await get_agent_runtime().subscribe_stream(
+            user_id=user_id,
+            conversation_id=conversation_id,
             run_id=run_id,
-            last_event_id=cursor,
+            last_event_sequence=cursor,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="Run not found") from exc
@@ -92,7 +102,7 @@ async def _sse_events(
 ) -> AsyncIterator[ServerSentEvent]:
     async for event in subscription.events:
         yield ServerSentEvent(
-            id=str(event.id),
+            id=str(event.sequence),
             event=event.event_name,
             data=event.data,
         )
@@ -108,12 +118,17 @@ async def agent_chat(
 ) -> ServiceResponse[ChatResponse]:
     runtime = get_agent_runtime()
 
-    result = await runtime.chat(
-        message=payload.message,
-        conversation_id=payload.conversation_id,
-        llm_profile_id=payload.llm_profile_id,
-        db=db,
-    )
+    try:
+        result = await runtime.chat(
+            message=payload.message,
+            user_id=payload.user_id,
+            conversation_id=payload.conversation_id,
+            run_id=payload.run_id,
+            llm_profile_id=payload.llm_profile_id,
+            db=db,
+        )
+    except chat_log.RunAlreadyExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     response = ChatResponse.model_validate(result)
 
@@ -144,9 +159,10 @@ async def chat_resume(
     runtime = get_agent_runtime()
 
     result = await runtime.resume_chat(
+        user_id=payload.user_id,
         conversation_id=payload.conversation_id,
         resume_payload=payload.model_dump(
-            exclude={"conversation_id", "run_id", "action_id"},
+            exclude={"user_id", "conversation_id", "run_id", "action_id"},
             exclude_none=True,
         ),
         requested_run_id=payload.run_id,

@@ -31,6 +31,10 @@ class InvalidRunIdError(ValueError):
     """The run ID cannot be used as a stable artifact directory name."""
 
 
+class RunAlreadyExistsError(ValueError):
+    """The requested root run has already been created."""
+
+
 @dataclass(frozen=True)
 class PendingActionClaim:
     message_id: int
@@ -107,6 +111,12 @@ def start_turn(
     run_id = validate_run_id(run_id)
     created_at = utc_now()
     with database.transaction() as connection:
+        existing = connection.execute(
+            "SELECT 1 FROM chat_log WHERE run_id = ? LIMIT 1",
+            (run_id,),
+        ).fetchone()
+        if existing is not None:
+            raise RunAlreadyExistsError("run_id already exists")
         connection.execute(
             """
             INSERT INTO chat_log (

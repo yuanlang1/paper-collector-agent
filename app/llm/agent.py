@@ -1,10 +1,13 @@
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 import logging
 from typing import Any
 
 from app.config import settings
+from app.events.adapter import event_from_envelope
+from app.events.delivery import TerminalUpdate
+from app.events.models import Event, RunTerminalEvent
 from app.database import SessionLocal
 from app.llm.artifacts.access import ArtifactAccessService
 from app.llm.graph.main.native_tools import build_native_tool_schemas
@@ -36,12 +39,6 @@ from app.runtime.system_context import SystemContextBuilder
 
 
 logger = logging.getLogger(__name__)
-
-
-TerminalCallback = Callable[
-    [dict[str, Any], dict[str, Any], EventEnvelope],
-    Awaitable[None],
-]
 
 
 class AgentService:
@@ -112,9 +109,7 @@ class AgentService:
     async def stream(
         self,
         session: Session,
-        *,
-        on_terminal: TerminalCallback | None = None,
-    ) -> AsyncIterator[EventEnvelope]:
+    ) -> AsyncIterator[Event]:
         adapter = AgentStreamAdapter(self.subagent_registry)
         card_meta = CardMetaAccumulator(
             model=(getattr(self, "llm_config", None).model if getattr(self, "llm_config", None) else settings.OPENAI_MODEL),
@@ -123,7 +118,7 @@ class AgentService:
         latest_root_state: dict[str, Any] = {}
         event_sequence = 0
 
-        def observe_event(event: EventEnvelope) -> EventEnvelope:
+        def observe_event(event: EventEnvelope) -> Event:
             nonlocal event_sequence
             event_sequence += 1
             card_meta.observe(
@@ -138,7 +133,7 @@ class AgentService:
                     "timestamp": datetime.now(UTC).isoformat(),
                 }
             )
-            return event
+            return event_from_envelope(event, run_id=str(session.run_id))
 
         try:
             yield observe_event(build_event("run_started", {"status": "running"}))
@@ -243,25 +238,16 @@ class AgentService:
 
             terminal_event = observe_event(build_event("run_failed", response))
 
-        await self._notify_terminal(
-            on_terminal,
-            response,
-            card_meta.snapshot(response),
-            terminal_event,
+        if not isinstance(terminal_event, RunTerminalEvent):
+            raise RuntimeError("Agent stream did not produce a terminal event")
+        yield terminal_event.model_copy(
+            update={
+                "terminal": TerminalUpdate(
+                    response=response,
+                    card_meta=card_meta.snapshot(response),
+                )
+            }
         )
-        yield terminal_event
-
-    async def _notify_terminal(
-        self,
-        callback: TerminalCallback | None,
-        payload: dict[str, Any],
-        card_meta: dict[str, Any],
-        event: EventEnvelope,
-    ) -> None:
-        if callback is None:
-            return
-
-        await callback(payload, card_meta, event)
 
     async def _read_final_state(
         self,

@@ -7,6 +7,11 @@ from dataclasses import dataclass
 
 from sqlalchemy import delete, select
 from app.database import SessionLocal
+from app.events.adapter import event_from_envelope
+from app.events.bus import EventBus, RootEventDispatcher
+from app.events.delivery import EventContext, TerminalUpdate
+from app.events.handlers import IpcEventBroadcaster, PersistenceHandler
+from app.events.models import RunTerminalEvent
 from app.history import chat_log, stream_events, transactions
 from app.history.sqlite import HistoryDatabase
 from app.history.stream_events import AgentStreamEvent
@@ -21,7 +26,6 @@ from app.models.memory import (
 )
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Callable, Optional
-from uuid import uuid4
 from sqlalchemy.orm import Session as DbSession
 from app.llm.artifacts.access import ArtifactAccessService
 from app.runtime.session import Session
@@ -31,8 +35,6 @@ from app.services.llm_profile_service import (
     resolve_small_model_runtime_config,
 )
 from app.services.setting_service import get_source_limits
-from app.llm.streaming.notify import EventEnvelope, build_event
-from app.llm.streaming.utils import to_jsonable
 
 if TYPE_CHECKING:
     from app.llm.agent import AgentService
@@ -60,6 +62,7 @@ class AgentRuntime:
         self.history_db = history_db
         self.db_factory = db_factory
         self.artifact_store = artifact_store or LocalArtifactStore()
+        self.broadcaster = IpcEventBroadcaster(history_db)
         self._active_consolidation_scopes: set[tuple[str, str]] = set()
         self._active_consolidation_tasks: set[asyncio.Task[None]] = set()
         self._active_stream_tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
@@ -68,19 +71,21 @@ class AgentRuntime:
         self,
         *,
         message: str,
-        conversation_id: str | None,
+        user_id: str,
+        conversation_id: str,
+        run_id: str,
         db: DbSession,
         llm_profile_id: int | None = None,
     ) -> dict[str, Any]:
         llm_config = resolve_runtime_config(db, llm_profile_id)
         memory_llm_config = resolve_small_model_runtime_config(db)
-        resolved_conversation_id = self.resolve_conversation_id(conversation_id)
         source_limits = get_source_limits(db)
         session = Session.create(
             message=message,
-            conversation_id=resolved_conversation_id,
+            conversation_id=conversation_id,
+            run_id=run_id,
             db=db,
-            user_id=DEFAULT_USER_ID,
+            user_id=user_id,
             llm_profile=llm_config.snapshot() if llm_config else None,
             memory_llm_profile=self._memory_llm_profile_snapshot(
                 llm_config,
@@ -131,15 +136,15 @@ class AgentRuntime:
         self,
         *,
         message: str,
-        conversation_id: str | None,
+        user_id: str,
+        conversation_id: str,
+        run_id: str,
         db: DbSession,
         llm_profile_id: int | None = None,
     ) -> AgentStreamSubscription:
         llm_config = resolve_runtime_config(db, llm_profile_id)
         memory_llm_config = resolve_small_model_runtime_config(db)
-        resolved_conversation_id = self.resolve_conversation_id(conversation_id)
         source_limits = get_source_limits(db)
-        run_id = f"run_{uuid4().hex}"
         service = self._service_for_config(llm_config, memory_llm_config)
         llm_profile = llm_config.snapshot() if llm_config else None
         memory_llm_profile = self._memory_llm_profile_snapshot(
@@ -151,15 +156,15 @@ class AgentRuntime:
         try:
             assistant_message_id = await self.history_db.run(
                 chat_log.start_turn,
-                user_id=DEFAULT_USER_ID,
-                conversation_id=resolved_conversation_id,
+                user_id=user_id,
+                conversation_id=conversation_id,
                 run_id=run_id,
                 user_content=message,
             )
             self._start_stream_task(
                 message=message,
-                user_id=DEFAULT_USER_ID,
-                conversation_id=resolved_conversation_id,
+                user_id=user_id,
+                conversation_id=conversation_id,
                 run_id=run_id,
                 resume_payload=None,
                 assistant_message_id=assistant_message_id,
@@ -171,16 +176,16 @@ class AgentRuntime:
             )
             return AgentStreamSubscription(
                 run_id=run_id,
-                events=self._stream_events(
-                    user_id=DEFAULT_USER_ID,
-                    run_id=run_id,
-                    after_id=None,
+                events=self.broadcaster.iter_events(
+                    user_id=user_id,
+                    root_run_id=run_id,
+                    after_sequence=None,
                 ),
             )
         except BaseException:
             await self._abort_stream_setup(
-                user_id=DEFAULT_USER_ID,
-                conversation_id=resolved_conversation_id,
+                user_id=user_id,
+                conversation_id=conversation_id,
                 run_id=run_id,
                 assistant_message_id=assistant_message_id,
             )
@@ -189,6 +194,7 @@ class AgentRuntime:
     async def resume_chat(
         self,
         *,
+        user_id: str,
         conversation_id: str,
         resume_payload: dict[str, Any],
         requested_run_id: str | None = None,
@@ -196,6 +202,7 @@ class AgentRuntime:
         db: DbSession,
     ) -> dict[str, Any]:
         session, action_id, service = await self._resume_session(
+            user_id=user_id,
             conversation_id=conversation_id,
             resume_payload=resume_payload,
             requested_run_id=requested_run_id,
@@ -248,6 +255,7 @@ class AgentRuntime:
     async def resume_chat_stream(
         self,
         *,
+        user_id: str,
         conversation_id: str,
         resume_payload: dict[str, Any],
         requested_run_id: str | None = None,
@@ -258,6 +266,7 @@ class AgentRuntime:
         run_id = requested_run_id or "resume-pending"
         try:
             session, action_id, service = await self._resume_session(
+                user_id=user_id,
                 conversation_id=conversation_id,
                 resume_payload=resume_payload,
                 requested_run_id=requested_run_id,
@@ -293,15 +302,15 @@ class AgentRuntime:
             )
             return AgentStreamSubscription(
                 run_id=run_id,
-                events=self._stream_events(
+                events=self.broadcaster.iter_events(
                     user_id=session.user_id,
-                    run_id=run_id,
-                    after_id=None,
+                    root_run_id=run_id,
+                    after_sequence=None,
                 ),
             )
         except BaseException:
             await self._abort_stream_setup(
-                user_id=DEFAULT_USER_ID,
+                user_id=user_id,
                 conversation_id=conversation_id,
                 run_id=run_id,
                 assistant_message_id=assistant_message_id,
@@ -533,28 +542,33 @@ class AgentRuntime:
     async def subscribe_stream(
         self,
         *,
+        user_id: str,
+        conversation_id: str,
         run_id: str,
-        last_event_id: int | None,
-        user_id: str = DEFAULT_USER_ID,
+        last_event_sequence: int | None,
     ) -> AgentStreamSubscription:
         scope = await self.history_db.run(chat_log.get_run_scope, run_id)
-        if scope is None or scope.user_id != user_id:
+        if (
+            scope is None
+            or scope.user_id != user_id
+            or scope.conversation_id != conversation_id
+        ):
             raise LookupError("run not found")
-        if last_event_id is not None:
+        if last_event_sequence is not None:
             event = await self.history_db.run(
                 stream_events.get,
                 user_id=user_id,
                 run_id=run_id,
-                event_id=last_event_id,
+                sequence=last_event_sequence,
             )
             if event is None:
                 raise ValueError("Last-Event-ID does not belong to this run")
         return AgentStreamSubscription(
             run_id=run_id,
-            events=self._stream_events(
+            events=self.broadcaster.iter_events(
                 user_id=user_id,
-                run_id=run_id,
-                after_id=last_event_id,
+                root_run_id=run_id,
+                after_sequence=last_event_sequence,
             ),
         )
 
@@ -610,50 +624,21 @@ class AgentRuntime:
         started_at = time.perf_counter()
         terminal_persisted = False
         stream_session: Session | None = None
-        terminal_event: EventEnvelope | None = None
         db: DbSession | None = None
-
-        async def persist_terminal(
-            response: dict[str, Any],
-            card_meta: dict[str, Any],
-            event: EventEnvelope,
-        ) -> None:
-            nonlocal terminal_persisted, terminal_event
-            if terminal_persisted:
-                return
-            await self.history_db.run(
-                transactions.complete_assistant_message_with_event,
-                user_id=user_id,
-                conversation_id=conversation_id,
-                run_id=run_id,
-                message_id=assistant_message_id,
-                response=response,
-                latency_ms=self._elapsed_ms(started_at),
-                extra_meta={
-                    **card_meta,
-                    **(
-                        self._llm_profile_meta(stream_session)
-                        if stream_session is not None
-                        else {}
-                    ),
-                    **(extra_meta or {}),
-                },
-                event_name=str(event["event"]),
-                event_data=self._event_data(event),
+        context = EventContext(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            root_run_id=run_id,
+            assistant_message_id=assistant_message_id,
+        )
+        bus = EventBus()
+        bus.subscribe(
+            RootEventDispatcher(
+                context=context,
+                persistence=PersistenceHandler(self.history_db, started_at=started_at),
+                broadcaster=self.broadcaster,
             )
-            terminal_persisted = True
-            terminal_event = event
-            if stream_session is not None:
-                try:
-                    self._schedule_consolidation(
-                        session=stream_session,
-                        response=response,
-                    )
-                except Exception:
-                    logger.exception(
-                        "Failed to schedule memory consolidation: run_id=%s",
-                        run_id,
-                    )
+        )
 
         try:
             db = self.db_factory()
@@ -681,20 +666,29 @@ class AgentRuntime:
                     paper_search_source_limits=paper_search_source_limits,
                 )
             )
-            async for event in service.stream(
-                stream_session,
-                on_terminal=persist_terminal,
-            ):
-                if event is terminal_event:
-                    continue
-                await self.history_db.run(
-                    stream_events.append,
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    run_id=run_id,
-                    event_name=str(event["event"]),
-                    data=self._event_data(event),
-                )
+            async for event in service.stream(stream_session):
+                if isinstance(event, RunTerminalEvent):
+                    if event.terminal is None:
+                        raise RuntimeError("Terminal event is missing persistence data")
+                    event = event.model_copy(
+                        update={
+                            "terminal": TerminalUpdate(
+                                response=event.terminal.response,
+                                card_meta={
+                                    **event.terminal.card_meta,
+                                    **self._llm_profile_meta(stream_session),
+                                    **(extra_meta or {}),
+                                },
+                            )
+                        }
+                    )
+                await bus.publish(event)
+                if isinstance(event, RunTerminalEvent):
+                    terminal_persisted = True
+                    self._schedule_consolidation(
+                        session=stream_session,
+                        response=event.terminal.response,
+                    )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -710,9 +704,28 @@ class AgentRuntime:
                     run_id=run_id,
                     error=str(exc),
                 )
-                event = build_event("run_failed", response)
+                event = event_from_envelope(
+                    {"event": "run_failed", **response},
+                    run_id=run_id,
+                )
+                if not isinstance(event, RunTerminalEvent):
+                    raise RuntimeError("Failed to build a terminal event") from exc
+                event = event.model_copy(
+                    update={
+                        "terminal": TerminalUpdate(
+                            response=response,
+                            card_meta={
+                                "schema_version": 1,
+                                "card": {},
+                                **self._llm_profile_meta(stream_session),
+                                **(extra_meta or {}),
+                            },
+                        )
+                    }
+                )
                 try:
-                    await persist_terminal(response, {"schema_version": 1, "card": {}}, event)
+                    await bus.publish(event)
+                    terminal_persisted = True
                 except Exception:
                     logger.exception(
                         "Failed to persist stream failure: user_id=%s, run_id=%s",
@@ -735,69 +748,8 @@ class AgentRuntime:
                 logger.exception("Failed to clean up agent stream: run_id=%s", run_id)
             finally:
                 if db is not None:
-                    try:
-                        db.close()
-                    except Exception:
-                        logger.exception(
-                            "Failed to close stream session: run_id=%s",
-                            run_id,
-                        )
+                    db.close()
                 self._active_stream_tasks.pop((user_id, run_id), None)
-
-    async def _stream_events(
-        self,
-        *,
-        user_id: str,
-        run_id: str,
-        after_id: int | None,
-    ) -> AsyncIterator[AgentStreamEvent]:
-        cursor = after_id
-        while True:
-            status = await self.history_db.run(
-                chat_log.get_run_status,
-                user_id=user_id,
-                run_id=run_id,
-            )
-            events = await self.history_db.run(
-                stream_events.list_after,
-                user_id=user_id,
-                run_id=run_id,
-                after_id=cursor,
-                limit=100,
-            )
-            for event in events:
-                cursor = event.id
-                yield event
-            if events:
-                continue
-
-            if status in {
-                "completed",
-                "confirmation_required",
-                "failed",
-                "blocked",
-                "interrupted",
-            } or (user_id, run_id) not in self._active_stream_tasks:
-                return
-            await asyncio.sleep(0.25)
-
-    @staticmethod
-    def _event_data(event: EventEnvelope) -> dict[str, Any]:
-        hidden_fields = {
-            "event",
-            "event_id",
-            "sequence",
-            "conversation_id",
-            "run_id",
-            "llm_profile",
-            "assistant_message_id",
-            "timestamp",
-        }
-        return {
-            key: to_jsonable(value)
-            for key, value in event.items()
-            if key not in hidden_fields
-        }
 
     @staticmethod
     def _failed_stream_response(
@@ -821,6 +773,7 @@ class AgentRuntime:
     async def _resume_session(
         self,
         *,
+        user_id: str,
         conversation_id: str,
         resume_payload: dict[str, Any],
         requested_run_id: str | None,
@@ -830,6 +783,7 @@ class AgentRuntime:
         lookup = Session.for_resume_lookup(
             conversation_id=conversation_id,
             db=db,
+            user_id=user_id,
         )
         snapshot = await self.agent_service.get_state(lookup)
 
@@ -872,6 +826,7 @@ class AgentRuntime:
                 run_id=run_id,
                 resume_payload=resume_payload,
                 db=db,
+                user_id=user_id,
                 llm_profile=(llm_config.snapshot() if llm_config else profile_snapshot),
                 memory_llm_profile=(
                     memory_llm_config.snapshot()
@@ -882,15 +837,6 @@ class AgentRuntime:
             action_id,
             self._service_for_config(llm_config, memory_llm_config),
         )
-
-    @staticmethod
-    def resolve_conversation_id(
-        conversation_id: str | None,
-    ) -> str:
-        if conversation_id:
-            return conversation_id
-
-        return f"conv_{uuid4().hex}"
 
     @staticmethod
     def _elapsed_ms(started_at: float) -> int:
