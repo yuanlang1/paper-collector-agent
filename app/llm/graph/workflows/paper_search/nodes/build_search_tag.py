@@ -19,8 +19,8 @@ SEARCH_TAG_SYSTEM_PROMPT = """
 - 仅输出 SearchTagArgs 定义的字段。 
 - yearTag 必须与 query_understanding 中明确的年份范围一致；未指定年份时为 0。
 - paperTag 选择用户明确需要的论文类型；若未限定，保留期刊论文和会议论文。
-- sourceTag 选择适合主题与用户要求的检索来源；若未限定，使用 arXiv、DBLP 和 Google Scholar。
-- 不得编造用户未提出的来源、年份或论文类型限制。
+- sourceTag 固定为 Google Scholar；不得输出其他来源。
+- 不得编造用户未提出的年份或论文类型限制。
 """.strip()
 
 

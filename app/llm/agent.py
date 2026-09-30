@@ -1,13 +1,12 @@
 import asyncio
-from collections.abc import AsyncIterator
-from datetime import UTC, datetime
 import logging
 from typing import Any
 
-from app.config import settings
 from app.events.adapter import event_from_envelope
-from app.events.delivery import TerminalUpdate
-from app.events.models import Event, RunTerminalEvent
+from app.events.bus import EventBus
+from app.events.context import EventContext, bind_event_context
+from app.events.errors import EventPublicationError
+from langgraph.errors import GraphInterrupt
 from app.database import SessionLocal
 from app.llm.artifacts.access import ArtifactAccessService
 from app.llm.graph.main.native_tools import build_native_tool_schemas
@@ -23,8 +22,6 @@ from app.llm.tools.registry import build_tool_registry
 from app.services.llm_profile_service import LlmRuntimeConfig
 from app.llm.response import build_chat_response, build_done_payload
 from app.llm.streaming import AgentStreamAdapter
-from app.llm.streaming.card_snapshot import CardMetaAccumulator
-from app.llm.streaming.notify import EventEnvelope, build_event
 from app.llm.streaming.utils import (
     content_to_text,
     extract_interrupt_payload,
@@ -96,10 +93,13 @@ class AgentService:
         return await self.graph.aget_state(session.graph_config)
 
     async def invoke(self, session: Session) -> dict[str, Any]:
-        result = await self.graph.ainvoke(
-            session.graph_input,
-            config=session.graph_config,
-        )
+        with bind_event_context(
+            EventContext(bus=EventBus(), run_id=str(session.run_id)),
+        ):
+            result = await self.graph.ainvoke(
+                session.graph_input,
+                config=session.graph_config,
+            )
         return build_chat_response(
             result=result,
             conversation_id=session.conversation_id,
@@ -109,145 +109,127 @@ class AgentService:
     async def stream(
         self,
         session: Session,
-    ) -> AsyncIterator[Event]:
+        *,
+        event_bus: EventBus,
+    ) -> dict[str, Any]:
         adapter = AgentStreamAdapter(self.subagent_registry)
-        card_meta = CardMetaAccumulator(
-            model=(getattr(self, "llm_config", None).model if getattr(self, "llm_config", None) else settings.OPENAI_MODEL),
-            provider=(getattr(self, "llm_config", None).provider if getattr(self, "llm_config", None) else getattr(settings, "LLM_PROVIDER", None)),
-        )
         latest_root_state: dict[str, Any] = {}
-        event_sequence = 0
 
-        def observe_event(event: EventEnvelope) -> Event:
-            nonlocal event_sequence
-            event_sequence += 1
-            card_meta.observe(
-                {
-                    "event": str(event["event"]),
-                    "data": {
-                        key: value
-                        for key, value in event.items()
-                        if key != "event"
-                    },
-                    "sequence": event_sequence,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                }
-            )
-            return event_from_envelope(event, run_id=str(session.run_id))
+        with bind_event_context(
+            EventContext(bus=event_bus, run_id=str(session.run_id)),
+        ) as event_context:
+            try:
+                await event_bus.publish(
+                    event_context.event("run_started", {"status": "running"}),
+                )
 
-        try:
-            yield observe_event(build_event("run_started", {"status": "running"}))
+                async for namespace, stream_type, chunk in self.graph.astream(
+                    session.graph_input,
+                    config=session.graph_config,
+                    stream_mode=["messages", "updates"],
+                    subgraphs=True,
+                ):
+                    namespace = tuple(namespace or ())
 
-            async for namespace, stream_type, chunk in self.graph.astream(
-                session.graph_input,
-                config=session.graph_config,
-                stream_mode=["messages", "updates", "custom"],
-                subgraphs=True,
-            ):
-                namespace = tuple(namespace or ())
+                    if stream_type == "messages":
+                        message_chunk, metadata = chunk
+                        if namespace or metadata.get("langgraph_node") != "final":
+                            continue
 
-                if stream_type == "messages":
-                    message_chunk, metadata = chunk
-                    if namespace or metadata.get("langgraph_node") != "final":
+                        text = content_to_text(
+                            getattr(message_chunk, "content", ""),
+                        )
+                        if text:
+                            await event_bus.publish(
+                                event_context.event("message", {"content": text}),
+                            )
                         continue
 
-                    text = content_to_text(
-                        getattr(message_chunk, "content", ""),
+                    if stream_type != "updates":
+                        continue
+
+                    interrupt_payload = extract_interrupt_payload(chunk)
+                    if interrupt_payload is not None:
+                        response = build_done_payload(
+                            state={
+                                **latest_root_state,
+                                "run_id": session.run_id,
+                                "__interrupt__": [interrupt_payload],
+                            },
+                            conversation_id=session.conversation_id,
+                            run_id=str(session.run_id),
+                        )
+                        await event_bus.publish(
+                            event_from_envelope(
+                                adapter.confirmation_required(response),
+                                run_id=str(session.run_id),
+                            ),
+                        )
+                        break
+
+                    if not isinstance(chunk, dict):
+                        continue
+
+                    for node_name, update in chunk.items():
+                        if not isinstance(update, dict):
+                            continue
+                        if namespace:
+                            continue
+
+                        latest_root_state.update(update)
+                        for event in adapter.handle_update(
+                            node_name=node_name,
+                            update=update,
+                        ):
+                            await event_bus.publish(
+                                event_from_envelope(
+                                    event,
+                                    run_id=str(session.run_id),
+                                ),
+                            )
+                else:
+                    final_state = await self._read_final_state(
+                        config=session.graph_config,
+                        fallback=latest_root_state,
                     )
-                    if text:
-                        yield observe_event(build_event("message", {"content": text}))
-                    continue
-
-                if stream_type == "custom":
-                    for event in adapter.handle_custom(chunk):
-                        yield observe_event(event)
-                    continue
-
-                if stream_type != "updates":
-                    continue
-
-                interrupt_payload = extract_interrupt_payload(chunk)
-                if interrupt_payload is not None:
                     response = build_done_payload(
-                        state={
-                            **latest_root_state,
-                            "run_id": session.run_id,
-                            "__interrupt__": [interrupt_payload],
-                        },
+                        state=final_state,
                         conversation_id=session.conversation_id,
                         run_id=str(session.run_id),
                     )
-                    terminal_event = observe_event(
-                        adapter.confirmation_required(interrupt_payload),
+                    event_name = (
+                        "run_failed"
+                        if response["status"] == "failed"
+                        else "run_completed"
                     )
-                    break
+                    await event_bus.publish(event_context.event(event_name, response))
 
-                if not isinstance(chunk, dict):
-                    continue
-
-                for node_name, update in chunk.items():
-                    if not isinstance(update, dict):
-                        continue
-
-                    if not namespace:
-                        latest_root_state.update(update)
-
-                    for event in adapter.handle_update(
-                        node_name=node_name,
-                        update=update,
-                    ):
-                        yield observe_event(event)
-
-            else:
-                final_state = await self._read_final_state(
-                    config=session.graph_config,
-                    fallback=latest_root_state,
+            except asyncio.CancelledError:
+                raise
+            except GraphInterrupt:
+                raise
+            except EventPublicationError:
+                raise
+            except Exception as exc:
+                logger.exception(
+                    "Agent stream failed: conversation_id=%s, run_id=%s",
+                    session.conversation_id,
+                    session.run_id,
                 )
-                response = build_done_payload(
-                    state=final_state,
-                    conversation_id=session.conversation_id,
-                    run_id=str(session.run_id),
-                )
-                event_name = (
-                    "run_failed"
-                    if response["status"] == "failed"
-                    else "run_completed"
-                )
-                terminal_event = observe_event(build_event(event_name, response))
+                response = {
+                    "conversation_id": session.conversation_id,
+                    "run_id": str(session.run_id),
+                    "status": "failed",
+                    "reply": "本次任务执行失败，请稍后重试。",
+                    "pending_action": None,
+                    "last_action_result": None,
+                    "artifact_refs": [],
+                    "interrupt": None,
+                    "error": str(exc),
+                }
+                await event_bus.publish(event_context.event("run_failed", response))
 
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            logger.exception(
-                "Agent stream failed: conversation_id=%s, run_id=%s",
-                session.conversation_id,
-                session.run_id,
-            )
-
-            response = {
-                "conversation_id": session.conversation_id,
-                "run_id": str(session.run_id),
-                "status": "failed",
-                "reply": "本次任务执行失败，请稍后重试。",
-                "pending_action": None,
-                "last_action_result": None,
-                "artifact_refs": [],
-                "interrupt": None,
-                "error": str(exc),
-            }
-
-            terminal_event = observe_event(build_event("run_failed", response))
-
-        if not isinstance(terminal_event, RunTerminalEvent):
-            raise RuntimeError("Agent stream did not produce a terminal event")
-        yield terminal_event.model_copy(
-            update={
-                "terminal": TerminalUpdate(
-                    response=response,
-                    card_meta=card_meta.snapshot(response),
-                )
-            }
-        )
+        return response
 
     async def _read_final_state(
         self,

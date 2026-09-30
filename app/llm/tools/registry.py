@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,7 +9,8 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.llm.artifacts.access import ArtifactAccessService
-from app.llm.streaming.notify import NOOP_NOTIFIER, Notifier
+from app.events.context import current_event_context
+from app.events.errors import EventPublicationError
 from app.llm.tools.base import BaseTool, ToolResult
 
 
@@ -21,14 +21,6 @@ class ToolExecutionContext:
     conversation_id: str = ""
     run_id: str = ""
     artifact_access: ArtifactAccessService | None = None
-    _notify: Notifier = NOOP_NOTIFIER
-
-    def notify(
-        self,
-        kind: str,
-        payload: Mapping[str, Any] | None = None,
-    ) -> None:
-        self._notify(kind, payload)
 
 
 class ToolRegistry:
@@ -53,10 +45,13 @@ class ToolRegistry:
         context: ToolExecutionContext | None = None,
         timeout: float = 20,
     ) -> ToolResult:
-        bus = context or ToolExecutionContext(db=self._db)
-        bus.notify(
-            "tool_started",
-            {"message": "工具开始执行。", "progress": 0, "data": {}},
+        tool_context = context or ToolExecutionContext(db=self._db)
+        event_context = current_event_context()
+        await event_context.bus.publish(
+            event_context.event(
+                "tool_started",
+                {"message": "工具开始执行。", "progress": 0, "data": {}},
+            ),
         )
         try:
             tool = self.get(name)
@@ -66,40 +61,44 @@ class ToolRegistry:
                 try:
                     tool.params_model.model_validate(dict(args))
                 except ValidationError as exc:
-                    return self._fail(
-                        bus,
+                    return await self._fail(
+                        event_context,
                         error_message=str(exc),
                         error_name=type(exc).__name__,
                     )
 
-            result = await asyncio.wait_for(tool.fn(args, bus), timeout)
+            result = await asyncio.wait_for(tool.fn(args, tool_context), timeout)
 
-            bus.notify(
-            "tool_completed",
-            {
-                "message": result.content,
-                "progress": 100,
-                "data": {},
-            },
-        )
+            await event_context.bus.publish(
+                event_context.event(
+                    "tool_completed",
+                    {
+                        "message": result.content,
+                        "progress": 100,
+                        "data": {},
+                    },
+                ),
+            )
         except asyncio.TimeoutError:
-            return self._fail(
-                bus,
+            return await self._fail(
+                event_context,
                 error_message=f"工具执行超时（{timeout:g}s）。",
                 error_name="timeout",
             )
+        except EventPublicationError:
+            raise
         except Exception as exc:
-            return self._fail(
-                bus,
+            return await self._fail(
+                event_context,
                 error_message=str(exc),
                 error_name=type(exc).__name__,
             )
 
         return result
 
-    def _fail(
+    async def _fail(
         self,
-        context: ToolExecutionContext,
+        event_context,
         *,
         error_message: str,
         error_name: str,
@@ -109,9 +108,11 @@ class ToolRegistry:
             is_error=True,
             error_type=error_name,
         )
-        context.notify(
-            "tool_failed",
-            {"message": result.content, "progress": None, "data": {}},
+        await event_context.bus.publish(
+            event_context.event(
+                "tool_failed",
+                {"message": result.content, "progress": None, "data": {}},
+            ),
         )
         return result
 

@@ -8,7 +8,7 @@ from langchain_core.runnables import RunnableConfig
 from app.llm.graph.main.state import MainAgentState
 from app.llm.artifacts.access import ArtifactAccessService
 from app.database import SessionLocal
-from app.llm.streaming.notify import langgraph_notifier
+from app.events.context import bind_event_context, current_event_context
 from app.llm.tools.registry import ToolExecutionContext, ToolRegistry
 
 
@@ -65,25 +65,25 @@ async def tool_node(
     artifact_access_service: ArtifactAccessService | None = None,
 ) -> dict:
     call = state["active_tool_call"]
-    notify = langgraph_notifier(config).scoped(
+    event_context = current_event_context().scoped(
         source="tool",
         action_id=str(call["id"]),
         tool_name=str(call["name"]),
     )
     db = SessionLocal()
     try:
-        result = await tool_registry.execute(
-            call["name"],
-            call["args"],
-            context=ToolExecutionContext(
-                db=db,
-                user_id=str(state.get("user_id") or "0"),
-                conversation_id=str(state.get("conversation_id") or ""),
-                run_id=str(state.get("run_id") or ""),
-                artifact_access=artifact_access_service,
-                _notify=notify,
-            ),
-        )
+        with bind_event_context(event_context):
+            result = await tool_registry.execute(
+                call["name"],
+                call["args"],
+                context=ToolExecutionContext(
+                    db=db,
+                    user_id=str(state.get("user_id") or "0"),
+                    conversation_id=str(state.get("conversation_id") or ""),
+                    run_id=str(state.get("run_id") or ""),
+                    artifact_access=artifact_access_service,
+                ),
+            )
     finally:
         db.close()
 

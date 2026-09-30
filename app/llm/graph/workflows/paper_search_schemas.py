@@ -77,9 +77,6 @@ class PaperTypeCode(IntEnum):
 
 
 class SourceTypeValue(str, Enum):
-    ARXIV = "arXiv"
-    DBLP = "DBLP"
-    CROSSREF = "Crossref"
     GOOGLE_SCHOLAR = "Google Scholar"
 
 
@@ -124,11 +121,7 @@ class SearchTagArgs(BaseModel):
         min_length=1,
     )
     sourceTag: list[SourceTypeValue] = Field(
-        default_factory=lambda: [
-            SourceTypeValue.ARXIV,
-            SourceTypeValue.DBLP,
-            SourceTypeValue.GOOGLE_SCHOLAR,
-        ],
+        default_factory=lambda: [SourceTypeValue.GOOGLE_SCHOLAR],
         min_length=1,
     )
 

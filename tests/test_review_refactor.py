@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock
 
 from langchain_core.documents import Document
 
+from app.events.bus import EventBus
+from app.events.context import EventContext, bind_event_context
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import (
     CandidateClaim,
@@ -949,7 +951,8 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
         graph = build_task_review_workflow(
             node_overrides={name: node(name) for name in transitions}
         )
-        result = await graph.ainvoke({})
+        with bind_event_context(EventContext(bus=EventBus(), run_id="review-test")):
+            result = await graph.ainvoke({})
         self.assertEqual(result["stage"], "completed")
         self.assertLess(order.index("generate_framework"), order.index("generate_claims"))
         self.assertNotIn("resolve_review_focus", order)
@@ -989,7 +992,8 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
                 "finalizing_handoff",
             ]}
         )
-        result = await graph.ainvoke({})
+        with bind_event_context(EventContext(bus=EventBus(), run_id="review-test")):
+            result = await graph.ainvoke({})
 
         self.assertEqual(result["error"], "review was not approved by reflection")
         self.assertNotIn("persist_review", order)

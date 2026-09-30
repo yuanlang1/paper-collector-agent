@@ -6,7 +6,7 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
 
-SourceName = Literal["arXiv", "DBLP", "Crossref", "Google Scholar"]
+SourceName = Literal["Google Scholar"]
 
 PaperSearchStage = Literal[
     "intent_understanding",

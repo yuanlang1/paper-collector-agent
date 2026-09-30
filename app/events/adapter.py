@@ -22,6 +22,7 @@ from app.events.models import (
     ToolFinishedEvent,
     ToolStartedEvent,
 )
+from app.events.envelope import EventEnvelope, build_event
 from app.llm.streaming.utils import to_jsonable
 
 

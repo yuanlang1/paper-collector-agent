@@ -12,16 +12,33 @@ from unittest.mock import Mock, patch
 import httpx
 from fastapi import FastAPI
 from fastapi.sse import EventSourceResponse, ServerSentEvent
+from langchain_core.messages import AIMessage, HumanMessage
+from pydantic import BaseModel
 
 from app.api import agent as agent_api
 from app.events.adapter import now
-from app.events.delivery import TerminalUpdate
+from app.events.bus import EventBus
+from app.events.context import EventContext, bind_event_context, current_event_context
 from app.events.models import RunStartedEvent, RunTerminalEvent
 from app.history import chat_log, stream_events, transactions
 from app.history.sqlite import HistoryDatabase
 from app.llm.agent import AgentService
+from app.llm.graph.main.nodes.subgraph import SubAgentNode
+from app.llm.graph.main.nodes.solve import SolveNode
+from app.llm.subagents.registry import (
+    SubAgentRegistry,
+    SubAgentRuntime,
+    SubAgentSpec,
+    SubAgentStreamSpec,
+)
+from app.llm.tools.base import BaseTool, ToolResult
+from app.llm.tools.registry import ToolRegistry
 from app.runtime.agent_runtime import AgentRuntime
 from app.runtime.session import Session
+
+
+async def _append(events: list, event) -> None:
+    events.append(event)
 
 
 class _TrackingDb:
@@ -41,15 +58,15 @@ class _StreamingService:
         self.closed = asyncio.Event()
         self.sessions: list[Session] = []
 
-    async def stream(self, session: Session):
+    async def stream(self, session: Session, *, event_bus: EventBus) -> dict:
         self.sessions.append(session)
         self.started.set()
         try:
-            yield RunStartedEvent(
+            await event_bus.publish(RunStartedEvent(
                 run_id=str(session.run_id),
                 ts=now(),
                 payload={"status": "running"},
-            )
+            ))
             if self.block:
                 await self.release.wait()
 
@@ -64,7 +81,7 @@ class _StreamingService:
                 "interrupt": None,
                 "error": None,
             }
-            yield RunTerminalEvent(
+            await event_bus.publish(RunTerminalEvent(
                 type=(
                     "run.waiting_for_confirmation"
                     if self.status == "confirmation_required"
@@ -73,12 +90,13 @@ class _StreamingService:
                 run_id=str(session.run_id),
                 ts=now(),
                 status=self.status,
-                payload={"reply": "done"},
-                terminal=TerminalUpdate(
-                    response=response,
-                    card_meta={"schema_version": 1, "card": {}},
-                ),
-            )
+                payload={
+                    key: value
+                    for key, value in response.items()
+                    if key not in {"conversation_id", "run_id"}
+                },
+            ))
+            return response
         finally:
             self.closed.set()
 
@@ -92,20 +110,31 @@ class _CompletedGraph:
         return SimpleNamespace(values={})
 
 
+class _InterruptedGraph:
+    async def astream(self, *_args, **_kwargs):
+        yield (), "updates", {
+            "dispatch": {
+                "active_tool_call": {
+                    "id": "call-confirm-1",
+                    "name": "paper_search_agent",
+                    "kind": "subagent",
+                    "args": {"prompt": "RAG 论文"},
+                    "requires_confirmation": True,
+                },
+            },
+        }
+        yield (), "updates", {
+            "__interrupt__": [{
+                "action_id": "call-confirm-1",
+                "status": "pending",
+            }],
+        }
+
+
 class _SubagentGraph:
     async def astream(self, *_args, **_kwargs):
-        yield (), "custom", {
-            "event": "subagent_started",
-            "delegation_id": "delegation-1",
-            "workflow": "paper_search",
-            "name": "论文检索",
-        }
-        yield (), "custom", {
-            "event": "subagent_completed",
-            "delegation_id": "delegation-1",
-            "workflow": "paper_search",
-            "summary": "检索完成",
-        }
+        if False:
+            yield None
 
     async def aget_state(self, config):
         return SimpleNamespace(
@@ -114,6 +143,45 @@ class _SubagentGraph:
                 "run_status": "completed",
                 "reply": "done",
             }
+        )
+
+
+class _BlockingSubagentGraph:
+    def __init__(self) -> None:
+        self.progress_published = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def ainvoke(self, _state, *, config):
+        event_context = current_event_context().scoped(node="test_progress")
+        await event_context.bus.publish(
+            event_context.event(
+                "subagent_progress",
+                {
+                    "phase": "search",
+                    "phase_label": "检索中",
+                    "status": "running",
+                    "message": "检索中",
+                    "iteration": None,
+                    "data": {"phase_state": "started"},
+                },
+            ),
+        )
+        self.progress_published.set()
+        await self.release.wait()
+        return {
+            "last_action_result": {
+                "status": "success",
+                "summary": "检索完成",
+                "data": {"count": 1},
+            },
+        }
+
+
+class _SolveModel:
+    async def astream(self, _messages):
+        yield AIMessage(
+            content="answer",
+            additional_kwargs={"reasoning_content": "reasoning"},
         )
 
 
@@ -649,10 +717,159 @@ class AgentServiceStreamTests(unittest.TestCase):
                 db=Mock(),
             )
 
-            events = [event async for event in service.stream(session)]
+            events = []
+            bus = EventBus()
+            bus.subscribe(lambda event: _append(events, event))
+            response = await service.stream(session, event_bus=bus)
 
             self.assertIsInstance(events[-1], RunTerminalEvent)
-            self.assertEqual(events[-1].terminal.response["status"], "completed")
+            self.assertEqual(response["status"], "completed")
+
+        asyncio.run(scenario())
+
+    def test_stream_publishes_confirmation_response(self) -> None:
+        async def scenario() -> None:
+            service = AgentService.__new__(AgentService)
+            service.subagent_registry = None
+            service.llm_config = None
+            service.graph = _InterruptedGraph()
+            session = Session.create(
+                message="hello",
+                conversation_id="conv-confirmation",
+                run_id="run_confirmation",
+                db=Mock(),
+            )
+            events = []
+            bus = EventBus()
+            bus.subscribe(lambda event: _append(events, event))
+
+            response = await service.stream(session, event_bus=bus)
+
+            event = events[-1]
+            self.assertIsInstance(event, RunTerminalEvent)
+            self.assertEqual(event.type, "run.waiting_for_confirmation")
+            self.assertEqual(event.status, "confirmation_required")
+            self.assertEqual(event.payload["pending_action"]["action_id"], "call-confirm-1")
+            self.assertEqual(event.payload["interrupt"]["action_id"], "call-confirm-1")
+            self.assertEqual(response["status"], "confirmation_required")
+
+        asyncio.run(scenario())
+
+
+class SubAgentNodeEventBusTests(unittest.TestCase):
+    def test_child_bus_publishes_progress_before_parent_continues(self) -> None:
+        async def scenario() -> None:
+            graph = _BlockingSubagentGraph()
+            registry = SubAgentRegistry((
+                SubAgentRuntime(
+                    spec=SubAgentSpec(
+                        name="paper_search_agent",
+                        description="test",
+                        input_model=BaseModel,
+                    ),
+                    graph=graph,
+                    error_code="TEST_SUBAGENT_FAILED",
+                    failure_summary="test failed",
+                    stream=SubAgentStreamSpec(workflow="paper_search"),
+                ),
+            ))
+            events = []
+            parent_bus = EventBus()
+            parent_bus.subscribe(lambda event: _append(events, event))
+            node = SubAgentNode(subagent_registry=registry)
+            state = {
+                "active_tool_call": {
+                    "id": "delegation-1",
+                    "name": "paper_search_agent",
+                    "kind": "subagent",
+                },
+            }
+
+            with bind_event_context(
+                EventContext(bus=parent_bus, run_id="run-1"),
+            ):
+                task = asyncio.create_task(node(state, {}))
+                await asyncio.wait_for(graph.progress_published.wait(), timeout=1)
+                self.assertFalse(task.done())
+                self.assertEqual(
+                    [event.payload.get("sse_name") for event in events],
+                    ["subagent_started", "subagent_progress"],
+                )
+                self.assertTrue(all(
+                    event.payload["delegation_id"] == "delegation-1"
+                    for event in events
+                ))
+
+                graph.release.set()
+                result = await task
+
+            self.assertEqual(result["last_action_result"]["status"], "success")
+            self.assertEqual(
+                events[-1].payload["sse_name"],
+                "subagent_completed",
+            )
+
+        asyncio.run(scenario())
+
+
+class DirectEventPublicationTests(unittest.TestCase):
+    def test_solve_publishes_events_to_bound_bus(self) -> None:
+        async def scenario() -> None:
+            events = []
+            bus = EventBus()
+            bus.subscribe(lambda event: _append(events, event))
+            node = SolveNode(
+                model=_SolveModel(),
+                tool_registry=ToolRegistry(),
+                subagent_registry=Mock(),
+            )
+            with bind_event_context(EventContext(bus=bus, run_id="run-1")):
+                result = await node({
+                    "run_id": "run-1",
+                    "messages": [HumanMessage(content="hello")],
+                    "system_context": "system",
+                    "iteration_count": 0,
+                })
+
+            self.assertEqual(result["reply"], "answer")
+            self.assertEqual(
+                [event.type for event in events],
+                ["iteration.started", "reasoning.delta", "content.delta"],
+            )
+
+        asyncio.run(scenario())
+
+    def test_tool_registry_publishes_lifecycle_events_to_bound_bus(self) -> None:
+        async def scenario() -> None:
+            async def handler(_args, _context) -> ToolResult:
+                return ToolResult(content="ok")
+
+            registry = ToolRegistry()
+            registry.register(BaseTool(
+                name="test_tool",
+                description="test",
+                input_schema={},
+                fn=handler,
+            ))
+            events = []
+            bus = EventBus()
+            bus.subscribe(lambda event: _append(events, event))
+            with bind_event_context(EventContext(
+                bus=bus,
+                run_id="run-1",
+                scope={"action_id": "tool-1", "source": "tool"},
+            )):
+                result = await registry.execute("test_tool", {})
+
+            self.assertFalse(result.is_error)
+            self.assertEqual(
+                [event.type for event in events],
+                ["tool.started", "tool.finished"],
+            )
+            self.assertTrue(all(
+                event.payload["action_id"] == "tool-1"
+                for event in events
+            ))
 
         asyncio.run(scenario())
 
@@ -668,20 +885,17 @@ class AgentServiceStreamTests(unittest.TestCase):
                 run_id="run_subagent_stream",
                 db=Mock(),
             )
-            events = [event async for event in service.stream(session)]
+            events = []
+            bus = EventBus()
+            bus.subscribe(lambda event: _append(events, event))
+            await service.stream(session, event_bus=bus)
 
             self.assertEqual(
                 [event.type for event in events],
                 [
                     "run.started",
-                    "subagent.progress",
-                    "subagent.progress",
                     "run.finished",
                 ],
-            )
-            self.assertEqual(
-                events[-1].terminal.card_meta["card"]["subagents"][0]["workflow"],
-                "paper_search",
             )
 
         asyncio.run(scenario())

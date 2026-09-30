@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Mapping
+from contextvars import Context
 from typing import Any
 from weakref import WeakKeyDictionary
 
@@ -13,12 +14,14 @@ from app.rag.index_construction.paper_reading_index_construction import (
 
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langgraph.errors import GraphInterrupt
 from pydantic import BaseModel, Field, model_validator
 
+from app.events.context import EventContext, current_event_context
+from app.events.errors import EventPublicationError
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
-from app.llm.streaming.notify import langgraph_notifier
 from app.rag.retrieval.paper_content_corpus import PaperContentCorpusReader
 from app.rag.retrieval.paper_content_retrieval import PaperContentHybridRetrievalModule
 
@@ -193,8 +196,24 @@ class ExtractStudiesNode:
                 paper: dict[str, Any]
             ) -> tuple[dict[str, str] | None, dict[str, str] | None]:
                 paper_id = str(paper["paper_id"])
+                event_context = current_event_context().scoped(
+                    workflow="task_review",
+                    node="extract_studies",
+                )
                 try:
-                    payload = await self._read_cached(paper=paper, config=config)
+                    await self._publish_reading_progress(
+                        event_context=event_context,
+                        paper_id=paper_id,
+                        label="阅读中",
+                        status="started",
+                    )
+                    payload = await self._read_cached(paper=paper)
+                    await self._publish_reading_progress(
+                        event_context=event_context,
+                        paper_id=paper_id,
+                        label="阅读完成",
+                        status="completed",
+                    )
                     return (
                         {
                             "paper_id": str(paper["paper_id"]),
@@ -203,7 +222,18 @@ class ExtractStudiesNode:
                         },
                         None,
                     )
+                except GraphInterrupt:
+                    raise
+                except EventPublicationError:
+                    raise
                 except Exception as exc:
+                    await self._publish_reading_progress(
+                        event_context=event_context,
+                        paper_id=paper_id,
+                        label="阅读失败",
+                        status="failed",
+                        error=str(exc) or exc.__class__.__name__,
+                    )
                     return (
                         None,
                         {
@@ -264,6 +294,10 @@ class ExtractStudiesNode:
                     "studies": records,
                 },
             )
+        except GraphInterrupt:
+            raise
+        except EventPublicationError:
+            raise
         except Exception as exc:
             return failed(f"profile extraction failed: {exc}")
 
@@ -275,39 +309,22 @@ class ExtractStudiesNode:
             "error": None,
         }
 
-    async def _read_cached(self, *, paper, config=None):
+    async def _read_cached(self, *, paper):
         paper_id = str(paper["paper_id"])
         pending = _READINGS.setdefault(asyncio.get_running_loop(), {})
-        notify = langgraph_notifier(config).scoped(workflow="task_review", node="extract_studies")
-
-        def progress(label, status):
-            notify(
-                "timeline_step",
-                {
-                    "step_id": f"task_review:reading:{paper_id}",
-                    "step_key": "extract_studies",
-                    "label": f"论文 {paper_id}：{label}",
-                    "state": status,
-                    "iteration": None,
-                    "error": None,
-                },
-            )
 
         async def process():
             cached = await self.reading_index.lookup(paper_id)
             if cached:
-                progress("缓存命中", "completed")
                 return cached
             documents = await self.corpus_reader.read([paper_id])
             if not documents:
                 raise ValueError("paper has no readable RAG chunks")
-            progress("阅读中", "started")
             profile = await self._extract_profile(paper=paper, documents=documents)
             payload = PaperReadingIndexConstructionModule.payload(paper_id, profile)
             for attempt in range(3):
                 try:
                     await self.reading_index.save(payload)
-                    progress("阅读结果已保存", "completed")
                     return payload
                 except Exception:
                     if attempt == 2:
@@ -316,9 +333,35 @@ class ExtractStudiesNode:
 
         # ponytail: only one in-flight read per paper per process.
         if paper_id not in pending:
-            pending[paper_id] = asyncio.create_task(process())
+            pending[paper_id] = asyncio.create_task(
+                process(),
+                context=Context(),
+            )
             pending[paper_id].add_done_callback(lambda task: pending.pop(paper_id, None))
         return await asyncio.shield(pending[paper_id])
+
+    @staticmethod
+    async def _publish_reading_progress(
+        *,
+        event_context: EventContext,
+        paper_id: str,
+        label: str,
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        await event_context.bus.publish(
+            event_context.event(
+                "timeline_step",
+                {
+                    "step_id": f"task_review:reading:{paper_id}",
+                    "step_key": "extract_studies",
+                    "label": f"论文 {paper_id}：{label}",
+                    "state": status,
+                    "iteration": None,
+                    "error": error,
+                },
+            ),
+        )
 
     async def _extract_profile(
         self, *, paper: Mapping[str, Any], documents: list[Document] | None = None,

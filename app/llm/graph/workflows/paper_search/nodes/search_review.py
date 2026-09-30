@@ -13,7 +13,7 @@ from app.llm.provider import ChatClient, ModelOptions
 
 
 class SourceSupplementAction(BaseModel):
-    source: Literal["arXiv", "DBLP", "Google Scholar"]
+    source: Literal["Google Scholar"]
     strategy: Literal["next_page"]
     requested_pages: int = Field(ge=1, le=2)
     priority: int = Field(ge=1, le=10)
@@ -63,7 +63,7 @@ class SearchReviewBrainNode:
                 "target_count": target,
                 "source_stats": stats,
                 "allowed_sources": state.get(
-                    "requested_sources", ["arXiv", "DBLP", "Google Scholar"]
+                    "requested_sources", ["Google Scholar"]
                 ),
             }
             try:

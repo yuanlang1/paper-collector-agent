@@ -50,6 +50,7 @@ tests/*
 !tests/test_review_refactor.py
 !tests/test_export_test_videos.py
 !tests/test_agent_stream_lifecycle.py
+!tests/test_paper_search_single_source.py
 !app/models/
 !app/models/*.py
 scripts/

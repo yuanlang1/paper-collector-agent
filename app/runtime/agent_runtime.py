@@ -6,16 +6,19 @@ import time
 from dataclasses import dataclass
 
 from sqlalchemy import delete, select
+from app.config import settings
 from app.database import SessionLocal
 from app.events.adapter import event_from_envelope
 from app.events.bus import EventBus, RootEventDispatcher
-from app.events.delivery import EventContext, TerminalUpdate
+from app.events.delivery import EventContext
+from app.events.errors import EventPublicationError
 from app.events.handlers import IpcEventBroadcaster, PersistenceHandler
-from app.events.models import RunTerminalEvent
+from langgraph.errors import GraphInterrupt
 from app.history import chat_log, stream_events, transactions
 from app.history.sqlite import HistoryDatabase
 from app.history.stream_events import AgentStreamEvent
 from app.llm.artifacts.store import LocalArtifactStore
+from app.llm.streaming.card_snapshot import CardMetaAccumulator
 from app.llm.provider import ChatClient
 from app.memory.consolidation import Consolidator
 from app.memory.extraction import LangChainMemoryExtractor
@@ -637,6 +640,25 @@ class AgentRuntime:
                 context=context,
                 persistence=PersistenceHandler(self.history_db, started_at=started_at),
                 broadcaster=self.broadcaster,
+                card_meta=CardMetaAccumulator(
+                    model=(
+                        str(llm_profile["model"])
+                        if llm_profile and llm_profile.get("model")
+                        else settings.OPENAI_MODEL
+                    ),
+                    provider=(
+                        str(llm_profile["provider"])
+                        if llm_profile and llm_profile.get("provider")
+                        else settings.LLM_PROVIDER
+                    ),
+                ),
+                terminal_meta={
+                    **self._llm_profile_meta_from_snapshots(
+                        llm_profile,
+                        memory_llm_profile,
+                    ),
+                    **(extra_meta or {}),
+                },
             )
         )
 
@@ -666,30 +688,17 @@ class AgentRuntime:
                     paper_search_source_limits=paper_search_source_limits,
                 )
             )
-            async for event in service.stream(stream_session):
-                if isinstance(event, RunTerminalEvent):
-                    if event.terminal is None:
-                        raise RuntimeError("Terminal event is missing persistence data")
-                    event = event.model_copy(
-                        update={
-                            "terminal": TerminalUpdate(
-                                response=event.terminal.response,
-                                card_meta={
-                                    **event.terminal.card_meta,
-                                    **self._llm_profile_meta(stream_session),
-                                    **(extra_meta or {}),
-                                },
-                            )
-                        }
-                    )
-                await bus.publish(event)
-                if isinstance(event, RunTerminalEvent):
-                    terminal_persisted = True
-                    self._schedule_consolidation(
-                        session=stream_session,
-                        response=event.terminal.response,
-                    )
+            response = await service.stream(stream_session, event_bus=bus)
+            terminal_persisted = True
+            self._schedule_consolidation(
+                session=stream_session,
+                response=response,
+            )
         except asyncio.CancelledError:
+            raise
+        except GraphInterrupt:
+            raise
+        except EventPublicationError:
             raise
         except Exception as exc:
             logger.exception(
@@ -707,21 +716,6 @@ class AgentRuntime:
                 event = event_from_envelope(
                     {"event": "run_failed", **response},
                     run_id=run_id,
-                )
-                if not isinstance(event, RunTerminalEvent):
-                    raise RuntimeError("Failed to build a terminal event") from exc
-                event = event.model_copy(
-                    update={
-                        "terminal": TerminalUpdate(
-                            response=response,
-                            card_meta={
-                                "schema_version": 1,
-                                "card": {},
-                                **self._llm_profile_meta(stream_session),
-                                **(extra_meta or {}),
-                            },
-                        )
-                    }
                 )
                 try:
                     await bus.publish(event)
@@ -890,6 +884,18 @@ class AgentRuntime:
             metadata["llm_profile"] = session.llm_profile
         if session.memory_llm_profile:
             metadata["memory_llm_profile"] = session.memory_llm_profile
+        return metadata
+
+    @staticmethod
+    def _llm_profile_meta_from_snapshots(
+        llm_profile: dict[str, Any] | None,
+        memory_llm_profile: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        metadata: dict[str, Any] = {}
+        if llm_profile:
+            metadata["llm_profile"] = llm_profile
+        if memory_llm_profile:
+            metadata["memory_llm_profile"] = memory_llm_profile
         return metadata
 
     @staticmethod

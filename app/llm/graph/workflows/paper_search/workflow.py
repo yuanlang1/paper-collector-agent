@@ -22,16 +22,13 @@ from app.llm.graph.workflows.paper_search.nodes.save_oss import (
     SavePersistedPdfsToOssNode,
 )
 from app.llm.graph.workflows.paper_search.nodes.search_review import SearchReviewBrainNode
-from app.llm.graph.workflows.paper_search.nodes.source_search import ArxivSearchNode, DblpSearchNode, GoogleScholarSearchNode
+from app.llm.graph.workflows.paper_search.nodes.source_search import GoogleScholarSearchNode
 from app.llm.graph.workflows.paper_search.nodes.supplemental_search import SupplementalSearchPlannerNode
 from app.llm.graph.workflows.paper_search.nodes.update_task_status import UpdatePaperSearchTaskStatusNode
 from app.llm.graph.workflows.paper_search.nodes.venue import VenueResolutionNode
 from app.llm.graph.workflows.paper_search.state import PaperSearchWorkflowState
 from app.llm.provider import ChatClient
-from app.llm.streaming.timeline import (
-    PAPER_SEARCH_TIMELINE,
-    instrument_timeline_node,
-)
+from app.llm.graph.workflows.paper_search.progress import instrument_paper_search_node
 
 
 def _route(stage: str, target: str):
@@ -90,7 +87,7 @@ def _route_after_supplemental_search(
     state: PaperSearchWorkflowState,
 ) -> str:
     if state.get("stage") == "searching":
-        return "search_arxiv"
+        return "search_google"
     if state.get("stage") == "enriching":
         return "enrich"
     return _terminal_target(state)
@@ -108,12 +105,9 @@ def build_paper_search_workflow(
     chat = chat or ChatClient()
 
     def node(name, default):
-        return instrument_timeline_node(
-            workflow="paper_search",
+        return instrument_paper_search_node(
             node_name=name,
             node=node_overrides.get(name, default),
-            timeline=PAPER_SEARCH_TIMELINE,
-            round_key="supplemental_search_round",
         )
 
     builder = StateGraph(PaperSearchWorkflowState)
@@ -135,8 +129,6 @@ def build_paper_search_workflow(
     builder.add_node("confirm", node("confirm", paper_search_confirm_node))
     builder.add_node("create_task", node("create_task", CreatePaperSearchTaskNode(client=task_client)))
     builder.add_node("generate_queries", node("generate_queries", BuildSourceQueryPlanNode(chat=chat)))
-    builder.add_node("search_arxiv", node("search_arxiv", ArxivSearchNode()))
-    builder.add_node("search_dblp", node("search_dblp", DblpSearchNode()))
     builder.add_node("search_google", node("search_google", GoogleScholarSearchNode()))
     builder.add_node(
         "finalize_source_search",
@@ -209,11 +201,9 @@ def build_paper_search_workflow(
         )
     builder.add_conditional_edges(
         "generate_queries",
-        _route("searching", "search_arxiv"),
-        _route_paths("search_arxiv"),
+        _route("searching", "search_google"),
+        _route_paths("search_google"),
     )
-    builder.add_edge("search_arxiv", "search_dblp")
-    builder.add_edge("search_dblp", "search_google")
     builder.add_edge("search_google", "finalize_source_search")
     builder.add_conditional_edges(
         "finalize_source_search",
@@ -239,7 +229,7 @@ def build_paper_search_workflow(
         "supplemental_search",
         _route_after_supplemental_search,
         {
-            "search_arxiv": "search_arxiv",
+            "search_google": "search_google",
             "enrich": "enrich",
             "cleanup_downloaded_pdfs": "cleanup_downloaded_pdfs",
             "finalize_result": "finalize_result",

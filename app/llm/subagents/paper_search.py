@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from app.llm.subagents.registry import SubAgentRuntime
 
 
-PaperSearchSource = Literal["arXiv", "DBLP", "Google Scholar"]
+PaperSearchSource = Literal["Google Scholar"]
 
 
 class PaperSearchConstraints(BaseModel):
@@ -58,7 +58,7 @@ def build_paper_search_runtime(
             input_model=PaperSearchDelegation,
             requires_confirmation=True,
             display_name="论文检索子代理",
-            confirmation_summary="将从多个来源检索、推荐并保存论文。",
+            confirmation_summary="将通过 Google Scholar 检索、推荐并保存论文。",
         ),
         graph=build_paper_search_workflow(
             skip_confirmation=True,

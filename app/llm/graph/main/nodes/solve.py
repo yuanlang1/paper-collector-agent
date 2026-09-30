@@ -1,14 +1,14 @@
-from typing import Any
+from typing import Any, Optional
 from uuid import uuid4
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
 from app.config import settings
+from app.events.context import current_event_context
 from app.llm.graph.main.native_tools import get_tool_kind, requires_confirmation
 from app.llm.graph.main.state import MainAgentState
 from app.llm.provider import ChatClient
-from app.llm.streaming.notify import langgraph_notifier
 from app.llm.streaming.utils import content_to_text
 from app.llm.tools.registry import ToolRegistry, build_tool_registry
 from app.llm.subagents.registry import SubAgentRegistry
@@ -31,14 +31,16 @@ class SolveNode:
     async def __call__(
         self,
         state: MainAgentState,
-        config: RunnableConfig | None = None,
+        config: Optional[RunnableConfig] = None,
     ) -> dict:
-        notify = langgraph_notifier(config).scoped(source="main", node="solve")
+        event_context = current_event_context().scoped(source="main", node="solve")
         chunks = []
         reasoning_deltas: list[str] = []
         iteration = int(state.get("iteration_count") or 0) + 1
         reasoning_id = f"{state['run_id']}:solve:{uuid4().hex}"
-        notify("iteration_started", {"iteration": iteration})
+        await event_context.bus.publish(
+            event_context.event("iteration_started", {"iteration": iteration}),
+        )
 
         messages = self._messages_from_window_start(
             state["messages"],
@@ -66,18 +68,22 @@ class SolveNode:
             )
             if reasoning_delta:
                 reasoning_deltas.append(reasoning_delta)
-                notify(
-                    "reasoning_delta",
-                    {
-                        "delta": reasoning_delta,
-                        "reasoning_id": reasoning_id,
-                        "scope": "main",
-                    },
+                await event_context.bus.publish(
+                    event_context.event(
+                        "reasoning_delta",
+                        {
+                            "delta": reasoning_delta,
+                            "reasoning_id": reasoning_id,
+                            "scope": "main",
+                        },
+                    ),
                 )
 
             content_delta = content_to_text(chunk.content)
             if content_delta:
-                notify("content_delta", {"delta": content_delta})
+                await event_context.bus.publish(
+                    event_context.event("content_delta", {"delta": content_delta}),
+                )
 
         assistant = chunks[0]
         for chunk in chunks[1:]:

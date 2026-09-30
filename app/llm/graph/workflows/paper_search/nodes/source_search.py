@@ -59,8 +59,7 @@ class _SourceSearchNode:
             return {}
         handler = SEARCH_HANDLERS[self.source]
         arguments = dict(plan["arguments"])
-        page_size_key = {"arXiv": "max_results", "DBLP": "h", "Google Scholar": "num"}[self.source]
-        page_size = int(arguments[page_size_key])
+        page_size = int(arguments["num"])
         result = await handler(arguments, None)
         metadata = result.get("metadata") or {}
         pagination = dict(metadata.get("pagination") or {})
@@ -117,16 +116,6 @@ class _SourceSearchNode:
             "next_offset": pagination.get("next_offset"),
         }
         return {"stage": "normalizing", "status": "partial_failed" if page_errors else "running", "source_summaries": summaries, "source_search_cursors": cursors, "source_search_stats": stats, "raw_result_artifact_refs": list(dict.fromkeys([*state.get("raw_result_artifact_refs", []), artifact.artifact_uri])), "warnings": [*state.get("warnings", []), *page_errors]}
-
-
-class ArxivSearchNode(_SourceSearchNode):
-    def __init__(self) -> None:
-        super().__init__("arXiv")
-
-
-class DblpSearchNode(_SourceSearchNode):
-    def __init__(self) -> None:
-        super().__init__("DBLP")
 
 
 class GoogleScholarSearchNode(_SourceSearchNode):

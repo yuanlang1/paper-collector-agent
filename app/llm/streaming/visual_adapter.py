@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.llm.streaming.notify import EventEnvelope, build_event
+from app.events.envelope import EventEnvelope, build_event
 from app.llm.subagents.registry import SubAgentRegistry
 from app.llm.streaming.utils import (
     to_jsonable,
@@ -91,24 +91,13 @@ class AgentStreamAdapter:
 
         return events
 
-    def handle_custom(
-        self,
-        payload: Any,
-    ) -> list[EventEnvelope]:
-        normalized = to_jsonable(payload)
-
-        if not isinstance(normalized, dict):
-            return []
-
-        return [normalized] if normalized.get("event") else []
-
     def confirmation_required(
         self,
-        payload: Any,
+        response: dict[str, Any],
     ) -> EventEnvelope:
         return build_event(
             "confirmation_required",
-            {"interrupt": to_jsonable(payload)},
+            to_jsonable(response),
         )
 
     def _workflow_for(self, action_name: Any) -> str | None:

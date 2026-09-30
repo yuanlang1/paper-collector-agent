@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
+from langgraph.errors import GraphInterrupt
 
-from app.llm.streaming.notify import langgraph_notifier
+from app.events.context import current_event_context
+from app.events.errors import EventPublicationError
 
 
 Node = Callable[..., Awaitable[dict[str, Any]]]
@@ -21,92 +23,6 @@ class TimelineStep:
     completes_at: frozenset[str]
     nodes: frozenset[str]
     repeats: bool = False
-
-
-PAPER_SEARCH_TIMELINE = (
-    TimelineStep(
-        key="prepare",
-        label="准备检索",
-        starts_at=frozenset({"initialize"}),
-        completes_at=frozenset({"build_search_tag", "confirm"}),
-        nodes=frozenset({
-            "initialize",
-            "intent_understanding",
-            "build_search_tag",
-            "confirm",
-        }),
-    ),
-    TimelineStep(
-        key="query_plan",
-        label="生成检索计划",
-        starts_at=frozenset({"generate_queries"}),
-        completes_at=frozenset({"generate_queries"}),
-        nodes=frozenset({"generate_queries"}),
-    ),
-    TimelineStep(
-        key="multi_source_search",
-        label="多来源检索",
-        starts_at=frozenset({"search_arxiv"}),
-        completes_at=frozenset({"finalize_source_search"}),
-        nodes=frozenset({
-            "search_arxiv",
-            "search_dblp",
-            "search_google",
-            "finalize_source_search",
-        }),
-        repeats=True,
-    ),
-    TimelineStep(
-        key="quality_review",
-        label="清洗与检索复盘",
-        starts_at=frozenset({"filter"}),
-        completes_at=frozenset({"search_review"}),
-        nodes=frozenset({"filter", "search_review"}),
-        repeats=True,
-    ),
-    TimelineStep(
-        key="supplemental_search_plan",
-        label="补充检索计划",
-        starts_at=frozenset({"supplemental_search"}),
-        completes_at=frozenset({"supplemental_search"}),
-        nodes=frozenset({"supplemental_search"}),
-        repeats=True,
-    ),
-    TimelineStep(
-        key="enrichment",
-        label="补充论文信息",
-        starts_at=frozenset({"enrich"}),
-        completes_at=frozenset({"abstract_enrich"}),
-        nodes=frozenset({
-            "enrich",
-            "crossref_enrich",
-            "venue",
-            "download_pdf",
-            "abstract_enrich",
-        }),
-    ),
-    TimelineStep(
-        key="recommendation",
-        label="论文推荐",
-        starts_at=frozenset({"recommend"}),
-        completes_at=frozenset({"recommend"}),
-        nodes=frozenset({"recommend"}),
-    ),
-    TimelineStep(
-        key="persist_and_sync",
-        label="保存结果与同步任务状态",
-        starts_at=frozenset({"create_task"}),
-        completes_at=frozenset({"finalize_result"}),
-        nodes=frozenset({
-            "create_task",
-            "persist",
-            "save_pdfs_to_oss",
-            "cleanup_downloaded_pdfs",
-            "update_task_status",
-            "finalize_result",
-        }),
-    ),
-)
 
 
 TASK_REVIEW_TIMELINE = (
@@ -283,52 +199,64 @@ def instrument_timeline_node(
         state: Mapping[str, Any],
         config: RunnableConfig,
     ) -> dict[str, Any]:
-        notify = langgraph_notifier(config).scoped(
+        event_context = current_event_context().scoped(
             workflow=workflow,
             node=node_name,
         )
         if node_name in step.starts_at:
-            notify("timeline_step", _event_payload(
-                workflow=workflow,
-                step=step,
-                state=state,
-                event_state="started",
-                round_key=round_key,
-            ))
+            await event_context.bus.publish(
+                event_context.event("timeline_step", _event_payload(
+                    workflow=workflow,
+                    step=step,
+                    state=state,
+                    event_state="started",
+                    round_key=round_key,
+                )),
+            )
 
         try:
             result = await (
                 node(state, config) if accepts_config else node(state)
             )
+        except GraphInterrupt:
+            raise
+        except EventPublicationError:
+            raise
         except Exception as exc:
-            notify("timeline_step", _event_payload(
-                workflow=workflow,
-                step=step,
-                state=state,
-                event_state="failed",
-                round_key=round_key,
-                error=str(exc),
-            ))
+            await event_context.bus.publish(
+                event_context.event("timeline_step", _event_payload(
+                    workflow=workflow,
+                    step=step,
+                    state=state,
+                    event_state="failed",
+                    round_key=round_key,
+                    error=str(exc),
+                )),
+            )
             raise
 
         error = result.get("error")
         if error:
-            notify("timeline_step", _event_payload(
-                workflow=workflow,
-                step=step,
-                state=state,
-                event_state="failed",
-                round_key=round_key,
-                error=str(error),
-            ))
+            await event_context.bus.publish(
+                event_context.event("timeline_step", _event_payload(
+                    workflow=workflow,
+                    step=step,
+                    state=state,
+                    event_state="failed",
+                    round_key=round_key,
+                    error=str(error),
+                )),
+            )
         elif node_name in step.completes_at:
-            notify("timeline_step", _event_payload(
-                workflow=workflow,
-                step=step,
-                state=state,
-                event_state="completed",
-                round_key=round_key,
-            ))
+            await event_context.bus.publish(
+                event_context.event("timeline_step", _event_payload(
+                    workflow=workflow,
+                    step=step,
+                    state=state,
+                    event_state="completed",
+                    round_key=round_key,
+                )),
+            )
 
         return result
 

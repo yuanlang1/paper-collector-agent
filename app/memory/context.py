@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 import logging
 from typing import Any
 
@@ -20,7 +20,7 @@ from app.rag.retrieval.memory_retrieval import MemoryHybridRetrieval
 from app.services.llm_profile_service import LlmRuntimeConfig
 
 
-MemoryEventCallback = Callable[[dict[str, Any]], None]
+MemoryEventCallback = Callable[[dict[str, Any]], Awaitable[None]]
 logger = logging.getLogger(__name__)
 
 
@@ -59,7 +59,7 @@ class MemoryContextService:
                 usage=self._usage("skipped"),
             )
 
-        self._emit(
+        await self._emit(
             on_event,
             {
                 "event": "memory_retrieval_started",
@@ -100,7 +100,7 @@ class MemoryContextService:
             facts_count=len(facts),
             episodes_count=len(episodes),
         )
-        self._emit(
+        await self._emit(
             on_event,
             {
                 "event": f"memory_retrieval_{usage['status']}",
@@ -184,9 +184,9 @@ class MemoryContextService:
         }
 
     @staticmethod
-    def _emit(
+    async def _emit(
         callback: MemoryEventCallback | None,
         payload: dict[str, Any],
     ) -> None:
         if callback is not None:
-            callback(payload)
+            await callback(payload)

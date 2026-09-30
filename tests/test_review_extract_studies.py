@@ -6,6 +6,8 @@ import unittest
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, ToolMessage
 
+from app.events.bus import EventBus
+from app.events.context import EventContext, bind_event_context
 from app.infrastructure.grpc.paper_service_grpc_client import PaperServiceGrpcClient
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.nodes.extract_studies import (
@@ -144,6 +146,15 @@ class ExtractStudiesNodeTests(unittest.IsolatedAsyncioTestCase):
         _document("chunk-3", 2, 3, "Introduction", "Background."),
         _document("chunk-4", 3, 4, "Discussion", "Finding C is discussed."),
     ]
+
+    async def asyncSetUp(self) -> None:
+        self._event_context = bind_event_context(
+            EventContext(bus=EventBus(), run_id="review-test"),
+        )
+        self._event_context.__enter__()
+
+    async def asyncTearDown(self) -> None:
+        self._event_context.__exit__(None, None, None)
 
     @staticmethod
     def _state(corpus_artifact_ref: str) -> dict:
