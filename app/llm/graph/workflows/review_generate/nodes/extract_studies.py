@@ -17,8 +17,6 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langgraph.errors import GraphInterrupt
 from pydantic import BaseModel, Field, model_validator
 
-from app.events.context import EventContext, current_event_context
-from app.events.errors import EventPublicationError
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
@@ -182,11 +180,13 @@ class ExtractStudiesNode:
         if state.get("stage") != "extracting_studies":
             return failed("extract_studies called in invalid stage")
 
+        reading_summary = {"total": 0, "succeeded": 0, "failed": 0}
         try:
             corpus = await self.artifact_store.read_json_uri(state["corpus_artifact_ref"])
             papers = corpus["papers"]
             if not isinstance(papers, list):
                 raise ValueError("corpus papers is invalid")
+            reading_summary["total"] = len(papers)
 
             warnings = list(state.get("warnings", []))
             if not all(isinstance(paper, dict) for paper in papers):
@@ -196,24 +196,8 @@ class ExtractStudiesNode:
                 paper: dict[str, Any]
             ) -> tuple[dict[str, str] | None, dict[str, str] | None]:
                 paper_id = str(paper["paper_id"])
-                event_context = current_event_context().scoped(
-                    workflow="task_review",
-                    node="extract_studies",
-                )
                 try:
-                    await self._publish_reading_progress(
-                        event_context=event_context,
-                        paper_id=paper_id,
-                        label="阅读中",
-                        status="started",
-                    )
                     payload = await self._read_cached(paper=paper)
-                    await self._publish_reading_progress(
-                        event_context=event_context,
-                        paper_id=paper_id,
-                        label="阅读完成",
-                        status="completed",
-                    )
                     return (
                         {
                             "paper_id": str(paper["paper_id"]),
@@ -224,16 +208,7 @@ class ExtractStudiesNode:
                     )
                 except GraphInterrupt:
                     raise
-                except EventPublicationError:
-                    raise
                 except Exception as exc:
-                    await self._publish_reading_progress(
-                        event_context=event_context,
-                        paper_id=paper_id,
-                        label="阅读失败",
-                        status="failed",
-                        error=str(exc) or exc.__class__.__name__,
-                    )
                     return (
                         None,
                         {
@@ -273,6 +248,10 @@ class ExtractStudiesNode:
                 for paper_id in expected_paper_ids
                 if paper_id not in extracted_paper_ids and paper_id not in failed_paper_ids
             )
+            reading_summary.update(
+                succeeded=len(records),
+                failed=len(failures),
+            )
             if failures:
                 return await self._failed_extraction(
                     state=state,
@@ -280,6 +259,7 @@ class ExtractStudiesNode:
                     extracted_paper_ids=extracted_paper_ids,
                     failures=failures,
                     warnings=warnings,
+                    reading_summary=reading_summary,
                 )
 
             artifact = await self.artifact_store.write_json(
@@ -296,13 +276,15 @@ class ExtractStudiesNode:
             )
         except GraphInterrupt:
             raise
-        except EventPublicationError:
-            raise
         except Exception as exc:
-            return failed(f"profile extraction failed: {exc}")
+            return failed(
+                f"profile extraction failed: {exc}",
+                reading_summary=reading_summary,
+            )
 
         return {
             "study_records_artifact_ref": artifact.artifact_uri,
+            "reading_summary": reading_summary,
             "warnings": warnings,
             "stage": "generating_framework",
             "status": "running",
@@ -339,29 +321,6 @@ class ExtractStudiesNode:
             )
             pending[paper_id].add_done_callback(lambda task: pending.pop(paper_id, None))
         return await asyncio.shield(pending[paper_id])
-
-    @staticmethod
-    async def _publish_reading_progress(
-        *,
-        event_context: EventContext,
-        paper_id: str,
-        label: str,
-        status: str,
-        error: str | None = None,
-    ) -> None:
-        await event_context.bus.publish(
-            event_context.event(
-                "timeline_step",
-                {
-                    "step_id": f"task_review:reading:{paper_id}",
-                    "step_key": "extract_studies",
-                    "label": f"论文 {paper_id}：{label}",
-                    "state": status,
-                    "iteration": None,
-                    "error": error,
-                },
-            ),
-        )
 
     async def _extract_profile(
         self, *, paper: Mapping[str, Any], documents: list[Document] | None = None,
@@ -579,6 +538,7 @@ class ExtractStudiesNode:
         extracted_paper_ids: set[str],
         failures: list[dict[str, str]],
         warnings: list[str],
+        reading_summary: dict[str, int],
     ) -> dict[str, Any]:
         report = await self.artifact_store.write_json(
             run_id=state["run_id"],
@@ -596,6 +556,7 @@ class ExtractStudiesNode:
         return failed(
             "profile extraction did not cover every task paper",
             warnings=warnings,
+            reading_summary=reading_summary,
             study_extraction_report_artifact_ref=report.artifact_uri,
             error_code=failures[0].get("error_code", "READING_FAILED"),
             retryable=any(item.get("retryable", False) for item in failures),

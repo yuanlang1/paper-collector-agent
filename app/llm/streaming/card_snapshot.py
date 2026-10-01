@@ -51,8 +51,6 @@ class CardMetaAccumulator:
             "subagent_failed",
         }:
             self._observe_subagent_event(event, data, sequence, timestamp)
-        elif event == "timeline_step":
-            self._observe_timeline_step(data, sequence, timestamp)
         elif event.startswith("memory_retrieval_"):
             self._observe_memory(event, data, sequence, timestamp)
 
@@ -249,43 +247,6 @@ class CardMetaAccumulator:
         ):
             item["result"] = result_data
 
-    def _observe_timeline_step(
-        self,
-        data: dict[str, Any],
-        sequence: int,
-        timestamp: str,
-    ) -> None:
-        item = self._subagent_for(data, sequence, timestamp)
-        step_id = str(data.get("step_id") or "")
-        if not step_id:
-            return
-
-        steps = item.setdefault("_timeline", {})
-        step = steps.setdefault(
-            step_id,
-            {
-                "step_id": step_id,
-                "step_key": data.get("step_key"),
-                "label": data.get("label"),
-                "iteration": data.get("iteration"),
-                "state": "running",
-                "start_seq": sequence,
-                "end_seq": None,
-                "started_at": timestamp,
-                "finished_at": None,
-                "duration_ms": None,
-                "error": None,
-                "_started_at": perf_counter(),
-            },
-        )
-        state = str(data.get("state") or "running")
-        step["state"] = state
-        if state in {"completed", "failed"}:
-            step["end_seq"] = sequence
-            step["finished_at"] = timestamp
-            step["duration_ms"] = self._duration_ms(step)
-            step["error"] = data.get("error")
-
     def _tool_for(
         self,
         data: dict[str, Any],
@@ -335,8 +296,6 @@ class CardMetaAccumulator:
                 "finished_at": None,
                 "duration_ms": None,
                 "input": to_jsonable(data.get("input") or {}),
-                "timeline": [],
-                "_timeline": {},
                 "_started_at": perf_counter(),
             },
         )
@@ -385,13 +344,8 @@ class CardMetaAccumulator:
         }
 
     def _public_subagent(self, item: dict[str, Any]) -> dict[str, Any]:
-        result = {
+        return {
             key: value
             for key, value in item.items()
-            if not key.startswith("_") and key != "timeline"
+            if not key.startswith("_")
         }
-        result["timeline"] = [
-            self._public_tool(step)
-            for step in self._ordered(item.get("_timeline", {}).values())
-        ]
-        return result

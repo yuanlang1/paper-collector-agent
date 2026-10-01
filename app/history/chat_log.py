@@ -606,10 +606,11 @@ def merge_card_items(
             continue
         previous_item = merged[positions[identity]]
         if identity_key == "delegation_id":
-            item["timeline"] = merge_card_items(
-                previous_item.get("timeline"),
-                item.get("timeline"),
-                identity_key="step_id",
-            )
+            previous_item = {
+                key: value
+                for key, value in previous_item.items()
+                if key != "timeline"
+            }
+            item.pop("timeline", None)
         merged[positions[identity]] = {**previous_item, **item}
     return merged

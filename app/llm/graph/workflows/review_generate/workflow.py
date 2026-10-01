@@ -18,13 +18,65 @@ from app.llm.graph.workflows.review_generate.nodes.reflect_review import Reflect
 from app.llm.graph.workflows.review_generate.nodes.render_section import RenderSectionsNode
 from app.llm.graph.workflows.review_generate.nodes.retrieve_evidence import RetrieveEvidenceNode
 from app.llm.graph.workflows.review_generate.state import TaskReviewWorkflowState
-from app.llm.streaming.timeline import (
-    TASK_REVIEW_TIMELINE,
-    instrument_timeline_node,
-)
+from app.llm.graph.workflows.progress import instrument_subagent_progress_node
 
 from app.llm.graph.workflows.review_generate.nodes.verify_claims import VerifyClaimsNode
 from app.llm.provider import ChatClient
+
+
+_PHASES = {
+    "initialize": ("prepare", "初始化综述请求"),
+    "load_task_corpus": ("corpus", "加载任务语料"),
+    "extract_studies": ("reading", "提取论文研究信息"),
+    "generate_framework": ("framework", "生成综述框架"),
+    "generate_claims": ("claims", "生成或修订论点"),
+    "retrieve_evidence": ("evidence", "检索或补充证据"),
+    "verify_claims": ("verify", "核验论点"),
+    "render_sections": ("writing", "撰写或修订章节"),
+    "assemble_review": ("writing", "组装综述"),
+    "reflect_review": ("review", "反思与质量检查"),
+    "finalizing_handoff": ("persist", "整理交接结果"),
+    "persist_review": ("persist", "保存综述"),
+    "finalize_result": ("finalize", "汇总综述结果"),
+}
+
+_CLAIM_LOOP_NODES = {
+    "generate_claims",
+    "retrieve_evidence",
+    "verify_claims",
+}
+
+_WRITING_LOOP_NODES = {
+    "render_sections",
+    "assemble_review",
+    "reflect_review",
+}
+
+
+def _iteration_resolver(node_name: str):
+    if node_name in _CLAIM_LOOP_NODES:
+        return lambda state: int(state.get("reflection_round", 0) or 0) + 1
+    if node_name in _WRITING_LOOP_NODES:
+        return lambda state: int(state.get("writing_revision_round", 0) or 0) + 1
+    return None
+
+
+def _progress_data(state, update):
+    current = {**state, **(update or {})}
+    reading_summary = current.get("reading_summary")
+    counts = {
+        "papers": len(current.get("paper_ids_snapshot") or []),
+        "warnings": len(current.get("warnings") or []),
+    }
+    if isinstance(reading_summary, dict):
+        counts.update({
+            "profiles": int(reading_summary.get("succeeded", 0)),
+            "failed": int(reading_summary.get("failed", 0)),
+        })
+    return {
+        "task_id": current.get("task_id"),
+        "counts": counts,
+    }
 
 
 def _route(expected_stage: str, target: str):
@@ -61,17 +113,19 @@ def build_task_review_workflow(
     node_overrides = node_overrides or {}
     chat = chat or ChatClient()
 
-    def node(name: str, factory, *, round_key="reflection_round"):
+    def node(name: str, factory):
         if name in node_overrides:
             target = node_overrides[name]
         else:
             target = factory()
-        return instrument_timeline_node(
-            workflow="task_review",
+        phase, phase_label = _PHASES[name]
+        return instrument_subagent_progress_node(
             node_name=name,
             node=target,
-            timeline=TASK_REVIEW_TIMELINE,
-            round_key=round_key,
+            phase=phase,
+            phase_label=phase_label,
+            data_builder=_progress_data,
+            iteration_resolver=_iteration_resolver(name),
         )
 
     builder = StateGraph(TaskReviewWorkflowState)
@@ -101,11 +155,7 @@ def build_task_review_workflow(
     )
     builder.add_node(
         "reflect_review",
-        node(
-            "reflect_review",
-            lambda: ReflectReviewNode(chat=chat),
-            round_key="writing_revision_round",
-        ),
+        node("reflect_review", lambda: ReflectReviewNode(chat=chat)),
     )
     builder.add_node(
         "finalizing_handoff", node("finalizing_handoff", FinalizingHandoffNode),

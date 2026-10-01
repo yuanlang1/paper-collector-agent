@@ -151,6 +151,8 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[0]["data"]["phase_state"], "started")
         self.assertEqual(events[1]["data"]["phase_state"], "completed")
         self.assertEqual(events[1]["data"]["counts"], {"discovered": 2})
+        self.assertTrue(all("message" not in event for event in events))
+        self.assertTrue(all("iteration" not in event for event in events))
 
     async def test_progress_exception_is_reported_and_propagated(self) -> None:
         events: list[dict] = []

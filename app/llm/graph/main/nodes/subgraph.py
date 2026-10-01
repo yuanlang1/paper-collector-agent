@@ -90,10 +90,8 @@ class SubAgentNode:
                 child_context.event(
                     "subagent_started",
                     {
-                        "name": runtime.spec.name,
                         "display_name": runtime.spec.display_name,
                         "message": f"{runtime.spec.display_name} 已启动。",
-                        "progress": 0,
                         "progress_percent": 0,
                         "status": "running",
                         "data": {},
@@ -112,7 +110,6 @@ class SubAgentNode:
                     child_context.event(
                         "subagent_failed",
                         {
-                            "name": runtime.spec.name,
                             "message": str(exc),
                             "status": "error",
                             "data": {"error_code": runtime.error_code},
@@ -134,7 +131,6 @@ class SubAgentNode:
                     child_context.event(
                         "subagent_failed",
                         {
-                            "name": runtime.spec.name,
                             "message": str(error),
                             "status": "error",
                             "data": {"error_code": runtime.error_code},
@@ -155,11 +151,9 @@ class SubAgentNode:
                 child_context.event(
                     "subagent_completed" if completed else "subagent_failed",
                     {
-                        "name": runtime.spec.name,
                         "message": str(
                             action_result.get("summary") or runtime.failure_summary
                         ),
-                        "progress": 100 if completed else None,
                         "progress_percent": 100 if completed else None,
                         "status": status,
                         "data": dict(action_result.get("data") or {}),

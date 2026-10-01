@@ -25,6 +25,7 @@ from app.history.sqlite import HistoryDatabase
 from app.llm.agent import AgentService
 from app.llm.graph.main.nodes.subgraph import SubAgentNode
 from app.llm.graph.main.nodes.solve import SolveNode
+from app.llm.streaming.card_snapshot import CardMetaAccumulator
 from app.llm.subagents.registry import (
     SubAgentRegistry,
     SubAgentRuntime,
@@ -799,6 +800,11 @@ class SubAgentNodeEventBusTests(unittest.TestCase):
                     event.payload["delegation_id"] == "delegation-1"
                     for event in events
                 ))
+                started = events[0].payload
+                self.assertEqual(started["subagent"], "paper_search_agent")
+                self.assertNotIn("name", started)
+                self.assertNotIn("progress", started)
+                self.assertEqual(started["progress_percent"], 0)
 
                 graph.release.set()
                 result = await task
@@ -808,11 +814,43 @@ class SubAgentNodeEventBusTests(unittest.TestCase):
                 events[-1].payload["sse_name"],
                 "subagent_completed",
             )
+            completed = events[-1].payload
+            self.assertNotIn("name", completed)
+            self.assertNotIn("progress", completed)
+            self.assertEqual(completed["progress_percent"], 100)
 
         asyncio.run(scenario())
 
 
 class DirectEventPublicationTests(unittest.TestCase):
+    def test_subagent_card_omits_timeline(self) -> None:
+        card = CardMetaAccumulator()
+        card.observe({
+            "event": "action_started",
+            "data": {
+                "action_id": "delegation-1",
+                "action_type": "subagent",
+                "name": "paper_search_agent",
+                "workflow": "paper_search",
+                "input": {"query": "test"},
+            },
+            "sequence": 1,
+            "timestamp": "2026-09-30T00:00:00+00:00",
+        })
+        card.observe({
+            "event": "timeline_step",
+            "data": {
+                "delegation_id": "delegation-1",
+                "step_id": "legacy-step",
+            },
+            "sequence": 2,
+            "timestamp": "2026-09-30T00:00:01+00:00",
+        })
+
+        snapshot = card.snapshot({"status": "completed"})
+
+        self.assertNotIn("timeline", snapshot["card"]["subagents"][0])
+
     def test_solve_publishes_events_to_bound_bus(self) -> None:
         async def scenario() -> None:
             events = []

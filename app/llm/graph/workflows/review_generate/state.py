@@ -30,6 +30,7 @@ class TaskReviewWorkflowState(TypedDict, total=False):
     corpus_artifact_ref: str | None
     study_records_artifact_ref: str | None
     study_extraction_report_artifact_ref: str | None
+    reading_summary: dict[str, int]
 
     framework_artifact_ref: str | None
     framework_hash: str | None

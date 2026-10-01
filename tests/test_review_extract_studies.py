@@ -8,8 +8,10 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 from app.events.bus import EventBus
 from app.events.context import EventContext, bind_event_context
+from app.events.adapter import sse_name_for
 from app.infrastructure.grpc.paper_service_grpc_client import PaperServiceGrpcClient
 from app.llm.artifacts.store import LocalArtifactStore
+from app.llm.graph.workflows.progress import instrument_subagent_progress_node
 from app.llm.graph.workflows.review_generate.nodes.extract_studies import (
     ArticleProfile,
     ExtractStudiesNode,
@@ -356,6 +358,73 @@ class ExtractStudiesNodeTests(unittest.IsolatedAsyncioTestCase):
             [study["paper_id"] for study in payload["studies"]], ["1", "2", "3", "4"],
         )
 
+    async def test_multiple_papers_emit_only_reading_phase_events(self) -> None:
+        async def extract_profile(*, paper, **_kwargs):
+            paper_id = str(paper["paper_id"])
+            return ArticleProfile(
+                core_problem=f"problem {paper_id}",
+                methods=f"methods {paper_id}",
+                main_discussion=f"discussion {paper_id}",
+            )
+
+        papers = [
+            {"paper_id": paper_id, "title": f"Paper {paper_id}"}
+            for paper_id in range(1, 4)
+        ]
+        events = []
+        bus = EventBus()
+
+        async def collect(event) -> None:
+            events.append(event)
+
+        bus.subscribe(collect)
+        with tempfile.TemporaryDirectory() as directory:
+            store = LocalArtifactStore(base_dir=directory)
+            corpus = await self._corpus_artifact(store, papers)
+            node = ExtractStudiesNode(
+                artifact_store=store,
+                reading_index=_ReadingIndex(),
+                model=_Model([]),
+                corpus_reader=_CorpusReader(self.documents),
+                content_retrieval=_Retrieval({}),
+            )
+            node._extract_profile = extract_profile
+            wrapped = instrument_subagent_progress_node(
+                node_name="extract_studies",
+                node=node,
+                phase="reading",
+                phase_label="提取论文研究信息",
+            )
+            with bind_event_context(EventContext(
+                bus=bus,
+                run_id="review-test",
+                scope={"delegation_id": "review-1"},
+            )):
+                update = await wrapped(
+                    {
+                        **self._state(corpus.artifact_uri),
+                        "paper_ids_snapshot": ["1", "2", "3"],
+                    },
+                    {},
+                )
+
+        self.assertEqual(
+            [sse_name_for(event) for event in events],
+            ["subagent_progress", "subagent_progress"],
+        )
+        self.assertEqual(
+            [event.payload["data"]["phase_state"] for event in events],
+            ["started", "completed"],
+        )
+        self.assertTrue(all(
+            event.payload["delegation_id"] == "review-1"
+            for event in events
+        ))
+        self.assertEqual(
+            update["reading_summary"],
+            {"total": 3, "succeeded": 3, "failed": 0},
+        )
+
     def test_opening_documents_use_first_three_actual_page_numbers(self) -> None:
         documents = [
             _document("chunk-a", 0, 5, "A", "A"),
@@ -383,6 +452,10 @@ class ExtractStudiesNodeTests(unittest.IsolatedAsyncioTestCase):
             )(self._state(corpus.artifact_uri))
 
             self.assertEqual(update["stage"], "failed")
+            self.assertEqual(
+                update["reading_summary"],
+                {"total": 1, "succeeded": 0, "failed": 1},
+            )
             report_ref = update["study_extraction_report_artifact_ref"]
             report = await store.read_json_uri(report_ref)
             self.assertEqual(report["extracted_paper_ids"], [])

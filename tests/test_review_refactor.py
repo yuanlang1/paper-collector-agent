@@ -3,10 +3,11 @@ import json
 import re
 import tempfile
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 from langchain_core.documents import Document
 
+from app.events.adapter import event_data, sse_name_for
 from app.events.bus import EventBus
 from app.events.context import EventContext, bind_event_context
 from app.llm.artifacts.store import LocalArtifactStore
@@ -68,6 +69,12 @@ from app.llm.graph.workflows.review_generate.workflow import (
     _route_after_verification,
     _route_after_writing_review,
     build_task_review_workflow,
+)
+from app.llm.graph.workflows.task_indexing.workflow import (
+    build_task_indexing_workflow,
+)
+from app.llm.graph.workflows.task_indexing.nodes.common import (
+    total_progress_payload,
 )
 from app.llm.provider.structured_output import build_json_mode_instruction
 from app.llm.subagents.task_review import TaskReviewDelegation
@@ -997,6 +1004,166 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["error"], "review was not approved by reflection")
         self.assertNotIn("persist_review", order)
+
+    async def test_review_workflow_uses_progress_events_with_stable_iterations(self):
+        stages = {
+            "initialize": "loading_corpus",
+            "load_task_corpus": "extracting_studies",
+            "extract_studies": "generating_framework",
+            "generate_framework": "generating_claims",
+            "generate_claims": "retrieving_evidence",
+            "retrieve_evidence": "verifying_claims",
+            "verify_claims": "rendering_sections",
+            "render_sections": "assembling_review",
+            "assemble_review": "reflecting_review",
+            "reflect_review": "finalizing_handoff",
+            "finalizing_handoff": "persisting_review",
+            "persist_review": "completed",
+            "finalize_result": "completed",
+        }
+
+        def node(name):
+            async def run(_state):
+                return {"stage": stages[name]}
+
+            return run
+
+        events = []
+
+        async def collect(event):
+            events.append(event)
+
+        bus = EventBus()
+        bus.subscribe(collect)
+        graph = build_task_review_workflow(
+            chat=Mock(),
+            node_overrides={name: node(name) for name in stages},
+        )
+        with bind_event_context(EventContext(
+            bus=bus,
+            run_id="run-review",
+            scope={
+                "action_id": "review-1",
+                "delegation_id": "review-1",
+                "subagent": "task_review_agent",
+                "workflow": "task_review",
+            },
+        )):
+            await graph.ainvoke({
+                "task_id": 8,
+                "paper_ids_snapshot": ["1", "2"],
+                "reflection_round": 2,
+                "writing_revision_round": 1,
+            })
+
+        serialized = [
+            {"name": sse_name_for(event), "data": event_data(event)}
+            for event in events
+        ]
+        self.assertEqual(len(serialized), 26)
+        self.assertTrue(all(item["name"] == "subagent_progress" for item in serialized))
+        self.assertTrue(all(
+            item["data"]["delegation_id"] == "review-1"
+            for item in serialized
+        ))
+        for node_name, expected_iteration in (
+            ("generate_claims", 3),
+            ("render_sections", 2),
+        ):
+            node_events = [
+                item["data"]
+                for item in serialized
+                if item["data"]["node"] == node_name
+            ]
+            self.assertEqual(
+                [event["iteration"] for event in node_events],
+                [expected_iteration, expected_iteration],
+            )
+            self.assertEqual(
+                [event["data"]["phase_state"] for event in node_events],
+                ["started", "completed"],
+            )
+
+    async def test_indexing_workflow_uses_progress_events_with_updated_counts(self):
+        transitions = {
+            "initialize": {"stage": "checking_status"},
+            "check_rag_status": {"stage": "indexing"},
+            "run_or_wait": {
+                "stage": "verifying",
+                "overall_summary": {"total": 2, "ready": 2},
+                "committed_summary": {"total": 2, "ready": 2},
+            },
+            "verify_completion": {"stage": "completed"},
+            "finalize_result": {"stage": "completed"},
+        }
+
+        def node(name):
+            async def run(_state):
+                return transitions[name]
+
+            return run
+
+        events = []
+
+        async def collect(event):
+            events.append(event)
+
+        bus = EventBus()
+        bus.subscribe(collect)
+        graph = build_task_indexing_workflow(
+            node_overrides={name: node(name) for name in transitions},
+        )
+        with bind_event_context(EventContext(
+            bus=bus,
+            run_id="run-index",
+            scope={
+                "action_id": "index-1",
+                "delegation_id": "index-1",
+                "subagent": "task_indexing_agent",
+                "workflow": "task_indexing",
+            },
+        )):
+            await graph.ainvoke({"task_id": 7})
+
+        serialized = [
+            {"name": sse_name_for(event), "data": event_data(event)}
+            for event in events
+        ]
+        self.assertEqual(len(serialized), 10)
+        self.assertTrue(all(item["name"] == "subagent_progress" for item in serialized))
+        self.assertTrue(all(
+            item["data"]["delegation_id"] == "index-1"
+            for item in serialized
+        ))
+        self.assertTrue(all(
+            "message" not in item["data"]
+            for item in serialized
+        ))
+        self.assertTrue(all(
+            "iteration" not in item["data"]
+            for item in serialized
+        ))
+        run_or_wait_done = next(
+            item["data"]
+            for item in serialized
+            if item["data"]["node"] == "run_or_wait"
+            and item["data"]["data"]["phase_state"] == "completed"
+        )
+        self.assertEqual(
+            run_or_wait_done["data"]["counts"],
+            {"total": 2, "ready": 2},
+        )
+
+    async def test_indexing_live_progress_uses_only_progress_percent(self):
+        payload = total_progress_payload(
+            task_id=7,
+            summary={"total": 2, "ready": 1, "skipped": 0, "failed": 0},
+            progress_percent=50,
+        )
+
+        self.assertEqual(payload["progress_percent"], 50)
+        self.assertNotIn("progress", payload)
+        self.assertEqual(payload["data"]["phase_state"], "running")
 
 
 class ReviewPromptSchemaTests(unittest.TestCase):

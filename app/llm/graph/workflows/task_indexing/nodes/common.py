@@ -65,7 +65,6 @@ def total_progress_payload(
         message += f"；当前批次：{batch_completed}/{batch['total']} 篇"
 
     return {
-        "progress": progress_percent,
         "progress_percent": progress_percent,
         "phase": "index",
         "phase_label": "索引论文到知识库",
@@ -73,6 +72,7 @@ def total_progress_payload(
         "task_id": task_id,
         "message": message,
         "data": {
+            "phase_state": "running",
             "batch_id": batch_id,
             "event_type": event_type,
             "summary": dict(summary),

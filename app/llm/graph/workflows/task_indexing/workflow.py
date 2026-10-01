@@ -16,10 +16,27 @@ from app.llm.graph.workflows.task_indexing.nodes.verify_completion import (
     verify_task_indexing_node,
 )
 from app.llm.graph.workflows.task_indexing.state import TaskIndexingWorkflowState
-from app.llm.streaming.timeline import (
-    TASK_INDEXING_TIMELINE,
-    instrument_timeline_node,
+from app.llm.graph.workflows.progress import (
+    instrument_subagent_progress_node,
 )
+
+
+_PHASES = {
+    "initialize": ("prepare", "初始化索引请求"),
+    "check_rag_status": ("prepare", "检查任务索引状态"),
+    "run_or_wait": ("index", "索引论文到知识库"),
+    "verify_completion": ("verify", "校验索引结果"),
+    "finalize_result": ("finalize", "汇总索引结果"),
+}
+
+
+def _progress_data(state, update):
+    current = {**state, **(update or {})}
+    return {
+        "task_id": current.get("task_id"),
+        "counts": dict(current.get("overall_summary") or {}),
+        "committed_counts": dict(current.get("committed_summary") or {}),
+    }
 
 
 def _route(expected_stage: str, target: str):
@@ -34,11 +51,13 @@ def build_task_indexing_workflow(
     node_overrides = node_overrides or {}
 
     def node(name: str, default):
-        return instrument_timeline_node(
-            workflow="task_indexing",
+        phase, phase_label = _PHASES[name]
+        return instrument_subagent_progress_node(
             node_name=name,
             node=node_overrides.get(name, default),
-            timeline=TASK_INDEXING_TIMELINE,
+            phase=phase,
+            phase_label=phase_label,
+            data_builder=_progress_data,
         )
 
     builder = StateGraph(TaskIndexingWorkflowState)
