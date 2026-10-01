@@ -20,7 +20,7 @@ class ChatMessageView(BaseModel):
     conversation_id: str
     run_id: str
     role: Literal["user", "assistant"]
-    content: str
+    content: str | list[dict[str, Any]]
     status: str
     source: str
     meta: dict[str, Any] | None = None

@@ -15,7 +15,6 @@ class Session:
     db: DbSession
     user_id: str = "0"
     run_id: str | None = None
-    assistant_message_id: int | None = None
     message: str | None = None
     resume_payload: dict[str, Any] | None = None
     llm_profile: dict[str, Any] | None = None
@@ -31,7 +30,6 @@ class Session:
         db: DbSession,
         user_id: str = "0",
         run_id: str | None = None,
-        assistant_message_id: int | None = None,
         llm_profile: dict[str, Any] | None = None,
         memory_llm_profile: dict[str, Any] | None = None,
         paper_search_source_limits: dict[str, int] | None = None,
@@ -40,7 +38,6 @@ class Session:
         return cls(
             conversation_id=conversation_id,
             run_id=run_id,
-            assistant_message_id=assistant_message_id,
             message=message,
             db=db,
             user_id=user_id,
@@ -72,7 +69,6 @@ class Session:
         resume_payload: dict[str, Any],
         db: DbSession,
         user_id: str = "0",
-        assistant_message_id: int | None = None,
         llm_profile: dict[str, Any] | None = None,
         memory_llm_profile: dict[str, Any] | None = None,
     ) -> "Session":
@@ -81,7 +77,6 @@ class Session:
             conversation_id=conversation_id,
             run_id=run_id,
             resume_payload=resume_payload,
-            assistant_message_id=assistant_message_id,
             db=db,
             user_id=user_id,
             llm_profile=llm_profile,

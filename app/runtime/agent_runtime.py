@@ -6,7 +6,6 @@ import time
 from dataclasses import dataclass
 
 from sqlalchemy import delete, select
-from app.config import settings
 from app.database import SessionLocal
 from app.events.adapter import event_from_envelope
 from app.events.bus import EventBus, RootEventDispatcher
@@ -18,7 +17,6 @@ from app.history import chat_log, stream_events, transactions
 from app.history.sqlite import HistoryDatabase
 from app.history.stream_events import AgentStreamEvent
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.streaming.card_snapshot import CardMetaAccumulator
 from app.llm.provider import ChatClient
 from app.memory.consolidation import Consolidator
 from app.memory.extraction import LangChainMemoryExtractor
@@ -70,71 +68,6 @@ class AgentRuntime:
         self._active_consolidation_tasks: set[asyncio.Task[None]] = set()
         self._active_stream_tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
         
-    async def chat(
-        self,
-        *,
-        message: str,
-        user_id: str,
-        conversation_id: str,
-        run_id: str,
-        db: DbSession,
-        llm_profile_id: int | None = None,
-    ) -> dict[str, Any]:
-        llm_config = resolve_runtime_config(db, llm_profile_id)
-        memory_llm_config = resolve_small_model_runtime_config(db)
-        source_limits = get_source_limits(db)
-        session = Session.create(
-            message=message,
-            conversation_id=conversation_id,
-            run_id=run_id,
-            db=db,
-            user_id=user_id,
-            llm_profile=llm_config.snapshot() if llm_config else None,
-            memory_llm_profile=self._memory_llm_profile_snapshot(
-                llm_config,
-                memory_llm_config,
-            ),
-            paper_search_source_limits=source_limits,
-        )
-
-        assistant_message_id = await self.history_db.run(
-            chat_log.start_turn,
-            user_id=session.user_id,
-            conversation_id=session.conversation_id,
-            run_id=str(session.run_id),
-            user_content=message,
-        )
-        started_at = time.perf_counter()
-
-        try:
-            response = await self._service_for_config(
-                llm_config,
-                memory_llm_config,
-            ).invoke(session)
-        except Exception:
-            await self.history_db.run(
-                chat_log.mark_interrupted,
-                user_id=session.user_id,
-                conversation_id=session.conversation_id,
-                run_id=str(session.run_id),
-                message_id=assistant_message_id,
-            )
-            raise
-
-        await self.history_db.run(
-            chat_log.complete_assistant_message,
-            user_id=session.user_id,
-            conversation_id=session.conversation_id,
-            run_id=str(session.run_id),
-            message_id=assistant_message_id,
-            response=response,
-            latency_ms=self._elapsed_ms(started_at),
-            extra_meta=self._llm_profile_meta(session),
-        )
-        self._schedule_consolidation(session=session, response=response)
-
-        return response
-
     async def chat_stream(
         self,
         *,
@@ -155,22 +88,22 @@ class AgentRuntime:
             memory_llm_config,
         )
         db.rollback()
-        assistant_message_id: int | None = None
+        turn_started = False
         try:
-            assistant_message_id = await self.history_db.run(
+            await self.history_db.run(
                 chat_log.start_turn,
                 user_id=user_id,
                 conversation_id=conversation_id,
                 run_id=run_id,
                 user_content=message,
             )
+            turn_started = True
             self._start_stream_task(
                 message=message,
                 user_id=user_id,
                 conversation_id=conversation_id,
                 run_id=run_id,
                 resume_payload=None,
-                assistant_message_id=assistant_message_id,
                 service=service,
                 llm_profile=llm_profile,
                 memory_llm_profile=memory_llm_profile,
@@ -186,74 +119,13 @@ class AgentRuntime:
                 ),
             )
         except BaseException:
-            await self._abort_stream_setup(
-                user_id=user_id,
-                conversation_id=conversation_id,
-                run_id=run_id,
-                assistant_message_id=assistant_message_id,
-            )
+            if turn_started:
+                await self._abort_stream_setup(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                )
             raise
-
-    async def resume_chat(
-        self,
-        *,
-        user_id: str,
-        conversation_id: str,
-        resume_payload: dict[str, Any],
-        requested_run_id: str | None = None,
-        requested_action_id: str | None = None,
-        db: DbSession,
-    ) -> dict[str, Any]:
-        session, action_id, service = await self._resume_session(
-            user_id=user_id,
-            conversation_id=conversation_id,
-            resume_payload=resume_payload,
-            requested_run_id=requested_run_id,
-            requested_action_id=requested_action_id,
-            db=db,
-        )
-        claim = await self.history_db.run(
-            chat_log.claim_pending_action,
-            user_id=session.user_id,
-            conversation_id=conversation_id,
-            run_id=str(session.run_id),
-            action_id=action_id,
-            decision=str(resume_payload["decision"]),
-            comment=resume_payload.get("comment"),
-        )
-        if not claim.claimed:
-            raise ValueError("The requested approval is already being processed")
-        assistant_message_id = claim.message_id
-        started_at = time.perf_counter()
-
-        try:
-            response = await service.invoke(session)
-        except Exception:
-            await self.history_db.run(
-                chat_log.mark_interrupted,
-                user_id=session.user_id,
-                conversation_id=session.conversation_id,
-                run_id=str(session.run_id),
-                message_id=assistant_message_id,
-            )
-            raise
-
-        await self.history_db.run(
-            chat_log.complete_assistant_message,
-            user_id=session.user_id,
-            conversation_id=session.conversation_id,
-            run_id=str(session.run_id),
-            message_id=assistant_message_id,
-            response=response,
-            latency_ms=self._elapsed_ms(started_at),
-            extra_meta={
-                **self._resume_meta(resume_payload, action_id),
-                **self._llm_profile_meta(session),
-            },
-        )
-        self._schedule_consolidation(session=session, response=response)
-
-        return response
 
     async def resume_chat_stream(
         self,
@@ -265,8 +137,8 @@ class AgentRuntime:
         requested_action_id: str | None = None,
         db: DbSession,
     ) -> AgentStreamSubscription:
-        assistant_message_id: int | None = None
         run_id = requested_run_id or "resume-pending"
+        claim_acquired = False
         try:
             session, action_id, service = await self._resume_session(
                 user_id=user_id,
@@ -289,14 +161,13 @@ class AgentRuntime:
             )
             if not claim.claimed:
                 raise ValueError("The requested approval is already being processed")
-            assistant_message_id = claim.message_id
+            claim_acquired = True
             self._start_stream_task(
                 message=None,
                 user_id=session.user_id,
                 conversation_id=conversation_id,
                 run_id=run_id,
                 resume_payload=resume_payload,
-                assistant_message_id=assistant_message_id,
                 service=service,
                 llm_profile=session.llm_profile,
                 memory_llm_profile=session.memory_llm_profile,
@@ -312,22 +183,23 @@ class AgentRuntime:
                 ),
             )
         except BaseException:
-            await self._abort_stream_setup(
-                user_id=user_id,
-                conversation_id=conversation_id,
-                run_id=run_id,
-                assistant_message_id=assistant_message_id,
-            )
+            if claim_acquired:
+                await self._abort_stream_setup(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                )
             raise
 
     async def delete_conversation(
         self,
         *,
+        user_id: str = DEFAULT_USER_ID,
         conversation_id: str,
         db: DbSession,
     ) -> dict[str, Any]:
         await self._run_conversation_deletion(
-            user_id=DEFAULT_USER_ID,
+            user_id=user_id,
             conversation_id=conversation_id,
             db=db,
         )
@@ -362,6 +234,7 @@ class AgentRuntime:
                 "memory",
                 self._delete_conversation_memory(
                     db=db,
+                    user_id=user_id,
                     conversation_id=conversation_id,
                 ),
             ),
@@ -387,13 +260,14 @@ class AgentRuntime:
     async def _delete_conversation_memory(
         *,
         db: DbSession,
+        user_id: str,
         conversation_id: str,
     ) -> None:
         try:
             fact_ids = list(
                 db.scalars(
                     select(MemoryFact.id).where(
-                        MemoryFact.user_id == DEFAULT_USER_ID,
+                        MemoryFact.user_id == user_id,
                         MemoryFact.source_conversation_id == conversation_id,
                     )
                 )
@@ -401,26 +275,26 @@ class AgentRuntime:
             episode_ids = list(
                 db.scalars(
                     select(MemoryEpisode.id).where(
-                        MemoryEpisode.user_id == DEFAULT_USER_ID,
+                        MemoryEpisode.user_id == user_id,
                         MemoryEpisode.source_conversation_id == conversation_id,
                     )
                 )
             )
             db.execute(
                 delete(MemoryFact).where(
-                    MemoryFact.user_id == DEFAULT_USER_ID,
+                    MemoryFact.user_id == user_id,
                     MemoryFact.source_conversation_id == conversation_id,
                 )
             )
             db.execute(
                 delete(MemoryEpisode).where(
-                    MemoryEpisode.user_id == DEFAULT_USER_ID,
+                    MemoryEpisode.user_id == user_id,
                     MemoryEpisode.source_conversation_id == conversation_id,
                 )
             )
             db.execute(
                 delete(MemoryConsolidationCursor).where(
-                    MemoryConsolidationCursor.user_id == DEFAULT_USER_ID,
+                    MemoryConsolidationCursor.user_id == user_id,
                     MemoryConsolidationCursor.conversation_id == conversation_id,
                 )
             )
@@ -524,17 +398,14 @@ class AgentRuntime:
         user_id: str,
         conversation_id: str,
         run_id: str,
-        assistant_message_id: int | None,
     ) -> None:
         try:
-            if assistant_message_id is not None:
-                await self.history_db.run(
-                    chat_log.mark_interrupted,
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    run_id=run_id,
-                    message_id=assistant_message_id,
-                )
+            await self.history_db.run(
+                chat_log.mark_interrupted,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                run_id=run_id,
+            )
         except Exception:
             logger.exception(
                 "Failed to interrupt prepared stream: user_id=%s, conversation_id=%s",
@@ -583,7 +454,6 @@ class AgentRuntime:
         conversation_id: str,
         run_id: str,
         resume_payload: dict[str, Any] | None,
-        assistant_message_id: int,
         service: AgentService,
         llm_profile: dict[str, Any] | None,
         memory_llm_profile: dict[str, Any] | None,
@@ -598,7 +468,6 @@ class AgentRuntime:
                 conversation_id=conversation_id,
                 run_id=run_id,
                 resume_payload=resume_payload,
-                assistant_message_id=assistant_message_id,
                 service=service,
                 llm_profile=llm_profile,
                 memory_llm_profile=memory_llm_profile,
@@ -617,7 +486,6 @@ class AgentRuntime:
         conversation_id: str,
         run_id: str,
         resume_payload: dict[str, Any] | None,
-        assistant_message_id: int,
         service: AgentService,
         llm_profile: dict[str, Any] | None,
         memory_llm_profile: dict[str, Any] | None,
@@ -632,7 +500,6 @@ class AgentRuntime:
             user_id=user_id,
             conversation_id=conversation_id,
             root_run_id=run_id,
-            assistant_message_id=assistant_message_id,
         )
         bus = EventBus()
         bus.subscribe(
@@ -640,18 +507,6 @@ class AgentRuntime:
                 context=context,
                 persistence=PersistenceHandler(self.history_db, started_at=started_at),
                 broadcaster=self.broadcaster,
-                card_meta=CardMetaAccumulator(
-                    model=(
-                        str(llm_profile["model"])
-                        if llm_profile and llm_profile.get("model")
-                        else settings.OPENAI_MODEL
-                    ),
-                    provider=(
-                        str(llm_profile["provider"])
-                        if llm_profile and llm_profile.get("provider")
-                        else settings.LLM_PROVIDER
-                    ),
-                ),
                 terminal_meta={
                     **self._llm_profile_meta_from_snapshots(
                         llm_profile,
@@ -671,7 +526,6 @@ class AgentRuntime:
                     resume_payload=resume_payload,
                     db=db,
                     user_id=user_id,
-                    assistant_message_id=assistant_message_id,
                     llm_profile=llm_profile,
                     memory_llm_profile=memory_llm_profile,
                 )
@@ -682,7 +536,6 @@ class AgentRuntime:
                     run_id=run_id,
                     db=db,
                     user_id=user_id,
-                    assistant_message_id=assistant_message_id,
                     llm_profile=llm_profile,
                     memory_llm_profile=memory_llm_profile,
                     paper_search_source_limits=paper_search_source_limits,
@@ -735,7 +588,6 @@ class AgentRuntime:
                             user_id=user_id,
                             conversation_id=conversation_id,
                             run_id=run_id,
-                            message_id=assistant_message_id,
                         )
                     )
             except Exception:
@@ -833,10 +685,6 @@ class AgentRuntime:
         )
 
     @staticmethod
-    def _elapsed_ms(started_at: float) -> int:
-        return int((time.perf_counter() - started_at) * 1000)
-
-    @staticmethod
     def _resume_meta(
         resume_payload: dict[str, Any],
         action_id: str | None = None,
@@ -876,15 +724,6 @@ class AgentRuntime:
             memory_llm_config=memory_llm_config,
             artifact_access_service=self.agent_service.artifact_access_service,
         )
-
-    @staticmethod
-    def _llm_profile_meta(session: Session) -> dict[str, Any]:
-        metadata: dict[str, Any] = {}
-        if session.llm_profile:
-            metadata["llm_profile"] = session.llm_profile
-        if session.memory_llm_profile:
-            metadata["memory_llm_profile"] = session.memory_llm_profile
-        return metadata
 
     @staticmethod
     def _llm_profile_meta_from_snapshots(

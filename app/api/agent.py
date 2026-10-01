@@ -16,7 +16,6 @@ from app.history.sqlite import get_history_database
 
 from app.api.schemas.agent import (
     ChatRequest,
-    ChatResponse,
     ChatResumeRequest,
 )
 from app.core.response import ServiceResponse
@@ -108,76 +107,12 @@ async def _sse_events(
         )
 
 
-@router.post(
-    "/chat",
-    response_model=ServiceResponse[ChatResponse],
-)
-async def agent_chat(
-    payload: ChatRequest,
-    db: Session = Depends(get_db),
-) -> ServiceResponse[ChatResponse]:
-    runtime = get_agent_runtime()
-
-    try:
-        result = await runtime.chat(
-            message=payload.message,
-            user_id=payload.user_id,
-            conversation_id=payload.conversation_id,
-            run_id=payload.run_id,
-            llm_profile_id=payload.llm_profile_id,
-            db=db,
-        )
-    except chat_log.RunAlreadyExistsError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    response = ChatResponse.model_validate(result)
-
-    return ServiceResponse[
-        ChatResponse
-    ].build_success_response(
-        data=response,
-        message="OK",
-    )
-
-
 @router.post("/chat/stream", response_class=EventSourceResponse)
 async def stream_chat(
     subscription: Annotated[AgentStreamSubscription, Depends(_start_chat_stream)],
 ) -> AsyncIterator[ServerSentEvent]:
     async for event in _sse_events(subscription):
         yield event
-
-
-@router.post(
-    "/chat/resume",
-    response_model=ServiceResponse[ChatResponse],
-)
-async def chat_resume(
-    payload: ChatResumeRequest,
-    db: Session = Depends(get_db),
-) -> ServiceResponse[ChatResponse]:
-    runtime = get_agent_runtime()
-
-    result = await runtime.resume_chat(
-        user_id=payload.user_id,
-        conversation_id=payload.conversation_id,
-        resume_payload=payload.model_dump(
-            exclude={"user_id", "conversation_id", "run_id", "action_id"},
-            exclude_none=True,
-        ),
-        requested_run_id=payload.run_id,
-        requested_action_id=payload.action_id,
-        db=db,
-    )
-
-    response = ChatResponse.model_validate(result)
-
-    return ServiceResponse[
-        ChatResponse
-    ].build_success_response(
-        data=response,
-        message="OK",
-    )
 
 
 @router.post("/chat/resume/stream", response_class=EventSourceResponse)
@@ -200,12 +135,13 @@ async def stream_run_events(
     response_model=ServiceResponse[ConversationListResponse],
 )
 async def list_conversations(
+    user_id: str = Query(default="0", min_length=1),
     limit: int = Query(default=30, ge=1, le=100),
 ) -> ServiceResponse[ConversationListResponse]:
     history_db = get_history_database()
     items = await history_db.run(
         chat_log.list_conversations,
-        user_id="0",
+        user_id=user_id,
         limit=limit,
     )
 
@@ -226,13 +162,14 @@ async def list_conversations(
 )
 async def list_conversation_messages(
     conversation_id: str,
+    user_id: str = Query(default="0", min_length=1),
     limit: int = Query(default=100, ge=1, le=100),
     before_id: int | None = Query(default=None, ge=1),
 ) -> ServiceResponse[ChatMessageListResponse]:
     history_db = get_history_database()
     items, next_before_id = await history_db.run(
         chat_log.list_messages,
-        user_id="0",
+        user_id=user_id,
         conversation_id=conversation_id,
         limit=limit,
         before_id=before_id,
@@ -257,10 +194,12 @@ async def list_conversation_messages(
 )
 async def delete_conversation(
     conversation_id: str,
+    user_id: str = Query(default="0", min_length=1),
     db: Session = Depends(get_db),
 ) -> ServiceResponse[DeleteConversationResponse]:
     runtime = get_agent_runtime()
     result = await runtime.delete_conversation(
+        user_id=user_id,
         conversation_id=conversation_id,
         db=db,
     )

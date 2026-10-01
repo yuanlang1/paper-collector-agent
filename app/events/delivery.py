@@ -14,7 +14,6 @@ class EventContext:
     user_id: str
     conversation_id: str
     root_run_id: str
-    assistant_message_id: int
 
 
 @dataclass
@@ -28,4 +27,4 @@ class EventDelivery:
 @dataclass(frozen=True)
 class TerminalUpdate:
     response: dict[str, Any]
-    card_meta: dict[str, Any]
+    extra_meta: dict[str, Any]

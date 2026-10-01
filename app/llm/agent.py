@@ -20,7 +20,7 @@ from app.llm.provider import ChatClient, ModelOptions
 from app.llm.tool_adapter import to_openai_tool_schemas
 from app.llm.tools.registry import build_tool_registry
 from app.services.llm_profile_service import LlmRuntimeConfig
-from app.llm.response import build_chat_response, build_done_payload
+from app.llm.response import build_done_payload
 from app.llm.streaming import AgentStreamAdapter
 from app.llm.streaming.utils import (
     content_to_text,
@@ -91,20 +91,6 @@ class AgentService:
 
     async def get_state(self, session: Session):
         return await self.graph.aget_state(session.graph_config)
-
-    async def invoke(self, session: Session) -> dict[str, Any]:
-        with bind_event_context(
-            EventContext(bus=EventBus(), run_id=str(session.run_id)),
-        ):
-            result = await self.graph.ainvoke(
-                session.graph_input,
-                config=session.graph_config,
-            )
-        return build_chat_response(
-            result=result,
-            conversation_id=session.conversation_id,
-            run_id=str(session.run_id),
-        )
 
     async def stream(
         self,

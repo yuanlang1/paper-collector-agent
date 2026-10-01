@@ -19,13 +19,18 @@ from app.api import agent as agent_api
 from app.events.adapter import now
 from app.events.bus import EventBus
 from app.events.context import EventContext, bind_event_context, current_event_context
-from app.events.models import RunStartedEvent, RunTerminalEvent
+from app.events.models import (
+    ActionResultEvent,
+    ActionStartedEvent,
+    ContentDeltaEvent,
+    RunStartedEvent,
+    RunTerminalEvent,
+)
 from app.history import chat_log, stream_events, transactions
 from app.history.sqlite import HistoryDatabase
 from app.llm.agent import AgentService
 from app.llm.graph.main.nodes.subgraph import SubAgentNode
 from app.llm.graph.main.nodes.solve import SolveNode
-from app.llm.streaming.card_snapshot import CardMetaAccumulator
 from app.llm.subagents.registry import (
     SubAgentRegistry,
     SubAgentRuntime,
@@ -71,12 +76,29 @@ class _StreamingService:
             if self.block:
                 await self.release.wait()
 
+            pending_action = None
+            if self.status == "confirmation_required":
+                pending_action = {
+                    "action_id": "call-confirm-test",
+                    "action_type": "tool",
+                    "name": "test_tool",
+                }
+                await event_bus.publish(ActionStartedEvent(
+                    run_id=str(session.run_id),
+                    ts=now(),
+                    payload={
+                        **pending_action,
+                        "input": {},
+                        "requires_confirmation": True,
+                    },
+                ))
+
             response = {
                 "conversation_id": session.conversation_id,
                 "run_id": session.run_id,
                 "status": self.status,
                 "reply": "done",
-                "pending_action": None,
+                "pending_action": pending_action,
                 "last_action_result": None,
                 "artifact_refs": [],
                 "interrupt": None,
@@ -100,6 +122,76 @@ class _StreamingService:
             return response
         finally:
             self.closed.set()
+
+
+class _ToolStreamingService:
+    async def stream(self, session: Session, *, event_bus: EventBus) -> dict:
+        run_id = str(session.run_id)
+        action = {
+            "action_id": "toolu_01",
+            "action_type": "tool",
+            "name": "read_file",
+            "input": {"path": "README.md"},
+            "requires_confirmation": False,
+        }
+        result = {
+            "action_id": "toolu_01",
+            "action_type": "tool",
+            "name": "read_file",
+            "status": "success",
+            "summary": "tool completed",
+            "data": {"content": "# KamaClaude"},
+            "artifact_refs": [],
+            "retryable": False,
+            "error_code": None,
+            "error_message": None,
+        }
+        await event_bus.publish(RunStartedEvent(
+            run_id=run_id,
+            ts=now(),
+            payload={"status": "running"},
+        ))
+        await event_bus.publish(ContentDeltaEvent(
+            run_id=run_id,
+            ts=now(),
+            payload={"delta": "我先读取 README。"},
+        ))
+        await event_bus.publish(ActionStartedEvent(
+            run_id=run_id,
+            ts=now(),
+            payload=action,
+        ))
+        await event_bus.publish(ActionResultEvent(
+            run_id=run_id,
+            ts=now(),
+            payload=result,
+        ))
+        await event_bus.publish(ContentDeltaEvent(
+            run_id=run_id,
+            ts=now(),
+            payload={"delta": "README 的主要内容是……"},
+        ))
+        response = {
+            "conversation_id": session.conversation_id,
+            "run_id": run_id,
+            "status": "completed",
+            "reply": "README 的主要内容是……",
+            "pending_action": None,
+            "artifact_refs": [],
+            "error": None,
+        }
+        await event_bus.publish(RunTerminalEvent(
+            type="run.finished",
+            run_id=run_id,
+            ts=now(),
+            status="completed",
+            payload={
+                key: value
+                for key, value in response.items()
+                if key not in {"conversation_id", "run_id"}
+            },
+        ))
+        return response
 
 
 class _CompletedGraph:
@@ -356,7 +448,7 @@ class AgentStreamLifecycleTests(unittest.TestCase):
 
     def test_terminal_update_and_event_insert_rollback_together(self) -> None:
         async def scenario() -> None:
-            message_id = await self.history_db.run(
+            await self.history_db.run(
                 chat_log.start_turn,
                 user_id="0",
                 conversation_id="conv-atomic",
@@ -381,7 +473,6 @@ class AgentStreamLifecycleTests(unittest.TestCase):
                         user_id="0",
                         conversation_id="conv-atomic",
                         run_id="run_atomic",
-                        message_id=message_id,
                         response=response,
                         latency_ms=1,
                         extra_meta=None,
@@ -389,7 +480,14 @@ class AgentStreamLifecycleTests(unittest.TestCase):
                         event_data={"status": "completed"},
                     )
 
-            self.assertEqual(await self._assistant_status("conv-atomic"), "running")
+            messages, _ = await self.history_db.run(
+                chat_log.list_messages,
+                user_id="0",
+                conversation_id="conv-atomic",
+                limit=10,
+                before_id=None,
+            )
+            self.assertEqual([message["role"] for message in messages], ["user"])
             self.assertEqual(
                 await self.history_db.run(
                     stream_events.list_after,
@@ -576,12 +674,100 @@ class AgentStreamLifecycleTests(unittest.TestCase):
 
             self.assertEqual(events[-1].event_name, "confirmation_required")
             self.assertEqual(await self._assistant_status("conv-confirm"), "confirmation_required")
+            claim = await self.history_db.run(
+                chat_log.claim_pending_action,
+                user_id="0",
+                conversation_id="conv-confirm",
+                run_id=subscription.run_id,
+                action_id="call-confirm-test",
+                decision="approved",
+                comment=None,
+            )
+            duplicate = await self.history_db.run(
+                chat_log.claim_pending_action,
+                user_id="0",
+                conversation_id="conv-confirm",
+                run_id=subscription.run_id,
+                action_id="call-confirm-test",
+                decision="approved",
+                comment=None,
+            )
+            self.assertTrue(claim.claimed)
+            self.assertFalse(duplicate.claimed)
+            await runtime.shutdown()
+
+        asyncio.run(scenario())
+
+    def test_chat_log_records_text_tools_and_results_in_order(self) -> None:
+        async def scenario() -> None:
+            runtime = self._runtime(_ToolStreamingService())
+            subscription = await self._start_chat(
+                runtime,
+                conversation_id="conv-tool-history",
+                message="读取 README.md",
+            )
+            await self._collect(subscription.events)
+            messages, _ = await self.history_db.run(
+                chat_log.list_messages,
+                user_id="0",
+                conversation_id="conv-tool-history",
+                limit=20,
+                before_id=None,
+            )
+
+            self.assertEqual(
+                [(message["role"], message["status"]) for message in messages],
+                [
+                    ("user", "completed"),
+                    ("assistant", "completed"),
+                    ("assistant", "completed"),
+                    ("user", "completed"),
+                    ("assistant", "completed"),
+                ],
+            )
+            self.assertEqual(messages[0]["content"], "读取 README.md")
+            self.assertEqual(messages[1]["content"], [{"type": "text", "text": "我先读取 README。"}])
+            self.assertEqual(messages[2]["content"][0]["type"], "tool_use")
+            self.assertEqual(messages[2]["content"][0]["id"], "toolu_01")
+            self.assertEqual(messages[3]["content"], [{
+                "type": "tool_result",
+                "tool_use_id": "toolu_01",
+                "content": "# KamaClaude",
+                "is_error": False,
+            }])
+            self.assertEqual(messages[4]["content"], [{
+                "type": "text",
+                "text": "README 的主要内容是……",
+            }])
+            self.assertTrue(all(
+                not message["meta"] or "card" not in message["meta"]
+                for message in messages
+            ))
+            turns = await self.history_db.run(
+                chat_log.list_completed_turns_after,
+                user_id="0",
+                conversation_id="conv-tool-history",
+                after_assistant_message_id=None,
+                limit=10,
+            )
+            self.assertEqual(len(turns), 1)
+            self.assertEqual(turns[0].assistant_content, "README 的主要内容是……")
             await runtime.shutdown()
 
         asyncio.run(scenario())
 
 
 class NativeSseResponseTests(unittest.TestCase):
+    def test_agent_api_exposes_only_streaming_chat_routes(self) -> None:
+        app = FastAPI()
+        app.include_router(agent_api.router)
+        paths = set(app.openapi()["paths"])
+
+        self.assertIn("/api/agent/chat/stream", paths)
+        self.assertIn("/api/agent/chat/resume/stream", paths)
+        self.assertNotIn("/api/agent/chat", paths)
+        self.assertNotIn("/api/agent/chat/resume", paths)
+
     def test_agent_api_requires_request_context(self) -> None:
         app = FastAPI()
         app.include_router(agent_api.router)
@@ -823,34 +1009,6 @@ class SubAgentNodeEventBusTests(unittest.TestCase):
 
 
 class DirectEventPublicationTests(unittest.TestCase):
-    def test_subagent_card_omits_timeline(self) -> None:
-        card = CardMetaAccumulator()
-        card.observe({
-            "event": "action_started",
-            "data": {
-                "action_id": "delegation-1",
-                "action_type": "subagent",
-                "name": "paper_search_agent",
-                "workflow": "paper_search",
-                "input": {"query": "test"},
-            },
-            "sequence": 1,
-            "timestamp": "2026-09-30T00:00:00+00:00",
-        })
-        card.observe({
-            "event": "timeline_step",
-            "data": {
-                "delegation_id": "delegation-1",
-                "step_id": "legacy-step",
-            },
-            "sequence": 2,
-            "timestamp": "2026-09-30T00:00:01+00:00",
-        })
-
-        snapshot = card.snapshot({"status": "completed"})
-
-        self.assertNotIn("timeline", snapshot["card"]["subagents"][0])
-
     def test_solve_publishes_events_to_bound_bus(self) -> None:
         async def scenario() -> None:
             events = []

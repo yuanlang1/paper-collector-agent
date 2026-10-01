@@ -121,6 +121,7 @@ class AgentStreamAdapter:
             "name": result.get("name"),
             "status": result.get("status"),
             "summary": result.get("summary"),
+            "data": to_jsonable(result.get("data") or {}),
             "artifact_refs": (
                 artifact_refs
                 if isinstance(artifact_refs, list)

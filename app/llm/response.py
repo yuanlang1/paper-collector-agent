@@ -314,18 +314,6 @@ def _build_payload(
     }
 
 
-def build_chat_response(
-    result: dict[str, Any],
-    conversation_id: str,
-    run_id: str | None = None,
-) -> dict[str, Any]:
-    return _build_payload(
-        state = result,
-        conversation_id = conversation_id,
-        fallback_run_id = run_id,
-    )
-
-
 def build_done_payload(
     state: dict[str, Any],
     conversation_id: str,

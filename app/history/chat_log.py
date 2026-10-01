@@ -24,7 +24,7 @@ _CANONICAL_RUN_ID = re.compile(
 
 
 class PendingActionConflictError(ValueError):
-    """The requested approval cannot be applied to the stored assistant card."""
+    """The requested approval cannot be applied to the stored tool call."""
 
 
 class InvalidRunIdError(ValueError):
@@ -117,7 +117,7 @@ def start_turn(
         ).fetchone()
         if existing is not None:
             raise RunAlreadyExistsError("run_id already exists")
-        connection.execute(
+        cursor = connection.execute(
             """
             INSERT INTO chat_log (
                 user_id, conversation_id, run_id, role, content,
@@ -127,17 +127,225 @@ def start_turn(
             """,
             (user_id, conversation_id, run_id, user_content, source, created_at),
         )
-        cursor = connection.execute(
-            """
-            INSERT INTO chat_log (
-                user_id, conversation_id, run_id, role, content,
-                status, source, created_at
-            )
-            VALUES (?, ?, ?, 'assistant', '', 'running', ?, ?)
-            """,
-            (user_id, conversation_id, run_id, source, created_at),
-        )
         return int(cursor.lastrowid)
+
+
+def append_message_in_transaction(
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    conversation_id: str,
+    run_id: str,
+    role: str,
+    content: str | list[dict[str, Any]],
+    status: str,
+    source: str = "api",
+    meta: dict[str, Any] | None = None,
+) -> int:
+    if role not in {"user", "assistant"}:
+        raise ValueError("role must be user or assistant")
+    if status not in TERMINAL_STATUSES | {"running", "interrupted"}:
+        raise ValueError(f"Unsupported chat status: {status}")
+    serialized_content = (
+        json.dumps(content, ensure_ascii=False, default=str)
+        if isinstance(content, list)
+        else content
+    )
+    clean_meta = {
+        key: value
+        for key, value in (meta or {}).items()
+        if key != "card" and value not in (None, [], "")
+    }
+    cursor = connection.execute(
+        """
+        INSERT INTO chat_log (
+            user_id, conversation_id, run_id, role, content,
+            status, source, meta, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            user_id,
+            conversation_id,
+            run_id,
+            role,
+            serialized_content,
+            status,
+            source,
+            json.dumps(clean_meta, ensure_ascii=False, default=str)
+            if clean_meta
+            else None,
+            utc_now(),
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def append_action_started_in_transaction(
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    conversation_id: str,
+    run_id: str,
+    action: dict[str, Any],
+) -> int:
+    action_id = str(action["action_id"])
+    return append_message_in_transaction(
+        connection,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        run_id=run_id,
+        role="assistant",
+        content=[
+            {
+                "type": "tool_use",
+                "id": action_id,
+                "name": str(action["name"]),
+                "input": action.get("input") or {},
+            }
+        ],
+        status="running",
+        meta={
+            "action_id": action_id,
+            "action_type": action.get("action_type") or "tool",
+            "requires_confirmation": bool(action.get("requires_confirmation")),
+        },
+    )
+
+
+def append_action_result_in_transaction(
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    conversation_id: str,
+    run_id: str,
+    result: dict[str, Any],
+) -> int:
+    action_id = str(result["action_id"])
+    result_data = result.get("data")
+    if isinstance(result_data, dict) and set(result_data) == {"content"}:
+        result_content: Any = result_data["content"]
+    else:
+        result_content = result_data if result_data is not None else result.get("summary", "")
+    is_error = str(result.get("status") or "") in {"error", "rejected"}
+    message_id = append_message_in_transaction(
+        connection,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        run_id=run_id,
+        role="user",
+        content=[
+            {
+                "type": "tool_result",
+                "tool_use_id": action_id,
+                "content": result_content,
+                "is_error": is_error,
+            }
+        ],
+        status="completed",
+    )
+    connection.execute(
+        """
+        UPDATE chat_log
+        SET status = 'completed'
+        WHERE user_id = ?
+          AND conversation_id = ?
+          AND run_id = ?
+          AND role = 'assistant'
+          AND status = 'running'
+          AND meta LIKE ?
+        """,
+        (user_id, conversation_id, run_id, f'%"action_id": "{action_id}"%'),
+    )
+    return message_id
+
+
+def append_terminal_assistant_message_in_transaction(
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    conversation_id: str,
+    run_id: str,
+    response: dict[str, Any],
+    latency_ms: int,
+    extra_meta: dict[str, Any] | None = None,
+    content: str | None = None,
+) -> int | None:
+    status = str(response.get("status") or "failed")
+    if status == "confirmation_required":
+        mark_pending_action_in_transaction(
+            connection,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            run_id=run_id,
+            pending_action=response.get("pending_action"),
+        )
+        return None
+    if status not in TERMINAL_STATUSES | {"interrupted"}:
+        status = "failed"
+    reply = content or str(response.get("reply") or "") or str(response.get("error") or "")
+    if not reply:
+        reply = "本次任务未产生可展示的回复。"
+    meta = {
+        "latency_ms": latency_ms,
+        "artifact_refs": response.get("artifact_refs") or [],
+        "error": response.get("error"),
+        **(extra_meta or {}),
+    }
+    return append_message_in_transaction(
+        connection,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        run_id=run_id,
+        role="assistant",
+        content=[{"type": "text", "text": reply}],
+        status=status,
+        meta=meta,
+    )
+
+
+def mark_pending_action_in_transaction(
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    conversation_id: str,
+    run_id: str,
+    pending_action: Any,
+) -> None:
+    if not isinstance(pending_action, dict):
+        raise PendingActionConflictError("The run has no pending action")
+    action_id = str(pending_action.get("action_id") or "")
+    if not action_id:
+        raise PendingActionConflictError("The pending action has no action ID")
+    row = connection.execute(
+        """
+        SELECT id, meta
+        FROM chat_log
+        WHERE user_id = ?
+          AND conversation_id = ?
+          AND run_id = ?
+          AND role = 'assistant'
+          AND status = 'running'
+        ORDER BY id DESC
+        """,
+        (user_id, conversation_id, run_id),
+    ).fetchone()
+    if row is None:
+        raise PendingActionConflictError("No running tool call exists for this run")
+    meta = _parse_meta(row["meta"])
+    if str(meta.get("action_id") or "") != action_id:
+        raise PendingActionConflictError("The pending action does not match the tool call")
+    meta["pending_action"] = pending_action
+    cursor = connection.execute(
+        """
+        UPDATE chat_log
+        SET status = 'confirmation_required', meta = ?
+        WHERE id = ? AND status = 'running'
+        """,
+        (json.dumps(meta, ensure_ascii=False, default=str), row["id"]),
+    )
+    if cursor.rowcount != 1:
+        raise PendingActionConflictError("The pending action was resolved concurrently")
 
 
 def claim_pending_action(
@@ -151,7 +359,7 @@ def claim_pending_action(
     comment: str | None,
 ) -> PendingActionClaim:
     with database.transaction() as connection:
-        row = connection.execute(
+        rows = connection.execute(
             """
             SELECT id, status, meta
             FROM chat_log
@@ -159,40 +367,44 @@ def claim_pending_action(
               AND user_id = ?
               AND run_id = ?
               AND role = 'assistant'
+              AND status IN ('confirmation_required', 'running')
             ORDER BY id DESC
-            LIMIT 1
             """,
             (conversation_id, user_id, run_id),
-        ).fetchone()
-        if row is None:
+        ).fetchall()
+        if not rows:
             raise PendingActionConflictError("No assistant confirmation exists for this run")
-
-        meta = json.loads(row["meta"]) if row["meta"] else {}
-        card = meta.get("card")
-        card = dict(card) if isinstance(card, dict) else {}
-        approval_history = card.get("approval_history")
-        approval_history = list(approval_history) if isinstance(approval_history, list) else []
-        existing_decision = next(
-            (
-                item.get("decision")
-                for item in approval_history
-                if isinstance(item, dict) and item.get("action_id") == action_id
-            ),
-            None,
-        )
-        if row["status"] == "running" and existing_decision == decision:
-            return PendingActionClaim(message_id=int(row["id"]), claimed=False)
-        if row["status"] == "running":
-            raise PendingActionConflictError("The pending action is already being processed")
-        if row["status"] != "confirmation_required":
-            raise PendingActionConflictError("The pending action has already been resolved")
-
-        pending_action = card.get("pending_action") or meta.get("pending_action")
-        if not isinstance(pending_action, dict):
-            raise PendingActionConflictError("The assistant message has no pending action")
-        if str(pending_action.get("action_id") or "") != action_id:
+        row = None
+        meta: dict[str, Any] = {}
+        pending_action: dict[str, Any] | None = None
+        for candidate in rows:
+            candidate_meta = _parse_meta(candidate["meta"])
+            approval_history = candidate_meta.get("approval_history")
+            if (
+                candidate["status"] == "running"
+                and isinstance(approval_history, list)
+                and any(
+                    isinstance(item, dict) and item.get("action_id") == action_id
+                    for item in approval_history
+                )
+            ):
+                return PendingActionClaim(message_id=int(candidate["id"]), claimed=False)
+            candidate_pending = candidate_meta.get("pending_action")
+            if (
+                isinstance(candidate_pending, dict)
+                and str(candidate_pending.get("action_id") or "") == action_id
+            ):
+                row = candidate
+                meta = candidate_meta
+                pending_action = candidate_pending
+                break
+        if row is None or pending_action is None:
             raise PendingActionConflictError("The requested action does not match the pending action")
+        if row["status"] == "running":
+            return PendingActionClaim(message_id=int(row["id"]), claimed=False)
 
+        approval_history = meta.get("approval_history")
+        approval_history = list(approval_history) if isinstance(approval_history, list) else []
         approval_history.append(
             {
                 "action_id": action_id,
@@ -203,16 +415,9 @@ def claim_pending_action(
                 "resolved_at": utc_now(),
             }
         )
-        card.update(
-            {
-                "status": "running",
-                "pending_action": None,
-                "approval_history": approval_history,
-                "error": None,
-            }
-        )
-        meta["card"] = card
+        meta.pop("card", None)
         meta.pop("pending_action", None)
+        meta["approval_history"] = approval_history
         cursor = connection.execute(
             """
             UPDATE chat_log
@@ -226,129 +431,22 @@ def claim_pending_action(
         return PendingActionClaim(message_id=int(row["id"]), claimed=True)
 
 
-def complete_assistant_message(
-    database: HistoryDatabase,
-    *,
-    user_id: str,
-    conversation_id: str,
-    run_id: str,
-    message_id: int,
-    response: dict[str, Any],
-    latency_ms: int,
-    extra_meta: dict[str, Any] | None = None,
-) -> None:
-    with database.transaction() as connection:
-        complete_assistant_message_in_transaction(
-            connection,
-            user_id=user_id,
-            conversation_id=conversation_id,
-            run_id=run_id,
-            message_id=message_id,
-            response=response,
-            latency_ms=latency_ms,
-            extra_meta=extra_meta,
-        )
-
-
-def complete_assistant_message_in_transaction(
-    connection: sqlite3.Connection,
-    *,
-    user_id: str,
-    conversation_id: str,
-    run_id: str,
-    message_id: int,
-    response: dict[str, Any],
-    latency_ms: int,
-    extra_meta: dict[str, Any] | None,
-) -> None:
-    status = str(response.get("status") or "failed")
-    if status not in TERMINAL_STATUSES:
-        status = "failed"
-    content = (
-        str(response.get("reply") or "")
-        or str(response.get("error") or "")
-        or "本次任务未产生可展示的回复。"
-    )
-    existing = connection.execute(
-        """
-        SELECT meta
-        FROM chat_log
-        WHERE id = ?
-          AND user_id = ?
-          AND conversation_id = ?
-          AND run_id = ?
-          AND role = 'assistant'
-        """,
-        (message_id, user_id, conversation_id, run_id),
-    ).fetchone()
-    existing_meta = json.loads(existing["meta"]) if existing and existing["meta"] else {}
-    existing_card = existing_meta.get("card")
-    existing_card = dict(existing_card) if isinstance(existing_card, dict) else {}
-    incoming_card = (extra_meta or {}).get("card")
-    incoming_card = dict(incoming_card) if isinstance(incoming_card, dict) else {}
-    card = merge_cards(existing_card, incoming_card)
-    if isinstance(existing_card.get("approval_history"), list):
-        card["approval_history"] = existing_card["approval_history"]
-    if card:
-        card["status"] = status
-        card["pending_action"] = response.get("pending_action")
-        extra_meta = {**(extra_meta or {}), "card": card}
-
-    meta = {
-        "latency_ms": latency_ms,
-        "artifact_refs": response.get("artifact_refs") or [],
-        "last_action_result": response.get("last_action_result"),
-        "pending_action": response.get("pending_action"),
-        "error": response.get("error"),
-        **(extra_meta or {}),
-    }
-    meta = {key: value for key, value in meta.items() if value not in (None, [], "")}
-    cursor = connection.execute(
-        """
-        UPDATE chat_log
-        SET content = ?, status = ?, meta = ?
-        WHERE id = ?
-          AND user_id = ?
-          AND conversation_id = ?
-          AND run_id = ?
-          AND role = 'assistant'
-          AND status = 'running'
-        """,
-        (
-            content,
-            status,
-            json.dumps(meta, ensure_ascii=False, default=str) if meta else None,
-            message_id,
-            user_id,
-            conversation_id,
-            run_id,
-        ),
-    )
-    if cursor.rowcount != 1:
-        raise RuntimeError(f"Assistant chat log {message_id} is not running")
-
-
 def mark_interrupted(
     database: HistoryDatabase,
     *,
     user_id: str,
     conversation_id: str,
     run_id: str,
-    message_id: int,
+    message_id: int | None = None,
 ) -> None:
     with database.transaction() as connection:
-        connection.execute(
-            """
-            UPDATE chat_log
-            SET status = 'interrupted', content = '本次回复未完成。'
-            WHERE id = ?
-              AND user_id = ?
-              AND conversation_id = ?
-              AND run_id = ?
-              AND role = 'assistant'
-              AND status = 'running'
-            """,
-            (message_id, user_id, conversation_id, run_id),
+        append_terminal_assistant_message_in_transaction(
+            connection,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            run_id=run_id,
+            response={"status": "interrupted", "reply": "本次回复未完成。"},
+            latency_ms=0,
         )
 
 
@@ -394,10 +492,10 @@ def list_conversations(
     return [
         {
             "conversation_id": row["conversation_id"],
-            "title": row["title"][:60],
+            "title": _display_text(row["title"])[:60] or "(空会话)",
             "last_message_preview": (
                 f"{'你' if row['last_message_role'] == 'user' else '助手'}："
-                f"{row['last_message_content'][:80]}"
+                f"{_display_text(row['last_message_content'])[:80]}"
             ),
             "message_count": row["message_count"],
             "last_message_at": row["last_message_at"],
@@ -436,10 +534,10 @@ def list_messages(
             "conversation_id": row["conversation_id"],
             "run_id": row["run_id"],
             "role": row["role"],
-            "content": row["content"],
+            "content": decode_content(row["content"]),
             "status": row["status"],
             "source": row["source"],
-            "meta": json.loads(row["meta"]) if row["meta"] else None,
+            "meta": _parse_meta(row["meta"]) or None,
             "created_at": row["created_at"],
         }
         for row in rows
@@ -492,7 +590,7 @@ def get_run_status(
     with database.transaction() as connection:
         row = connection.execute(
             """
-            SELECT status
+            SELECT content, status
             FROM chat_log
             WHERE user_id = ? AND run_id = ? AND role = 'assistant'
             ORDER BY id DESC
@@ -500,7 +598,19 @@ def get_run_status(
             """,
             (user_id, run_id),
         ).fetchone()
-    return str(row["status"]) if row else None
+    if row is None:
+        return None
+    content = decode_content(row["content"])
+    if row["status"] == "confirmation_required":
+        return "confirmation_required"
+    if _is_text_block(content) and row["status"] in {
+        "completed",
+        "failed",
+        "blocked",
+        "interrupted",
+    }:
+        return str(row["status"])
+    return "running"
 
 
 def list_completed_turns_after(
@@ -513,41 +623,52 @@ def list_completed_turns_after(
 ) -> list[HistoryTurn]:
     if limit < 1:
         raise ValueError("limit must be positive")
-    sql = """
-        SELECT user_message.id AS user_message_id,
-               assistant_message.id AS assistant_message_id,
-               user_message.content AS user_content,
-               assistant_message.content AS assistant_content,
-               assistant_message.created_at AS completed_at
-        FROM chat_log user_message
-        JOIN chat_log assistant_message
-          ON assistant_message.run_id = user_message.run_id
-         AND assistant_message.user_id = user_message.user_id
-         AND assistant_message.role = 'assistant'
-        WHERE user_message.role = 'user'
-          AND user_message.user_id = ?
-          AND user_message.conversation_id = ?
-          AND assistant_message.conversation_id = ?
-          AND assistant_message.status = 'completed'
-    """
-    params: list[Any] = [user_id, conversation_id, conversation_id]
-    if after_assistant_message_id is not None:
-        sql += " AND assistant_message.id > ?"
-        params.append(after_assistant_message_id)
-    sql += " ORDER BY assistant_message.id ASC LIMIT ?"
-    params.append(limit)
     with database.transaction() as connection:
-        rows = connection.execute(sql, params).fetchall()
-    return [
-        HistoryTurn(
-            user_message_id=int(row["user_message_id"]),
-            assistant_message_id=int(row["assistant_message_id"]),
-            user_content=row["user_content"],
-            assistant_content=row["assistant_content"],
-            completed_at=datetime.fromisoformat(row["completed_at"]),
+        rows = connection.execute(
+            """
+            SELECT id, run_id, role, content, status, created_at
+            FROM chat_log
+            WHERE user_id = ? AND conversation_id = ?
+            ORDER BY id ASC
+            """,
+            (user_id, conversation_id),
+        ).fetchall()
+    runs: dict[str, list[sqlite3.Row]] = {}
+    for row in rows:
+        runs.setdefault(str(row["run_id"]), []).append(row)
+    turns: list[HistoryTurn] = []
+    for run_rows in runs.values():
+        user_row = next(
+            (
+                row
+                for row in run_rows
+                if row["role"] == "user" and _is_user_text(decode_content(row["content"]))
+            ),
+            None,
         )
-        for row in rows
-    ]
+        terminal_row = run_rows[-1]
+        terminal_content = decode_content(terminal_row["content"])
+        if (
+            user_row is None
+            or terminal_row["role"] != "assistant"
+            or terminal_row["status"] != "completed"
+            or not _is_text_block(terminal_content)
+            or (
+                after_assistant_message_id is not None
+                and int(terminal_row["id"]) <= after_assistant_message_id
+            )
+        ):
+            continue
+        turns.append(
+            HistoryTurn(
+                user_message_id=int(user_row["id"]),
+                assistant_message_id=int(terminal_row["id"]),
+                user_content=_display_text(decode_content(user_row["content"])),
+                assistant_content=_display_text(terminal_content),
+                completed_at=datetime.fromisoformat(terminal_row["created_at"]),
+            )
+        )
+    return sorted(turns, key=lambda turn: turn.assistant_message_id)[:limit]
 
 
 def delete_conversation(
@@ -567,50 +688,48 @@ def utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds")
 
 
-def merge_cards(previous: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
-    merged = {**previous, **current}
-    merged["reasoning"] = merge_card_items(
-        previous.get("reasoning"), current.get("reasoning"), identity_key="reasoning_id"
-    )
-    merged["tools"] = merge_card_items(
-        previous.get("tools"), current.get("tools"), identity_key="action_id"
-    )
-    merged["subagents"] = merge_card_items(
-        previous.get("subagents"), current.get("subagents"), identity_key="delegation_id"
-    )
-    return merged
+def decode_content(content: str) -> str | list[dict[str, Any]]:
+    try:
+        decoded = json.loads(content)
+    except (TypeError, json.JSONDecodeError):
+        return content
+    if isinstance(decoded, list) and all(isinstance(item, dict) for item in decoded):
+        return decoded
+    return content
 
 
-def merge_card_items(
-    previous: Any,
-    current: Any,
-    *,
-    identity_key: str,
-) -> list[dict[str, Any]]:
-    previous = previous if isinstance(previous, list) else []
-    current = current if isinstance(current, list) else []
-    merged = [dict(item) for item in previous if isinstance(item, dict)]
-    positions = {
-        str(item.get(identity_key)): index
-        for index, item in enumerate(merged)
-        if item.get(identity_key)
-    }
-    for item in current:
-        if not isinstance(item, dict):
-            continue
-        item = dict(item)
-        identity = str(item.get(identity_key) or "")
-        if not identity or identity not in positions:
-            positions[identity] = len(merged)
-            merged.append(item)
-            continue
-        previous_item = merged[positions[identity]]
-        if identity_key == "delegation_id":
-            previous_item = {
-                key: value
-                for key, value in previous_item.items()
-                if key != "timeline"
-            }
-            item.pop("timeline", None)
-        merged[positions[identity]] = {**previous_item, **item}
-    return merged
+def _parse_meta(value: str | None) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _is_text_block(content: str | list[dict[str, Any]]) -> bool:
+    return (
+        isinstance(content, list)
+        and len(content) == 1
+        and content[0].get("type") == "text"
+    )
+
+
+def _is_user_text(content: str | list[dict[str, Any]]) -> bool:
+    return isinstance(content, str) or _is_text_block(content)
+
+
+def _display_text(content: str | list[dict[str, Any]]) -> str:
+    if isinstance(content, str):
+        return content
+    text = [str(block.get("text") or "") for block in content if block.get("type") == "text"]
+    if text:
+        return "".join(text)
+    tool = next((block for block in content if block.get("type") == "tool_use"), None)
+    if isinstance(tool, dict):
+        return f"调用工具：{tool.get('name') or ''}"
+    result = next((block for block in content if block.get("type") == "tool_result"), None)
+    if isinstance(result, dict):
+        return str(result.get("content") or "")
+    return ""

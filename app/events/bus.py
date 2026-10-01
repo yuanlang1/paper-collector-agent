@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from app.events.adapter import event_data, sse_name_for
+from app.events.adapter import sse_name_for
 from app.events.delivery import EventContext, EventDelivery, TerminalUpdate
 from app.events.errors import EventPublicationError
 from app.events.models import Event, EventBase, RunTerminalEvent
@@ -45,13 +45,11 @@ class RootEventDispatcher:
         context: EventContext,
         persistence: PersistenceHandler,
         broadcaster: IpcEventBroadcaster,
-        card_meta=None,
         terminal_meta: dict[str, object] | None = None,
     ) -> None:
         self._context = context
         self._persistence = persistence
         self._broadcaster = broadcaster
-        self._card_meta = card_meta
         self._terminal_meta = terminal_meta or {}
         self._lock = asyncio.Lock()
 
@@ -68,14 +66,7 @@ class RootEventDispatcher:
                             "run_id": typed_event.run_id,
                             **dict(typed_event.payload),
                         },
-                        card_meta={
-                            **(
-                                self._card_meta.snapshot(typed_event.payload)
-                                if self._card_meta is not None
-                                else {"schema_version": 1, "card": {}}
-                            ),
-                            **self._terminal_meta,
-                        },
+                        extra_meta=dict(self._terminal_meta),
                     ),
                 },
             )
@@ -86,13 +77,4 @@ class RootEventDispatcher:
         )
         async with self._lock:
             await self._persistence(delivery)
-            if self._card_meta is not None and delivery.persisted is not None:
-                self._card_meta.observe(
-                    {
-                        "event": delivery.sse_name,
-                        "data": event_data(typed_event),
-                        "sequence": delivery.persisted.sequence,
-                        "timestamp": typed_event.ts,
-                    },
-                )
             await self._broadcaster(delivery)
