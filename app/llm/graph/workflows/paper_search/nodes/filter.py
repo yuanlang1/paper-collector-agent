@@ -14,7 +14,7 @@ from app.llm.graph.workflows.paper_search_schemas import (
     PromptUnderstandingArgs,
     SearchTagArgs,
 )
-from app.llm.graph.workflows.paper_search.nodes.paper_cache import (
+from app.llm.graph.workflows.paper_search.paper_cache import (
     PaperCacheStore,
 )
 
@@ -349,10 +349,7 @@ class NormalizeDeduplicateFilterNode:
         state: Mapping[str, Any],
     ) -> dict[str, Any]:
         try:
-            run_id = state.get("run_id")
-
-            if not isinstance(run_id, str) or not run_id:
-                raise ValueError("缺少有效 run_id。")
+            child_run_id = state["child_run_id"]
 
             understanding = PromptUnderstandingArgs.model_validate(
                 state.get("query_understanding")
@@ -649,12 +646,12 @@ class NormalizeDeduplicateFilterNode:
                     )
 
             existing_artifact = await self.artifact_store.write_json(
-                run_id=run_id,
+                run_id=child_run_id,
                 step_key="find_existing_papers",
                 source="database",
                 kind="existing_paper_manifest_json",
                 payload={
-                    "run_id": run_id,
+                    "run_id": child_run_id,
                     "step_key": "find_existing_papers",
                     "papers": existing_papers,
                 },
@@ -689,7 +686,7 @@ class NormalizeDeduplicateFilterNode:
                     )
                 )
             quality_artifact = await self.artifact_store.write_json(
-                run_id=run_id,
+                run_id=child_run_id,
                 step_key="search_quality",
                 source="filter",
                 kind="search_quality_report_json",
@@ -700,7 +697,7 @@ class NormalizeDeduplicateFilterNode:
             )
 
             manifest = {
-                "run_id": run_id,
+                "run_id": child_run_id,
                 "step_key": "normalize_deduplicate_filter",
                 "paper_info_schema": "paper_info_v1",
                 "papers": new_papers,
@@ -716,7 +713,7 @@ class NormalizeDeduplicateFilterNode:
             }
 
             artifact = await self.artifact_store.write_json(
-                run_id=run_id,
+                run_id=child_run_id,
                 step_key="normalize_deduplicate_filter",
                 source="normalized",
                 kind="paper_info_manifest_json",

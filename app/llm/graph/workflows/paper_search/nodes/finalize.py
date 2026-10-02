@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Any
 
+from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.main.nodes.tool import build_action_result_update
+
+
+logger = logging.getLogger(__name__)
 
 
 async def finalize_paper_search_node(
@@ -13,14 +18,19 @@ async def finalize_paper_search_node(
     if not isinstance(call, Mapping):
         raise RuntimeError("paper search finalized without an active tool call")
 
+    try:
+        await LocalArtifactStore().delete_run_directories(
+            (state["child_run_id"],)
+        )
+    except OSError:
+        logger.warning("Paper-search artifact cleanup failed.", exc_info=True)
+
     stage = str(state.get("stage"))
     progress = state.get("progress") or {}
     status = {
         "completed": "success",
         "partial_failed": "partial",
     }.get(stage, "error")
-    if stage == "blocked" and state.get("confirmation_decision") == "rejected":
-        status = "rejected"
 
     if stage == "completed":
         summary = (
@@ -28,19 +38,10 @@ async def finalize_paper_search_node(
             f"保存关系 {progress.get('persistence_saved', 0)} 条。"
         )
     elif stage == "partial_failed":
-        summary = "论文检索部分完成，请查看警告与结果 artifact。"
+        summary = "论文检索部分完成，请查看警告与结果。"
     else:
         summary = "论文检索未完成。"
 
-    artifact_refs = list(
-        dict.fromkeys(
-            value
-            for key, value in state.items()
-            if key.endswith("_artifact_ref")
-            and isinstance(value, str)
-            and value.startswith("artifact://")
-        )
-    )
     return build_action_result_update(
         call=call,
         status=status,
@@ -64,7 +65,7 @@ async def finalize_paper_search_node(
             "remote_task_state": state.get("remote_task_state"),
             "task_status_update_error": state.get("task_status_update_error"),
         },
-        artifact_refs=artifact_refs,
+        artifact_refs=[],
         retryable=stage == "partial_failed",
         error_code=(None if stage in {"completed", "partial_failed"} else stage),
         error_message=state.get("error"),

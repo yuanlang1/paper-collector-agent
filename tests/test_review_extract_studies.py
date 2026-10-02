@@ -163,6 +163,7 @@ class ExtractStudiesNodeTests(unittest.IsolatedAsyncioTestCase):
         return {
             "stage": "extracting_studies",
             "run_id": "review-test",
+            "child_run_id": "child-review-test",
             "task_id": 1,
             "topic": "Topic",
             "language": "en",
@@ -194,7 +195,7 @@ class ExtractStudiesNodeTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             store = LocalArtifactStore(base_dir=directory)
             update = await LoadTaskCorpusNode(client=_PaperClient(), artifact_store=store,)(
-                {"stage": "loading_corpus", "run_id": "review-test", "task_id": 1, "warnings": [],}
+                {"stage": "loading_corpus", "run_id": "review-test", "child_run_id": "child-review-test", "task_id": 1, "warnings": [],}
             )
 
             payload = await store.read_json_uri(update["corpus_artifact_ref"])
@@ -465,10 +466,12 @@ class ExtractStudiesNodeTests(unittest.IsolatedAsyncioTestCase):
                 {
                     **update,
                     "active_tool_call": {"id": "call-1", "name": "task_review"},
+                    "child_run_id": "child-review-test",
                     "task_id": 1,
                 }
             )
-            self.assertIn(report_ref, result["last_action_result"]["artifact_refs"])
+            self.assertEqual(result["last_action_result"]["artifact_refs"], [])
+            self.assertNotIn("artifact://", str(result["last_action_result"]))
 
 
 if __name__ == "__main__":

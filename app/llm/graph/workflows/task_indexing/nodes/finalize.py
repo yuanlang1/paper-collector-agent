@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Any
 
+from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.main.nodes.tool import build_action_result_update
+
+
+logger = logging.getLogger(__name__)
 
 
 async def finalize_task_indexing_node(
@@ -12,6 +17,13 @@ async def finalize_task_indexing_node(
     call = state.get("active_tool_call")
     if not isinstance(call, Mapping):
         raise RuntimeError("task indexing finalized without an active tool call")
+
+    try:
+        await LocalArtifactStore().delete_run_directories(
+            (state["child_run_id"],)
+        )
+    except OSError:
+        logger.warning("Task-indexing artifact cleanup failed.", exc_info=True)
 
     data = {
         "task_id": state.get("task_id"),

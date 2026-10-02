@@ -54,9 +54,7 @@ class CreatePaperSearchTaskNode:
         ):
             raise ValueError("missing recommendation manifest artifact")
 
-        run_id = state.get("run_id")
-        if not isinstance(run_id, str) or not run_id:
-            raise ValueError("missing valid run_id")
+        child_run_id = state["child_run_id"]
 
         base_dir = self.artifact_store.base_dir.resolve()
         manifest_path = (
@@ -96,7 +94,7 @@ class CreatePaperSearchTaskNode:
         manifest["step_key"] = "bind_recommendations_to_task"
         manifest["search_task_id"] = task_id
         artifact = await self.artifact_store.write_json(
-            run_id=run_id,
+            run_id=child_run_id,
             step_key="bind_recommendations_to_task",
             source="task_service",
             kind="task_bound_recommendation_manifest_json",

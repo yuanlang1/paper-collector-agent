@@ -16,7 +16,6 @@ from langgraph.errors import GraphInterrupt
 from app.history import chat_log, stream_events, transactions
 from app.history.sqlite import HistoryDatabase
 from app.history.stream_events import AgentStreamEvent
-from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.provider import ChatClient
 from app.memory.consolidation import Consolidator
 from app.memory.extraction import LangChainMemoryExtractor
@@ -57,12 +56,10 @@ class AgentRuntime:
         agent_service: AgentService,
         history_db: HistoryDatabase,
         db_factory: Callable[[], DbSession] = SessionLocal,
-        artifact_store: LocalArtifactStore | None = None,
     ) -> None:
         self.agent_service = agent_service
         self.history_db = history_db
         self.db_factory = db_factory
-        self.artifact_store = artifact_store or LocalArtifactStore()
         self.broadcaster = IpcEventBroadcaster(history_db)
         self._active_consolidation_scopes: set[tuple[str, str]] = set()
         self._active_consolidation_tasks: set[asyncio.Task[None]] = set()
@@ -216,16 +213,7 @@ class AgentRuntime:
         conversation_id: str,
         db: DbSession,
     ) -> None:
-        async def delete_artifacts() -> None:
-            run_ids = await self.history_db.run(
-                chat_log.list_run_ids,
-                user_id=user_id,
-                conversation_id=conversation_id,
-            )
-            await self.artifact_store.delete_run_directories(run_ids)
-
         for resource, operation in (
-            ("artifacts", delete_artifacts()),
             (
                 "checkpoints",
                 self.agent_service.checkpointer.adelete_thread(conversation_id),
@@ -759,7 +747,7 @@ def initialize_agent_runtime(
     _agent_runtime = AgentRuntime(
         agent_service=AgentService(
             checkpointer=checkpointer,
-            artifact_access_service=ArtifactAccessService(history_db),
+            artifact_access_service=ArtifactAccessService(),
         ),
         history_db=history_db,
     )

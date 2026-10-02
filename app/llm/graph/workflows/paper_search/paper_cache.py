@@ -33,8 +33,12 @@ def identity_keys(paper_info: dict[str, Any]) -> list[str]:
         first_author = _normalize_text(authors[0]) if authors else ""
     else:
         first_author = _normalize_text(
-            re.split(r"\s*(?:;|\band\b)\s*", str(authors or ""), maxsplit=1,
-                     flags=re.IGNORECASE)[0]
+            re.split(
+                r"\s*(?:;|\band\b)\s*",
+                str(authors or ""),
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )[0]
         )
     if title and first_author:
         keys.append(f"title_author:{title}|{first_author}")

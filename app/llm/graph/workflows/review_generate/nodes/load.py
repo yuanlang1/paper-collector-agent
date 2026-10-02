@@ -47,11 +47,8 @@ class LoadTaskCorpusNode:
                 "load_task_corpus called in invalid stage"
             )
 
-        run_id = state.get("run_id")
+        child_run_id = state["child_run_id"]
         task_id = state.get("task_id")
-
-        if not isinstance(run_id, str) or not run_id.strip():
-            return failed("missing valid run_id")
 
         if (
             not isinstance(task_id, int)
@@ -200,7 +197,7 @@ class LoadTaskCorpusNode:
         ]
 
         artifact = await self.store.write_json(
-            run_id = run_id,
+            run_id = child_run_id,
             step_key = "load_task_corpus",
             source = "task_review",
             kind = "task_review_corpus_json",

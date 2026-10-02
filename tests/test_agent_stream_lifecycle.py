@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sqlite3
 import tempfile
 import unittest
@@ -243,8 +244,10 @@ class _BlockingSubagentGraph:
     def __init__(self) -> None:
         self.progress_published = asyncio.Event()
         self.release = asyncio.Event()
+        self.state = None
 
     async def ainvoke(self, _state, *, config):
+        self.state = dict(_state)
         event_context = current_event_context().scoped(node="test_progress")
         await event_context.bus.publish(
             event_context.event(
@@ -266,6 +269,21 @@ class _BlockingSubagentGraph:
                 "status": "success",
                 "summary": "检索完成",
                 "data": {"count": 1},
+            },
+        }
+
+
+class _CapturingSubagentGraph:
+    def __init__(self) -> None:
+        self.states: list[dict] = []
+
+    async def ainvoke(self, state, *, config):
+        self.states.append(dict(state))
+        return {
+            "last_action_result": {
+                "status": "success",
+                "summary": "完成",
+                "data": {},
             },
         }
 
@@ -944,6 +962,60 @@ class AgentServiceStreamTests(unittest.TestCase):
 
 
 class SubAgentNodeEventBusTests(unittest.TestCase):
+    def test_all_subgraphs_receive_distinct_child_run_ids(self) -> None:
+        async def scenario() -> None:
+            workflows = ("paper_search", "task_indexing", "task_review")
+            graphs = {workflow: _CapturingSubagentGraph() for workflow in workflows}
+            registry = SubAgentRegistry(
+                tuple(
+                    SubAgentRuntime(
+                        spec=SubAgentSpec(
+                            name=f"{workflow}_agent",
+                            description="test",
+                            input_model=BaseModel,
+                        ),
+                        graph=graphs[workflow],
+                        error_code="TEST_SUBAGENT_FAILED",
+                        failure_summary="test failed",
+                        stream=SubAgentStreamSpec(workflow=workflow),
+                    )
+                    for workflow in workflows
+                )
+            )
+            node = SubAgentNode(subagent_registry=registry)
+            with bind_event_context(EventContext(bus=EventBus(), run_id="run-1")):
+                for workflow in workflows:
+                    state = {
+                        "run_id": "run-1",
+                        "active_tool_call": {
+                            "id": f"delegation-{workflow}",
+                            "name": f"{workflow}_agent",
+                            "kind": "subagent",
+                        },
+                    }
+                    await node(state, {})
+                    self.assertNotIn("child_run_id", state)
+
+            child_run_ids = [
+                graphs[workflow].states[0]["child_run_id"]
+                for workflow in workflows
+            ]
+            self.assertEqual(len(set(child_run_ids)), len(workflows))
+            self.assertTrue(
+                all(
+                    re.fullmatch(r"child_[0-9a-f]{16}_[0-9a-f]{32}", run_id)
+                    for run_id in child_run_ids
+                )
+            )
+            self.assertTrue(
+                all(
+                    graphs[workflow].states[0]["run_id"] == "run-1"
+                    for workflow in workflows
+                )
+            )
+
+        asyncio.run(scenario())
+
     def test_child_bus_publishes_progress_before_parent_continues(self) -> None:
         async def scenario() -> None:
             graph = _BlockingSubagentGraph()
@@ -965,6 +1037,7 @@ class SubAgentNodeEventBusTests(unittest.TestCase):
             parent_bus.subscribe(lambda event: _append(events, event))
             node = SubAgentNode(subagent_registry=registry)
             state = {
+                "run_id": "run-1",
                 "active_tool_call": {
                     "id": "delegation-1",
                     "name": "paper_search_agent",
@@ -988,9 +1061,19 @@ class SubAgentNodeEventBusTests(unittest.TestCase):
                 ))
                 started = events[0].payload
                 self.assertEqual(started["subagent"], "paper_search_agent")
+                self.assertEqual(started["parent_run_id"], "run-1")
                 self.assertNotIn("name", started)
                 self.assertNotIn("progress", started)
                 self.assertEqual(started["progress_percent"], 0)
+                self.assertEqual(graph.state["run_id"], "run-1")
+                self.assertRegex(
+                    graph.state["child_run_id"],
+                    r"^child_[0-9a-f]{16}_[0-9a-f]{32}$",
+                )
+                self.assertEqual(
+                    started["child_run_id"],
+                    graph.state["child_run_id"],
+                )
 
                 graph.release.set()
                 result = await task

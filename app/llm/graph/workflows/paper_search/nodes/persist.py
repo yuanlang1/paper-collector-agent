@@ -15,7 +15,7 @@ from app.infrastructure.grpc.venue_service_grpc_client import (
 )
 from app.infrastructure.oss import normalize_pdf_sha256
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.graph.workflows.paper_search.nodes.paper_cache import (
+from app.llm.graph.workflows.paper_search.paper_cache import (
     PaperCacheStore,
 )
 from app.llm.graph.workflows.paper_search.nodes.venue import (
@@ -243,13 +243,11 @@ class PersistRecommendedPapersNode:
 
     async def __call__(self, state: Mapping[str, Any]) -> dict[str, Any]:
         try:
-            run_id = state.get("run_id")
+            child_run_id = state["child_run_id"]
             task_id = state.get("paper_service_task_id")
             artifact_uri = state.get(
                 "task_bound_recommendation_manifest_artifact_ref"
             ) or state.get("recommendation_manifest_artifact_ref")
-            if not isinstance(run_id, str) or not run_id:
-                raise ValueError("missing valid run_id")
             if not _is_valid_id(task_id):
                 raise ValueError("missing valid paper_service_task_id")
             if not isinstance(artifact_uri, str) or not artifact_uri.startswith(
@@ -266,7 +264,7 @@ class PersistRecommendedPapersNode:
             entries: list[dict[str, Any]] = []
             invalid_count = 0
             for index, candidate in enumerate(papers):
-                client_key = f"{run_id}:{index}"
+                client_key = f"{child_run_id}:{index}"
                 validated = self._validate_entry(candidate, task_id)
                 title = (
                     str((candidate.get("paper_info") or {}).get("title") or "")
@@ -425,12 +423,12 @@ class PersistRecommendedPapersNode:
             )
             failure_count = len(outcomes) - persisted_count
             artifact = await self.artifact_store.write_json(
-                run_id=run_id,
+                run_id=child_run_id,
                 step_key="persist_recommended_papers",
                 source="paper_service",
                 kind="persisted_papers_manifest_json",
                 payload={
-                    "run_id": run_id,
+                    "run_id": child_run_id,
                     "step_key": "persist_recommended_papers",
                     "input_manifest": artifact_uri,
                     "results": outcomes,

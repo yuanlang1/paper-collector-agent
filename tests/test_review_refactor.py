@@ -183,6 +183,7 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
         self.store = LocalArtifactStore(self.directory.name)
         self.state = {
             "run_id": "review-test",
+            "child_run_id": "child-review-test",
             "task_id": 1,
             "topic": "Conditional outcomes",
             "language": "en",
@@ -894,6 +895,7 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
         update = await initialize_review_node(
             {
                 "run_id": "review-test",
+                "child_run_id": "child-review-test",
                 "active_tool_call": {
                     "args": {
                         "task_id": 1,

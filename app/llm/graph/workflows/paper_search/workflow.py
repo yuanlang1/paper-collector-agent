@@ -1,29 +1,19 @@
 from langgraph.graph import END, START, StateGraph
 
 from app.llm.graph.workflows.paper_search.nodes.abstract_enrich import AbstractEnrichNode
-from app.llm.graph.workflows.paper_search.nodes.build_search_tag import BuildSearchTagNode
-from app.llm.graph.workflows.paper_search.nodes.cleanup import CleanupDownloadedPdfsNode
-from app.llm.graph.workflows.paper_search.nodes.confirm import paper_search_confirm_node
 from app.llm.graph.workflows.paper_search.nodes.create_task import CreatePaperSearchTaskNode
 from app.llm.graph.workflows.paper_search.nodes.crossref_enrich import CrossrefMetadataEnrichmentNode
 from app.llm.graph.workflows.paper_search.nodes.dowload_pdf import PdfDownloadNode
 from app.llm.graph.workflows.paper_search.nodes.enrich import PaperEnrichmentNode
+from app.llm.graph.workflows.paper_search.nodes.finalize_pdfs import FinalizePdfsNode
 from app.llm.graph.workflows.paper_search.nodes.filter import NormalizeDeduplicateFilterNode
-from app.llm.graph.workflows.paper_search.nodes.finalize_search import (
-    finalize_source_search_node,
-)
-from app.llm.graph.workflows.paper_search.nodes.generate_queries import BuildSourceQueryPlanNode
 from app.llm.graph.workflows.paper_search.nodes.initialize import initialize_paper_search_node
-from app.llm.graph.workflows.paper_search.nodes.intent import IntentUnderstandingNode
 from app.llm.graph.workflows.paper_search.nodes.finalize import finalize_paper_search_node
+from app.llm.graph.workflows.paper_search.nodes.plan_search import PlanSearchNode
 from app.llm.graph.workflows.paper_search.nodes.persist import PersistRecommendedPapersNode
 from app.llm.graph.workflows.paper_search.nodes.recommend import RecommendationNode
-from app.llm.graph.workflows.paper_search.nodes.save_oss import (
-    SavePersistedPdfsToOssNode,
-)
-from app.llm.graph.workflows.paper_search.nodes.search_review import SearchReviewBrainNode
-from app.llm.graph.workflows.paper_search.nodes.source_search import GoogleScholarSearchNode
-from app.llm.graph.workflows.paper_search.nodes.supplemental_search import SupplementalSearchPlannerNode
+from app.llm.graph.workflows.paper_search.nodes.review import ReviewNode
+from app.llm.graph.workflows.paper_search.nodes.search import SearchNode
 from app.llm.graph.workflows.paper_search.nodes.update_task_status import UpdatePaperSearchTaskStatusNode
 from app.llm.graph.workflows.paper_search.nodes.venue import VenueResolutionNode
 from app.llm.graph.workflows.paper_search.state import PaperSearchWorkflowState
@@ -42,14 +32,14 @@ def _route(stage: str, target: str):
 def _route_paths(target: str) -> dict[str, str]:
     return {
         target: target,
-        "cleanup_downloaded_pdfs": "cleanup_downloaded_pdfs",
+        "finalize_pdfs": "finalize_pdfs",
         "finalize_result": "finalize_result",
     }
 
 
 def _terminal_target(state: PaperSearchWorkflowState) -> str:
     if state.get("downloaded_pdf_paths"):
-        return "cleanup_downloaded_pdfs"
+        return "finalize_pdfs"
 
     task_id = state.get("paper_service_task_id")
     if (
@@ -71,23 +61,13 @@ def _terminal_target(state: PaperSearchWorkflowState) -> str:
             }
         )
     ):
-        return "cleanup_downloaded_pdfs"
+        return "finalize_pdfs"
     return "finalize_result"
 
 
-def _route_after_search_review(state: PaperSearchWorkflowState) -> str:
-    if state.get("stage") == "planning_supplemental_search":
-        return "supplemental_search"
-    if state.get("stage") == "enriching":
-        return "enrich"
-    return _terminal_target(state)
-
-
-def _route_after_supplemental_search(
-    state: PaperSearchWorkflowState,
-) -> str:
+def _route_after_review(state: PaperSearchWorkflowState) -> str:
     if state.get("stage") == "searching":
-        return "search_google"
+        return "search"
     if state.get("stage") == "enriching":
         return "enrich"
     return _terminal_target(state)
@@ -98,7 +78,6 @@ def build_paper_search_workflow(
     task_client=None,
     chat: ChatClient | None = None,
     checkpointer=None,
-    skip_confirmation: bool = False,
     node_overrides: dict[str, object] | None = None,
 ):
     node_overrides = node_overrides or {}
@@ -115,31 +94,17 @@ def build_paper_search_workflow(
         "initialize",
         node("initialize", initialize_paper_search_node),
     )
-    builder.add_node("intent_understanding", node("intent_understanding", IntentUnderstandingNode(chat=chat)))
     builder.add_node(
-        "build_search_tag",
+        "plan_search",
         node(
-            "build_search_tag",
-            BuildSearchTagNode(
-                chat=chat,
-                skip_confirmation=skip_confirmation,
-            ),
+            "plan_search",
+            PlanSearchNode(chat=chat),
         ),
     )
-    builder.add_node("confirm", node("confirm", paper_search_confirm_node))
     builder.add_node("create_task", node("create_task", CreatePaperSearchTaskNode(client=task_client)))
-    builder.add_node("generate_queries", node("generate_queries", BuildSourceQueryPlanNode(chat=chat)))
-    builder.add_node("search_google", node("search_google", GoogleScholarSearchNode()))
-    builder.add_node(
-        "finalize_source_search",
-        node(
-            "finalize_source_search",
-            finalize_source_search_node,
-        ),
-    )
+    builder.add_node("search", node("search", SearchNode()))
     builder.add_node("filter", node("filter", NormalizeDeduplicateFilterNode()))
-    builder.add_node("search_review", node("search_review", SearchReviewBrainNode(chat=chat)))
-    builder.add_node("supplemental_search", node("supplemental_search", SupplementalSearchPlannerNode()))
+    builder.add_node("review", node("review", ReviewNode(chat=chat)))
     builder.add_node("enrich", node("enrich", PaperEnrichmentNode()))
     builder.add_node("crossref_enrich", node("crossref_enrich", CrossrefMetadataEnrichmentNode()))
     builder.add_node("venue", node("venue", VenueResolutionNode(chat=chat)))
@@ -148,14 +113,10 @@ def build_paper_search_workflow(
     builder.add_node("recommend", node("recommend", RecommendationNode(chat=chat)))
     builder.add_node("persist", node("persist", PersistRecommendedPapersNode()))
     builder.add_node(
-        "save_pdfs_to_oss",
-        node("save_pdfs_to_oss", SavePersistedPdfsToOssNode()),
-    )
-    builder.add_node(
-        "cleanup_downloaded_pdfs",
+        "finalize_pdfs",
         node(
-            "cleanup_downloaded_pdfs",
-            CleanupDownloadedPdfsNode(),
+            "finalize_pdfs",
+            FinalizePdfsNode(),
         ),
     )
     builder.add_node(
@@ -174,64 +135,31 @@ def build_paper_search_workflow(
     builder.add_edge(START, "initialize")
     builder.add_conditional_edges(
         "initialize",
-        _route("intent_understanding", "intent_understanding"),
-        _route_paths("intent_understanding"),
+        _route("preparing_search", "plan_search"),
+        _route_paths("plan_search"),
     )
     builder.add_conditional_edges(
-        "intent_understanding",
-        _route("building_search_tag", "build_search_tag"),
-        _route_paths("build_search_tag"),
+        "plan_search",
+        _route("searching", "search"),
+        _route_paths("search"),
     )
-    if skip_confirmation:
-        builder.add_conditional_edges(
-            "build_search_tag",
-            _route("generating_source_queries", "generate_queries"),
-            _route_paths("generate_queries"),
-        )
-    else:
-        builder.add_conditional_edges(
-            "build_search_tag",
-            _route("awaiting_confirmation", "confirm"),
-            _route_paths("confirm"),
-        )
-        builder.add_conditional_edges(
-            "confirm",
-            _route("generating_source_queries", "generate_queries"),
-            _route_paths("generate_queries"),
-        )
     builder.add_conditional_edges(
-        "generate_queries",
-        _route("searching", "search_google"),
-        _route_paths("search_google"),
-    )
-    builder.add_edge("search_google", "finalize_source_search")
-    builder.add_conditional_edges(
-        "finalize_source_search",
+        "search",
         _route("normalizing", "filter"),
         _route_paths("filter"),
     )
     builder.add_conditional_edges(
         "filter",
-        _route("reviewing_search", "search_review"),
-        _route_paths("search_review"),
+        _route("reviewing_search", "review"),
+        _route_paths("review"),
     )
     builder.add_conditional_edges(
-        "search_review",
-        _route_after_search_review,
+        "review",
+        _route_after_review,
         {
-            "supplemental_search": "supplemental_search",
+            "search": "search",
             "enrich": "enrich",
-            "cleanup_downloaded_pdfs": "cleanup_downloaded_pdfs",
-            "finalize_result": "finalize_result",
-        },
-    )
-    builder.add_conditional_edges(
-        "supplemental_search",
-        _route_after_supplemental_search,
-        {
-            "search_google": "search_google",
-            "enrich": "enrich",
-            "cleanup_downloaded_pdfs": "cleanup_downloaded_pdfs",
+            "finalize_pdfs": "finalize_pdfs",
             "finalize_result": "finalize_result",
         },
     )
@@ -270,9 +198,8 @@ def build_paper_search_workflow(
         _route("persisting_papers", "persist"),
         _route_paths("persist"),
     )
-    builder.add_edge("persist", "save_pdfs_to_oss")
-    builder.add_edge("save_pdfs_to_oss", "cleanup_downloaded_pdfs")
-    builder.add_edge("cleanup_downloaded_pdfs", "update_task_status")
+    builder.add_edge("persist", "finalize_pdfs")
+    builder.add_edge("finalize_pdfs", "update_task_status")
     builder.add_edge("update_task_status", "finalize_result")
     builder.add_edge("finalize_result", END)
     return builder.compile(checkpointer=checkpointer)

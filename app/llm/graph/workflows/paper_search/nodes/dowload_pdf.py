@@ -71,14 +71,14 @@ class PdfDownloadNode:
     async def _download_one(
         self,
         paper_info: dict[str, Any],
-        run_id: str,
+        child_run_id: str,
     ) -> dict[str, Any]:
         result = await DOWNLOAD_FILE_TOOL.fn(
             {
                 "url": str(paper_info["pdf_url"]),
                 "save_dir": (
                     f"{LIBRARY_SAVE_DIR}/"
-                    f"{_safe_filename_part(run_id, max_length=120)}"
+                    f"{_safe_filename_part(child_run_id, max_length=120)}"
                 ),
                 "file_name": self._pdf_file_name(paper_info),
                 "expected_type": "pdf",
@@ -100,11 +100,8 @@ class PdfDownloadNode:
         downloaded_pdf_paths: list[str] = []
 
         try:
-            run_id = state.get("run_id")
+            child_run_id = state["child_run_id"]
             artifact_uri = state.get("venue_manifest_artifact_ref")
-
-            if not isinstance(run_id, str) or not run_id:
-                raise ValueError("缺少有效 run_id。")
 
             if (
                 not isinstance(artifact_uri, str)
@@ -160,7 +157,7 @@ class PdfDownloadNode:
 
                 try:
                     file_name = self._pdf_file_name(paper_info)
-                    downloaded = await self._download_one(paper_info, run_id)
+                    downloaded = await self._download_one(paper_info, child_run_id)
                     downloaded_pdf_paths.append(downloaded["saved_path"])
 
                     paper_info["file_name"] = file_name
@@ -195,7 +192,7 @@ class PdfDownloadNode:
             manifest["step_key"] = "download_pdfs"
 
             artifact = await self.artifact_store.write_json(
-                run_id=run_id,
+                run_id=child_run_id,
                 step_key="download_pdfs",
                 source="pdf",
                 kind="paper_info_pdf_manifest_json",

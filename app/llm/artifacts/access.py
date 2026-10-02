@@ -7,8 +7,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
-from app.history import chat_log
-from app.history.sqlite import HistoryDatabase
 from app.llm.artifacts.store import ArtifactUriError, LocalArtifactStore
 
 
@@ -28,21 +26,18 @@ class ArtifactAccessError(ValueError):
 
 
 class ArtifactAccessService:
-    """Authorize and bound reads of locally stored JSON artifacts."""
+    """Bound reads of locally stored JSON artifacts."""
 
     def __init__(
         self,
-        history_db: HistoryDatabase,
         artifact_store: LocalArtifactStore | None = None,
     ) -> None:
-        self.history_db = history_db
         self.artifact_store = artifact_store or LocalArtifactStore()
 
     async def read(
         self,
         *,
         artifact_uri: str,
-        user_id: str,
         mode: ArtifactReadMode,
         start_line: int = 1,
         max_lines: int = 100,
@@ -57,10 +52,6 @@ class ArtifactAccessService:
             run_id, path = self.artifact_store.resolve_json_uri(artifact_uri)
         except ArtifactUriError as exc:
             raise ArtifactAccessError("artifact is unavailable") from exc
-
-        scope = await self.history_db.run(chat_log.get_run_scope, run_id)
-        if scope is None or scope.user_id != user_id:
-            raise ArtifactAccessError("artifact is unavailable")
 
         text = await asyncio.to_thread(self._read_text, path)
         result: dict[str, Any] = {

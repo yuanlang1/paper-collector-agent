@@ -10,15 +10,10 @@ from app.llm.graph.workflows.progress import (
 
 _PHASES = {
     "initialize": ("prepare", "准备检索"),
-    "intent_understanding": ("prepare", "理解检索需求"),
-    "build_search_tag": ("prepare", "准备检索条件"),
-    "confirm": ("prepare", "确认检索条件"),
-    "generate_queries": ("query_plan", "生成检索计划"),
-    "search_google": ("search", "Google Scholar 检索"),
-    "finalize_source_search": ("search", "汇总检索结果"),
+    "plan_search": ("prepare", "理解并生成检索计划"),
+    "search": ("search", "Google Scholar 检索"),
     "filter": ("normalize", "清洗检索结果"),
-    "search_review": ("review", "审核检索结果"),
-    "supplemental_search": ("search", "补充 Google Scholar 检索"),
+    "review": ("review", "审核结果并规划补充检索"),
     "enrich": ("enrich", "补充论文信息"),
     "crossref_enrich": ("enrich", "补充 Crossref 信息"),
     "venue": ("enrich", "解析期刊或会议"),
@@ -27,8 +22,7 @@ _PHASES = {
     "recommend": ("recommend", "推荐论文"),
     "create_task": ("persist", "创建检索任务"),
     "persist": ("persist", "保存论文"),
-    "save_pdfs_to_oss": ("persist", "上传 PDF"),
-    "cleanup_downloaded_pdfs": ("persist", "清理临时 PDF"),
+    "finalize_pdfs": ("persist", "上传并清理临时 PDF"),
     "update_task_status": ("persist", "同步任务状态"),
     "finalize_result": ("persist", "汇总检索结果"),
 }
@@ -64,7 +58,7 @@ def _data(
         "source_search_stats",
         state.get("source_search_stats"),
     )
-    if node_name == "search_google" and isinstance(source_stats, Mapping):
+    if node_name == "search" and isinstance(source_stats, Mapping):
         data["source"] = "Google Scholar"
         data["source_stats"] = source_stats.get("Google Scholar", {})
     return data

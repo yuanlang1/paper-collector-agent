@@ -71,6 +71,7 @@ class AbstractEnrichNodeTests(unittest.IsolatedAsyncioTestCase):
                 update = await node(
                     {
                         "run_id": RUN_ID,
+                        "child_run_id": f"child-{RUN_ID}",
                         "pdf_manifest_artifact_ref": artifact.artifact_uri,
                     }
                 )

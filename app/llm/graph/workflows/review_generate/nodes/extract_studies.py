@@ -263,7 +263,7 @@ class ExtractStudiesNode:
                 )
 
             artifact = await self.artifact_store.write_json(
-                run_id=state["run_id"],
+                run_id=state["child_run_id"],
                 step_key="extract_studies",
                 source="task_review",
                 kind="task_review_article_profiles_json",
@@ -541,7 +541,7 @@ class ExtractStudiesNode:
         reading_summary: dict[str, int],
     ) -> dict[str, Any]:
         report = await self.artifact_store.write_json(
-            run_id=state["run_id"],
+            run_id=state["child_run_id"],
             step_key="extract_studies",
             source="task_review",
             kind="task_review_study_extraction_report_json",

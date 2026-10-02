@@ -62,7 +62,6 @@ async def read_artifact_handler(
         raise RuntimeError("artifact 读取服务尚未初始化。")
     data = await context.artifact_access.read(
         artifact_uri=args.artifact_uri,
-        user_id=context.user_id,
         mode=args.mode,
         start_line=args.start_line,
         max_lines=args.max_lines,
@@ -79,7 +78,7 @@ async def read_artifact_handler(
 READ_ARTIFACT_TOOL = BaseTool(
     name="read_artifact",
     description=(
-        "按需读取当前用户可访问的 artifact:// JSON 文件。"
+        "按需读取可用的 artifact:// JSON 文件。"
         "仅使用真实工作流结果中的 URI；可查看摘要、行范围、JSON Pointer 或关键词匹配。"
     ),
     input_schema=ReadArtifactArgs.model_json_schema(),

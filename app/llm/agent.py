@@ -13,9 +13,6 @@ from app.llm.graph.main.native_tools import build_native_tool_schemas
 from app.llm.graph.main.nodes.memory import MemoryNode
 from app.llm.graph.main.nodes.solve import SolveNode
 from app.llm.graph.main.workflow import build_main_agent_workflow
-from app.llm.graph.workflows.paper_search.nodes.generate_queries import (
-    BuildSourceQueryPlanNode,
-)
 from app.llm.provider import ChatClient, ModelOptions
 from app.llm.tool_adapter import to_openai_tool_schemas
 from app.llm.tools.registry import build_tool_registry
@@ -54,9 +51,7 @@ class AgentService:
         self.tool_registry = build_tool_registry()
         self.chat = ChatClient(llm_config)
         if subagent_registry is None:
-            source_query_plan_node = BuildSourceQueryPlanNode(chat=self.chat)
             self.subagent_registry = build_default_subagent_registry(
-                source_query_plan_model=source_query_plan_node.model,
                 chat=self.chat,
             )
         else:

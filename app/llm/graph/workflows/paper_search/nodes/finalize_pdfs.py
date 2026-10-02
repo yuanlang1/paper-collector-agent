@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping
 from pathlib import Path
@@ -18,7 +19,7 @@ from app.llm.artifacts.store import LocalArtifactStore
 logger = logging.getLogger(__name__)
 
 
-class SavePersistedPdfsToOssNode:
+class FinalizePdfsNode:
     def __init__(
         self,
         *,
@@ -46,24 +47,22 @@ class SavePersistedPdfsToOssNode:
             return None
         if not path.is_file():
             return None
-
         return path, sha256
 
-    async def __call__(self, state: Mapping[str, Any]) -> dict[str, Any]:
+    async def _upload_pdfs_to_oss(self, state: Mapping[str, Any]) -> None:
         if not settings.OSS_ENABLED:
-            return {}
+            return
 
-        run_id = state.get("run_id")
+        child_run_id = state["child_run_id"]
         persisted_uri = state.get("persisted_papers_manifest_artifact_ref")
         recommendation_uri = state.get(
             "task_bound_recommendation_manifest_artifact_ref"
         ) or state.get("recommendation_manifest_artifact_ref")
         if (
-            not isinstance(run_id, str)
-            or not isinstance(persisted_uri, str)
+            not isinstance(persisted_uri, str)
             or not isinstance(recommendation_uri, str)
         ):
-            return {}
+            return
 
         try:
             persisted = await self.artifact_store.read_json_uri(persisted_uri)
@@ -72,17 +71,17 @@ class SavePersistedPdfsToOssNode:
             )
         except Exception as exc:
             logger.warning("Skipping OSS PDF upload: unable to read manifest: %s", exc)
-            return {}
+            return
 
         persisted_results = persisted.get("results")
         recommendation_papers = recommendation.get("papers")
         if not isinstance(persisted_results, list) or not isinstance(
             recommendation_papers, list
         ):
-            return {}
+            return
 
         papers_by_client_key = {
-            f"{run_id}:{index}": paper
+            f"{child_run_id}:{index}": paper
             for index, paper in enumerate(recommendation_papers)
             if isinstance(paper, dict)
         }
@@ -125,4 +124,55 @@ class SavePersistedPdfsToOssNode:
                     exc,
                 )
 
-        return {}
+    def _delete_downloaded_pdfs(self, paths: list[str]) -> int:
+        base_dir = self.artifact_store.base_dir.resolve()
+        deleted = 0
+        for value in paths:
+            path = Path(value).resolve()
+            path.relative_to(base_dir)
+            if path.exists():
+                path.unlink()
+                deleted += 1
+        return deleted
+
+    async def __call__(self, state: Mapping[str, Any]) -> dict[str, Any]:
+        try:
+            await self._upload_pdfs_to_oss(state)
+        finally:
+            paths = state.get("downloaded_pdf_paths") or []
+            try:
+                deleted = await asyncio.to_thread(
+                    self._delete_downloaded_pdfs,
+                    paths,
+                )
+            except (OSError, ValueError) as exc:
+                stage = state.get("stage")
+                status = state.get("status")
+                if stage == "completed":
+                    stage = "partial_failed"
+                if status == "completed":
+                    status = "partial_failed"
+                return {
+                    "stage": stage,
+                    "status": status,
+                    "degraded": True,
+                    "pdf_cleanup_error": str(exc),
+                    "progress": {
+                        **state.get("progress", {}),
+                        "pdf_files_deleted": 0,
+                    },
+                    "warnings": [
+                        *state.get("warnings", []),
+                        f"PDF cleanup failed: {exc}",
+                    ],
+                    "error": state.get("error") or f"PDF cleanup failed: {exc}",
+                }
+
+        return {
+            "downloaded_pdf_paths": [],
+            "pdf_cleanup_error": None,
+            "progress": {
+                **state.get("progress", {}),
+                "pdf_files_deleted": deleted,
+            },
+        }

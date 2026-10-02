@@ -1,46 +1,22 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
+
 from app.llm.provider import ChatClient
 
 if TYPE_CHECKING:
     from app.llm.subagents.registry import SubAgentRuntime
 
 
-PaperSearchSource = Literal["Google Scholar"]
-
-
-class PaperSearchConstraints(BaseModel):
-    year_from: int | None = Field(default=None, ge=1900, le=2100)
-    year_to: int | None = Field(default=None, ge=1900, le=2100)
-    sources: list[PaperSearchSource] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def validate_year_range(self) -> "PaperSearchConstraints":
-        if (self.year_from is None) != (self.year_to is None):
-            raise ValueError("year_from and year_to must be provided together")
-        if (
-            self.year_from is not None
-            and self.year_to is not None
-            and self.year_from > self.year_to
-        ):
-            raise ValueError("year_from must not be after year_to")
-        return self
-
-
 class PaperSearchDelegation(BaseModel):
     prompt: str = Field(min_length=1, max_length=2_000)
     objective: str = "检索、筛选、推荐并保存相关论文"
-    constraints: PaperSearchConstraints = Field(
-        default_factory=PaperSearchConstraints
-    )
+
 
 def build_paper_search_runtime(
     *,
-    source_query_plan_model: Any,
     chat: ChatClient,
 ) -> SubAgentRuntime:
     from app.llm.graph.workflows.paper_search.workflow import (
@@ -56,48 +32,11 @@ def build_paper_search_runtime(
             name="paper_search_agent",
             description="检索、补充检索、筛选、推荐并保存学术论文。",
             input_model=PaperSearchDelegation,
-            requires_confirmation=True,
+            requires_confirmation=False,
             display_name="论文检索子代理",
-            confirmation_summary="将通过 Google Scholar 检索、推荐并保存论文。",
         ),
-        graph=build_paper_search_workflow(
-            skip_confirmation=True,
-            chat=chat,
-            node_overrides={
-                "generate_queries": _source_query_plan_node(
-                    source_query_plan_model,
-                ),
-            },
-        ),
+        graph=build_paper_search_workflow(chat=chat),
         error_code="PAPER_SEARCH_SUBGRAPH_FAILED",
         failure_summary="论文检索工作流执行失败，未完成结果保存。",
         stream=SubAgentStreamSpec(workflow="paper_search"),
     )
-
-
-def _source_query_plan_node(model: Any):
-    from app.llm.graph.workflows.paper_search.nodes.generate_queries import (
-        BuildSourceQueryPlanNode,
-    )
-    from app.services.setting_service import (
-        default_source_limits,
-        source_pagination_settings,
-    )
-    async def generate_queries(state: Mapping[str, Any]) -> dict[str, Any]:
-        source_limits = state.get("paper_search_source_limits")
-        try:
-            pagination_settings = source_pagination_settings(
-                source_limits or default_source_limits()
-            )
-        except (TypeError, ValueError) as exc:
-            return {
-                "stage": "blocked",
-                "status": "blocked",
-                "error": f"论文检索来源数量配置无效：{exc}",
-            }
-        return await BuildSourceQueryPlanNode(
-            model=model,
-            pagination_settings=pagination_settings,
-        )(state)
-
-    return generate_queries

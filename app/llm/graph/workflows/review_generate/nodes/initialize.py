@@ -10,10 +10,6 @@ from app.llm.subagents.task_review import TaskReviewDelegation
 
 
 async def initialize_review_node(state: Mapping[str, Any],) -> dict[str, Any]:
-    run_id = state.get("run_id")
-    if not isinstance(run_id, str) or not run_id.strip():
-        return failed("missing valid run_id", warnings=[])
-
     call = state.get("active_tool_call")
     raw_request = call.get("args") if isinstance(call, Mapping) else None
     if not isinstance(raw_request, Mapping):

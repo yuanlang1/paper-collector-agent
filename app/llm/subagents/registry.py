@@ -88,7 +88,6 @@ class SubAgentRegistry:
 
 def build_default_subagent_registry(
     *,
-    source_query_plan_model: Any,
     chat: ChatClient,
 ) -> SubAgentRegistry:
     from app.llm.subagents.paper_search import build_paper_search_runtime
@@ -98,7 +97,6 @@ def build_default_subagent_registry(
     return SubAgentRegistry(
         (
             build_paper_search_runtime(
-                source_query_plan_model=source_query_plan_model,
                 chat=chat,
             ),
             build_task_indexing_runtime(),

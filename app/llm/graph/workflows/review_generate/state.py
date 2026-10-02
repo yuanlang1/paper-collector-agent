@@ -6,6 +6,7 @@ from langgraph.graph.message import add_messages
 
 class TaskReviewWorkflowState(TypedDict, total=False):
     run_id: str
+    child_run_id: str
     active_tool_call: dict[str, Any] | None
     messages: Annotated[list[BaseMessage], add_messages]
     last_action_result: dict[str, Any] | None

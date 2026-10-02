@@ -28,7 +28,7 @@ async def invoke(model, schema, prompt, payload):
 
 async def save(store, state, name, payload):
     artifact = await store.write_json(
-        run_id=state["run_id"],
+        run_id=state["child_run_id"],
         step_key=name,
         source="task_review",
         kind=f"task_review_{name}_json",

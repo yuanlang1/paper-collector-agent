@@ -240,10 +240,8 @@ class CrossrefMetadataEnrichmentNode:
         state: Mapping[str, Any],
     ) -> dict[str, Any]:
         try:
-            run_id = state.get("run_id")
+            child_run_id = state["child_run_id"]
             artifact_uri = state.get("enrichment_manifest_artifact_ref")
-            if not isinstance(run_id, str) or not run_id:
-                raise ValueError("Missing valid run_id.")
             if (
                 not isinstance(artifact_uri, str)
                 or not artifact_uri.startswith("artifact://")
@@ -303,7 +301,7 @@ class CrossrefMetadataEnrichmentNode:
             manifest["papers"] = papers
             manifest["step_key"] = "crossref_enrichment"
             artifact = await self.artifact_store.write_json(
-                run_id=run_id,
+                run_id=child_run_id,
                 step_key="crossref_enrichment",
                 source="crossref",
                 kind="paper_info_crossref_enriched_manifest_json",

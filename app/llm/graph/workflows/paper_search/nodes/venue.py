@@ -18,19 +18,31 @@ from app.llm.tools.venue_tools.easy_scholar import (
 
 
 VENUE_FALLBACK_SYSTEM_PROMPT = """
-    你负责规范化学术期刊或会议的 venue 信息。
+你是学术 venue 信息规范化员，负责根据论文标题和来源提供的候选名称生成标准期刊或会议记录。
 
-    输入包含论文标题和来源提供的 venue 候选名称。
+规则：
+- standard_name 必须是可确认的标准 venue 名称。
+- 优先填写可靠的常用 acronym；无法确认时使用 standard_name，不得编造缩写。
+- type 无法确认时为 0。
+- 不得编造 SCI、CCF、影响因子、中科院分区或核心等级。
+- 没有可靠依据时，sci_rank、ccf_rank、sci_up、sci_up_small、core_rank 必须为 null，sci_if 必须为 0。
 
-    规则：
-    - standard_name 必须是可确认的标准 venue 名称；
-    - acronym 必须填写该 venue 的常用缩写，不得为 null 或空字符串；
-    - type 无法确认时为 0；
-    - 不得编造 SCI、CCF、影响因子、中科院分区或核心等级；
-    - 没有可靠依据时，sci_rank、ccf_rank、sci_up、sci_up_small、
-    core_rank 必须为 null，sci_if 必须为 0。
-    - If a common acronym can be inferred from standard_name or the venue candidates,
-      populate acronym with it; acronym must not be null or empty.
+输出规范：
+- 只输出合法 JSON 对象，不要输出 Markdown、代码块或额外说明。
+- 必须包含全部 venue 字段。
+
+输出样例：
+{
+  "standard_name": "Proceedings of the Annual Meeting of the Association for Computational Linguistics",
+  "acronym": "ACL",
+  "type": 2,
+  "sci_rank": null,
+  "ccf_rank": null,
+  "sci_if": 0,
+  "sci_up": null,
+  "sci_up_small": null,
+  "core_rank": null
+}
 """.strip()
 
 
@@ -318,7 +330,8 @@ class VenueResolutionNode:
         self.cache_store = cache_store or VenueCacheStore(
             self.artifact_store.base_dir.parent / "venue_cache.json"
         )
-        self.model = model or (chat or ChatClient()).structured(
+        client = chat or ChatClient()
+        self.model = model or client.structured(
             ModelVenueInfoDraft,
             options=ModelOptions(temperature=0),
         )
@@ -404,13 +417,10 @@ class VenueResolutionNode:
         state: Mapping[str, Any],
     ) -> dict[str, Any]:
         try:
-            run_id = state.get("run_id")
+            child_run_id = state["child_run_id"]
             artifact_uri = state.get(
                 "crossref_enrichment_manifest_artifact_ref"
             ) or state.get("enrichment_manifest_artifact_ref")
-
-            if not isinstance(run_id, str) or not run_id:
-                raise ValueError("缺少有效 run_id。")
 
             if (
                 not isinstance(artifact_uri, str)
@@ -516,7 +526,7 @@ class VenueResolutionNode:
             manifest["step_key"] = "resolve_venues"
 
             artifact = await self.artifact_store.write_json(
-                run_id=run_id,
+                run_id=child_run_id,
                 step_key="resolve_venues",
                 source="venue",
                 kind="paper_info_venue_manifest_json",

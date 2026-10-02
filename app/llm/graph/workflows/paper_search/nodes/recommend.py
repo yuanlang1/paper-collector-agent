@@ -35,6 +35,16 @@ RECOMMENDATION_SYSTEM_PROMPT = """
 - 只能依据输入内容评分，不得编造论文贡献、实验结果或 venue 等级；
 - venue 信息仅作为辅助判断，不得因缺失而臆测；
 - 推荐理由使用中文，明确说明匹配点或不匹配点。
+
+输出规范：
+- 只输出合法 JSON 对象，不要输出 Markdown、代码块或额外说明。
+- recommendation_stars 必须是 1 至 5 的整数，recommendation_reason 必须为中文。
+
+输出样例：
+{
+  "recommendation_stars": 4,
+  "recommendation_reason": "论文聚焦检索增强生成方法，与用户主题高度匹配，但未覆盖全部限定条件。"
+}
 """.strip()
 
 
@@ -56,7 +66,8 @@ class RecommendationNode:
         chat: ChatClient | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = model or (chat or ChatClient()).structured(
+        client = chat or ChatClient()
+        self.model = model or client.structured(
             PaperRecommendationResult,
             options=ModelOptions(temperature=0),
         )
@@ -112,16 +123,13 @@ class RecommendationNode:
         state: Mapping[str, Any],
     ) -> dict[str, Any]:
         try:
-            run_id = state.get("run_id")
+            child_run_id = state["child_run_id"]
             abstract_artifact_uri = state.get(
                 "abstract_manifest_artifact_ref"
             )
             existing_artifact_uri = state.get(
                 "existing_papers_manifest_artifact_ref"
             )
-
-            if not isinstance(run_id, str) or not run_id:
-                raise ValueError("缺少有效 run_id。")
 
             artifact_inputs = [
                 ("abstract", abstract_artifact_uri),
@@ -331,7 +339,7 @@ class RecommendationNode:
             manifest["step_key"] = "recommend_papers"
 
             artifact = await self.artifact_store.write_json(
-                run_id=run_id,
+                run_id=child_run_id,
                 step_key="recommend_papers",
                 source="recommendation",
                 kind="paper_info_recommendation_manifest_json",

@@ -93,6 +93,7 @@ class ReviewCitationTests(unittest.IsolatedAsyncioTestCase):
             )(
                 {
                     "run_id": "review-test",
+                    "child_run_id": "child-review-test",
                     "task_id": 1,
                     "language": "en",
                     "framework_hash": "hash",

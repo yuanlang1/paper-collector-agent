@@ -23,11 +23,9 @@ class PaperEnrichmentNode:
         state: Mapping[str, Any],
     ) -> dict[str, Any]:
         try:
-            run_id = state.get("run_id")
+            child_run_id = state["child_run_id"]
             artifact_uri = state.get("normalized_manifest_artifact_ref")
 
-            if not isinstance(run_id, str) or not run_id:
-                raise ValueError("缺少有效 run_id。")
             if (
                 not isinstance(artifact_uri, str)
                 or not artifact_uri.startswith("artifact://")
@@ -75,7 +73,7 @@ class PaperEnrichmentNode:
             manifest["removed_without_pdf"] = removed_papers
             manifest["step_key"] = "paper_enrichment"
             artifact = await self.artifact_store.write_json(
-                run_id=run_id,
+                run_id=child_run_id,
                 step_key="paper_enrichment",
                 source="enriched",
                 kind="paper_info_enriched_manifest_json",

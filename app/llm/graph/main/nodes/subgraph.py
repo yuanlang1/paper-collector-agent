@@ -11,6 +11,7 @@ from app.events.bus import EventBus
 from app.events.context import bind_event_context, current_event_context
 from app.events.errors import EventPublicationError
 from app.llm.graph.main.nodes.tool import build_action_result_update
+from app.llm.subagents.run_context import create_child_run_id
 from app.llm.subagents.registry import SubAgentRegistry
 
 logger = logging.getLogger(__name__)
@@ -69,12 +70,18 @@ class SubAgentNode:
                 error_code="UNKNOWN_SUBAGENT",
             )
 
+        child_state = dict(state)
+        parent_run_id = state["run_id"]
+        child_run_id = create_child_run_id(parent_run_id)
+        child_state["child_run_id"] = child_run_id
         scope = {
             "source": "subagent",
             "action_id": str(call["id"]),
             "delegation_id": str(call["id"]),
             "subagent": runtime.spec.name,
             "workflow": runtime.stream.workflow,
+            "parent_run_id": parent_run_id,
+            "child_run_id": child_run_id,
         }
         parent_context = current_event_context()
         child_bus = EventBus()
@@ -99,7 +106,10 @@ class SubAgentNode:
                 ),
             )
             try:
-                result = await runtime.graph.ainvoke(state, config=child_config)
+                result = await runtime.graph.ainvoke(
+                    child_state,
+                    config=child_config,
+                )
             except GraphInterrupt:
                 raise
             except EventPublicationError:

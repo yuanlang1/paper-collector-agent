@@ -9,19 +9,20 @@ from app.infrastructure.oss import (
     build_pdf_object_name,
 )
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.graph.workflows.paper_search.nodes.paper_cache import (
+from app.llm.graph.workflows.paper_search.paper_cache import (
     PaperCacheStore,
 )
 from app.llm.graph.workflows.paper_search.nodes.persist import (
     PersistRecommendedPapersNode,
 )
-from app.llm.graph.workflows.paper_search.nodes.save_oss import (
-    SavePersistedPdfsToOssNode,
+from app.llm.graph.workflows.paper_search.nodes.finalize_pdfs import (
+    FinalizePdfsNode,
 )
 from app.llm.graph.workflows.paper_search.nodes.venue import VenueCacheStore
 
 
 RUN_ID = "oss-save-test"
+CHILD_RUN_ID = "child-oss-save-test"
 TASK_ID = 7
 SHA256 = "a" * 64
 PDF_OBJECT_NAME = f"papers/pdf/{SHA256}.pdf"
@@ -118,24 +119,27 @@ class PaperSearchOssTests(unittest.IsolatedAsyncioTestCase):
                 update = await persist(
                     {
                         "run_id": RUN_ID,
+                        "child_run_id": CHILD_RUN_ID,
                         "paper_service_task_id": TASK_ID,
                         "recommendation_manifest_artifact_ref": (
                             recommendation_artifact.artifact_uri
                         ),
                     }
                 )
-                await SavePersistedPdfsToOssNode(
+                finalize_update = await FinalizePdfsNode(
                     artifact_store=store,
                     object_store=object_store,
                 )(
                     {
                         "run_id": RUN_ID,
+                        "child_run_id": CHILD_RUN_ID,
                         "persisted_papers_manifest_artifact_ref": update[
                             "persisted_papers_manifest_artifact_ref"
                         ],
                         "recommendation_manifest_artifact_ref": (
                             recommendation_artifact.artifact_uri
                         ),
+                        "downloaded_pdf_paths": [str(pdf_path)],
                     }
                 )
 
@@ -151,6 +155,9 @@ class PaperSearchOssTests(unittest.IsolatedAsyncioTestCase):
                 object_store.calls,
                 [(pdf_path.resolve(), PDF_OBJECT_NAME, SHA256)],
             )
+            self.assertEqual(finalize_update["downloaded_pdf_paths"], [])
+            self.assertEqual(finalize_update["progress"]["pdf_files_deleted"], 1)
+            self.assertFalse(pdf_path.exists())
 
     async def test_one_upload_failure_does_not_stop_other_papers(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -187,13 +194,13 @@ class PaperSearchOssTests(unittest.IsolatedAsyncioTestCase):
                 payload={
                     "results": [
                         {
-                            "client_key": f"{RUN_ID}:0",
+                            "client_key": f"{CHILD_RUN_ID}:0",
                             "paper_id": 1,
                             "paper_save_status": "saved",
                             "oss_name": SHA256,
                         },
                         {
-                            "client_key": f"{RUN_ID}:1",
+                            "client_key": f"{CHILD_RUN_ID}:1",
                             "paper_id": 2,
                             "paper_save_status": "saved",
                             "oss_name": second_sha256,
@@ -206,22 +213,25 @@ class PaperSearchOssTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(settings, "OSS_ENABLED", True), patch.object(
                 settings, "OSS_PREFIX", "papers"
             ):
-                update = await SavePersistedPdfsToOssNode(
+                update = await FinalizePdfsNode(
                     artifact_store=store,
                     object_store=object_store,
                 )(
                     {
                         "run_id": RUN_ID,
+                        "child_run_id": CHILD_RUN_ID,
                         "persisted_papers_manifest_artifact_ref": (
                             persisted_artifact.artifact_uri
                         ),
                         "task_bound_recommendation_manifest_artifact_ref": (
                             bound_artifact.artifact_uri
                         ),
+                        "downloaded_pdf_paths": [str(first_path), str(second_path)],
                     }
                 )
 
-            self.assertEqual(update, {})
+            self.assertEqual(update["downloaded_pdf_paths"], [])
+            self.assertEqual(update["progress"]["pdf_files_deleted"], 2)
             self.assertEqual(
                 [(call[1], call[2]) for call in object_store.calls],
                 [
@@ -267,7 +277,7 @@ class PaperSearchOssTests(unittest.IsolatedAsyncioTestCase):
                 payload={
                     "results": [
                         {
-                            "client_key": f"{RUN_ID}:0",
+                            "client_key": f"{CHILD_RUN_ID}:0",
                             "paper_id": 1,
                             "paper_save_status": "saved",
                             "oss_name": PDF_OBJECT_NAME,
@@ -280,22 +290,71 @@ class PaperSearchOssTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(settings, "OSS_ENABLED", True), patch.object(
                 settings, "OSS_PREFIX", "papers"
             ):
-                await SavePersistedPdfsToOssNode(
+                await FinalizePdfsNode(
                     artifact_store=store,
                     object_store=object_store,
                 )(
                     {
                         "run_id": RUN_ID,
+                        "child_run_id": CHILD_RUN_ID,
                         "persisted_papers_manifest_artifact_ref": (
                             persisted_artifact.artifact_uri
                         ),
                         "task_bound_recommendation_manifest_artifact_ref": (
                             bound_artifact.artifact_uri
                         ),
+                        "downloaded_pdf_paths": [],
                     }
                 )
 
             self.assertEqual(object_store.calls, [])
+
+    async def test_oss_disabled_still_cleans_downloaded_pdf(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = LocalArtifactStore(directory)
+            pdf_path = store.base_dir / RUN_ID / "pdfs" / "paper.pdf"
+            pdf_path.parent.mkdir(parents=True)
+            pdf_path.write_bytes(b"pdf")
+
+            with patch.object(settings, "OSS_ENABLED", False):
+                update = await FinalizePdfsNode(artifact_store=store)(
+                    {
+                        "downloaded_pdf_paths": [str(pdf_path)],
+                        "progress": {},
+                    }
+                )
+
+            self.assertFalse(pdf_path.exists())
+            self.assertEqual(update["downloaded_pdf_paths"], [])
+            self.assertEqual(update["progress"]["pdf_files_deleted"], 1)
+
+    async def test_cleanup_failure_marks_completed_run_partial_failed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = LocalArtifactStore(directory)
+            node = FinalizePdfsNode(artifact_store=store)
+
+            with (
+                patch.object(settings, "OSS_ENABLED", False),
+                patch.object(
+                    node,
+                    "_delete_downloaded_pdfs",
+                    side_effect=OSError("locked"),
+                ),
+            ):
+                update = await node(
+                    {
+                        "downloaded_pdf_paths": ["unused.pdf"],
+                        "stage": "completed",
+                        "status": "completed",
+                        "warnings": [],
+                        "progress": {},
+                    }
+                )
+
+        self.assertEqual(update["stage"], "partial_failed")
+        self.assertEqual(update["status"], "partial_failed")
+        self.assertTrue(update["degraded"])
+        self.assertEqual(update["pdf_cleanup_error"], "locked")
 
 
 if __name__ == "__main__":

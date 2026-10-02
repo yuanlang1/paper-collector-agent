@@ -15,21 +15,31 @@ from app.llm.provider import ChatClient, ModelOptions
 from pypdf import PdfReader
 
 
+PDF_FRONT_PAGE_ENRICHMENT_SYSTEM_PROMPT = """
+你是学术论文信息提取员，只能依据输入的 PDF 前几页文本生成结果。
+
+规则：
+- paper_abstract 提取页面中的原始 Abstract 段落，保留原文语言和含义；未找到时为 null，不得改写或编造。
+- keywords 优先提取 Keywords、Index Terms 或“关键词”段落；未找到时可依据页面文本归纳关键词。
+- ai_abstract 使用中文概括研究问题、核心方法、实验设置、主要结果和贡献；不得补充页面文本中不存在的事实。
+
+输出规范：
+- 只输出合法 JSON 对象，不要输出 Markdown、代码块或额外说明。
+- keywords 为字符串数组，ai_abstract 必须是非空中文文本。
+
+输出样例：
+{
+  "paper_abstract": null,
+  "keywords": ["retrieval augmented generation", "large language models"],
+  "ai_abstract": "论文研究检索增强生成方法，并在给定实验设置下报告其效果。"
+}
+""".strip()
+
+
 PDF_READ_PAGE_COUNT = 4
 MAX_ABSTRACT_CHARS = 8_000
 MAX_KEYWORDS = 12
 MAX_KEYWORD_CHARS = 1_000
-
-
-PDF_FRONT_PAGE_ENRICHMENT_SYSTEM_PROMPT = """
-    你负责仅根据论文前几页文本完成三个字段。
-
-    - paper_abstract：提取页面中原始的 Abstract 段落，保留原文语言和含义；
-    未找到时返回 null，不得改写或编造。
-    - keywords：提取页面中 Keywords、Index Terms 或“关键词”段落；如果未找到就根据论文内容生成关键词。
-    - ai_abstract：使用中文概括研究问题、核心方法、实验设置、主要结果和贡献；
-    仅依据页面文本，不得编造其中没有的事实。
-""".strip()
 
 
 class PdfFrontPageEnrichmentResult(BaseModel):
@@ -104,7 +114,8 @@ class AbstractEnrichNode:
         chat: ChatClient | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = model or (chat or ChatClient()).structured(
+        client = chat or ChatClient()
+        self.model = model or client.structured(
             PdfFrontPageEnrichmentResult,
             options=ModelOptions(temperature=0),
         )
@@ -135,11 +146,8 @@ class AbstractEnrichNode:
         state: Mapping[str, Any],
     ) -> dict[str, Any]:
         try:
-            run_id = state.get("run_id")
+            child_run_id = state["child_run_id"]
             artifact_uri = state.get("pdf_manifest_artifact_ref")
-
-            if not isinstance(run_id, str) or not run_id:
-                raise ValueError("缺少有效 run_id。")
 
             if (
                 not isinstance(artifact_uri, str)
@@ -289,7 +297,7 @@ class AbstractEnrichNode:
             manifest["step_key"] = "abstract_enrichment"
 
             artifact = await self.artifact_store.write_json(
-                run_id = run_id,
+                run_id = child_run_id,
                 step_key = "abstract_enrichment",
                 source = "abstract",
                 kind = "paper_info_abstract_manifest_json",

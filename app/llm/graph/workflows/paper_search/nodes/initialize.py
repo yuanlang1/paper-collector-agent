@@ -31,16 +31,12 @@ async def initialize_paper_search_node(
 
     return {
         "original_prompt": request.prompt,
-        "paper_search_constraints": request.constraints.model_dump(
-            mode="json",
-            exclude_none=True,
-        ),
         "warnings": [],
         "progress": {},
         "downloaded_pdf_paths": [],
         "pdf_cleanup_error": None,
         "degraded": False,
-        "stage": "intent_understanding",
+        "stage": "preparing_search",
         "status": "running",
         "error": None,
     }

@@ -9,14 +9,10 @@ from langgraph.graph.message import add_messages
 SourceName = Literal["Google Scholar"]
 
 PaperSearchStage = Literal[
-    "intent_understanding",
-    "building_search_tag",
-    "generating_source_queries",
-    "awaiting_confirmation",
+    "preparing_search",
     "searching",
     "normalizing",
     "reviewing_search",
-    "planning_supplemental_search",
     "enriching",
     "enriching_crossref",
     "downloading_pdfs",
@@ -33,7 +29,6 @@ PaperSearchStage = Literal[
 
 PaperSearchStatus = Literal[
     "running",
-    "waiting_confirmation",
     "completed",
     "partial_failed",
     "failed",
@@ -60,13 +55,13 @@ class SourceRunSummary(TypedDict):
 class PaperSearchWorkflowState(TypedDict, total=False):
     conversation_id: str
     run_id: str
+    child_run_id: str
     active_tool_call: dict[str, Any] | None
     messages: Annotated[list[BaseMessage], add_messages]
     last_action_result: dict[str, Any] | None
     artifact_refs: list[str]
     paper_search_source_limits: dict[str, int] | None
     original_prompt: str
-    paper_search_constraints: dict[str, Any] | None
 
     requested_sources: list[SourceName]
     download_pdfs: bool
@@ -78,10 +73,6 @@ class PaperSearchWorkflowState(TypedDict, total=False):
 
     source_query_plans: list[SourceQueryPlan]
     query_plan_artifact_ref: str | None
-
-    confirmation_required: bool
-    confirmation_message: str | None
-    confirmation_decision: Literal["approved", "rejected"] | None
 
     create_task_payload: dict[str, Any] | None
 
