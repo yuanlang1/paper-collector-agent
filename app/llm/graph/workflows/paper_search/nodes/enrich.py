@@ -95,12 +95,7 @@ class PaperEnrichmentNode:
 
         return {
             "stage": "enriching_crossref",
-            "status": (
-                "partial_failed"
-                if state.get("degraded") or removed_papers
-                else "running"
-            ),
-            "degraded": bool(state.get("degraded")) or bool(removed_papers),
+            "status": "running",
             "enrichment_manifest_artifact_ref": artifact.artifact_uri,
             "progress": {
                 **state.get("progress", {}),

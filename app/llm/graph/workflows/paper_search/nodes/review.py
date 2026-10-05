@@ -207,8 +207,7 @@ class ReviewNode:
             return {
                 **update,
                 "stage": "enriching",
-                "status": "partial_failed",
-                "degraded": True,
+                "status": "running",
                 "warnings": [
                     *state.get("warnings", []),
                     "无可用补充检索来源，继续后续流程。",

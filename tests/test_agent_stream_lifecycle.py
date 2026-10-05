@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 import httpx
 from fastapi import FastAPI
 from fastapi.sse import EventSourceResponse, ServerSentEvent
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from pydantic import BaseModel
 
 from app.api import agent as agent_api
@@ -271,6 +271,20 @@ class _BlockingSubagentGraph:
                 "data": {"count": 1},
             },
         }
+
+
+class _NeverEndingSubagentGraph:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.cancelled = asyncio.Event()
+
+    async def ainvoke(self, _state, *, config):
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
 
 
 class _CapturingSubagentGraph:
@@ -774,15 +788,65 @@ class AgentStreamLifecycleTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_chat_log_preserves_subagent_result_details(self) -> None:
+        async def scenario() -> None:
+            await self.history_db.run(
+                transactions.persist_stream_event,
+                user_id="0",
+                conversation_id="conv-subagent-history",
+                run_id="run-subagent-history",
+                event_name="action_result",
+                event_data={
+                    "action_id": "delegation-1",
+                    "action_type": "subagent",
+                    "name": "task_review_agent",
+                    "status": "error",
+                    "summary": "文献综述工作流执行失败，未完成结果保存。",
+                    "data": {"task_id": 12, "review_id": None},
+                    "retryable": True,
+                    "error_code": "WRITING_REVIEW_BLOCKED",
+                    "error_message": "综述写作质量审核未通过。",
+                },
+            )
+
+            messages, _ = await self.history_db.run(
+                chat_log.list_messages,
+                user_id="0",
+                conversation_id="conv-subagent-history",
+                limit=10,
+                before_id=None,
+            )
+
+            self.assertEqual(messages[0]["content"], [{
+                "type": "tool_result",
+                "tool_use_id": "delegation-1",
+                "content": {
+                    "task_id": 12,
+                    "review_id": None,
+                    "summary": "文献综述工作流执行失败，未完成结果保存。",
+                    "error_code": "WRITING_REVIEW_BLOCKED",
+                    "error_message": "综述写作质量审核未通过。",
+                },
+                "is_error": True,
+            }])
+
+        asyncio.run(scenario())
+
 
 class NativeSseResponseTests(unittest.TestCase):
-    def test_agent_api_exposes_only_streaming_chat_routes(self) -> None:
+    def test_agent_api_exposes_run_commands_and_event_subscription(self) -> None:
         app = FastAPI()
         app.include_router(agent_api.router)
-        paths = set(app.openapi()["paths"])
+        schema = app.openapi()
+        paths = set(schema["paths"])
 
+        self.assertIn("/api/agent/runs", paths)
+        self.assertIn("/api/agent/runs/{run_id}/resume", paths)
+        self.assertIn("/api/agent/runs/{run_id}/events", paths)
         self.assertIn("/api/agent/chat/stream", paths)
         self.assertIn("/api/agent/chat/resume/stream", paths)
+        self.assertTrue(schema["paths"]["/api/agent/chat/stream"]["post"]["deprecated"])
+        self.assertTrue(schema["paths"]["/api/agent/chat/resume/stream"]["post"]["deprecated"])
         self.assertNotIn("/api/agent/chat", paths)
         self.assertNotIn("/api/agent/chat/resume", paths)
 
@@ -828,13 +892,14 @@ class NativeSseResponseTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
-    def test_agent_api_returns_run_header_and_replays_by_cursor(self) -> None:
+    def test_agent_api_starts_run_and_replays_by_cursor(self) -> None:
         async def scenario() -> None:
             with tempfile.TemporaryDirectory() as directory:
                 history_db = HistoryDatabase(Path(directory) / "history.db")
                 history_db.initialize()
+                service = _StreamingService()
                 runtime = AgentRuntime(
-                    agent_service=_StreamingService(),
+                    agent_service=service,
                     history_db=history_db,
                     db_factory=_TrackingDb,
                 )
@@ -864,43 +929,39 @@ class NativeSseResponseTests(unittest.TestCase):
                         base_url="http://test",
                     ) as client:
                         response = await client.post(
-                            "/api/agent/chat/stream",
+                            "/api/agent/runs",
                             json={
                                 "message": "hello",
-                                "user_id": "user-api",
                                 "conversation_id": "conv-api",
                                 "run_id": "run-api",
                             },
                         )
                         duplicate = await client.post(
-                            "/api/agent/chat/stream",
+                            "/api/agent/runs",
                             json={
                                 "message": "hello",
-                                "user_id": "user-api",
                                 "conversation_id": "conv-api",
                                 "run_id": "run-api",
                             },
                         )
-                        run_id = response.headers["x-agent-run-id"]
+                        await asyncio.wait_for(service.closed.wait(), timeout=1)
+                        run_id = response.json()["data"]["run_id"]
                         events = await history_db.run(
                             stream_events.list_after,
-                            user_id="user-api",
+                            user_id="0",
                             run_id=run_id,
                             after_sequence=None,
                             limit=100,
                         )
                         replay = await client.get(
                             f"/api/agent/runs/{run_id}/events"
-                            "?user_id=user-api&conversation_id=conv-api",
-                            headers={"Last-Event-ID": str(events[0].sequence)},
+                            f"?conversation_id=conv-api&after_sequence={events[0].sequence}",
                         )
 
-                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.status_code, 202)
                 self.assertEqual(duplicate.status_code, 409)
-                self.assertEqual(response.headers["access-control-expose-headers"], "X-Agent-Run-ID")
-                self.assertIn("event: run_started", response.text)
-                self.assertIn("event: run_completed", response.text)
-                self.assertIn("id: 1", response.text)
+                self.assertEqual(response.json()["data"]["conversation_id"], "conv-api")
+                self.assertEqual(response.json()["data"]["status"], "started")
                 self.assertIn("event: run_completed", replay.text)
                 self.assertNotIn("event: run_started", replay.text)
                 await runtime.shutdown()
@@ -1087,6 +1148,55 @@ class SubAgentNodeEventBusTests(unittest.TestCase):
             self.assertNotIn("name", completed)
             self.assertNotIn("progress", completed)
             self.assertEqual(completed["progress_percent"], 100)
+
+        asyncio.run(scenario())
+
+    def test_timeout_cancels_child_and_returns_tool_result(self) -> None:
+        async def scenario() -> None:
+            graph = _NeverEndingSubagentGraph()
+            registry = SubAgentRegistry((
+                SubAgentRuntime(
+                    spec=SubAgentSpec(
+                        name="paper_search_agent",
+                        description="test",
+                        input_model=BaseModel,
+                    ),
+                    graph=graph,
+                    error_code="TEST_SUBAGENT_FAILED",
+                    failure_summary="test failed",
+                    stream=SubAgentStreamSpec(workflow="paper_search"),
+                    timeout_seconds=0.01,
+                ),
+            ))
+            events = []
+            parent_bus = EventBus()
+            parent_bus.subscribe(lambda event: _append(events, event))
+            node = SubAgentNode(subagent_registry=registry)
+            state = {
+                "run_id": "run-1",
+                "active_tool_call": {
+                    "id": "delegation-timeout",
+                    "name": "paper_search_agent",
+                    "kind": "subagent",
+                    "args": {},
+                },
+            }
+
+            with bind_event_context(EventContext(bus=parent_bus, run_id="run-1")):
+                result = await node(state, {})
+
+            await asyncio.wait_for(graph.cancelled.wait(), timeout=1)
+            action_result = result["last_action_result"]
+            self.assertEqual(action_result["status"], "error")
+            self.assertTrue(action_result["retryable"])
+            self.assertEqual(action_result["error_code"], "SUBAGENT_TIMEOUT")
+            self.assertEqual(action_result["data"]["timeout_seconds"], 0.01)
+            self.assertIsInstance(result["messages"][0], ToolMessage)
+            self.assertEqual(result["messages"][0].tool_call_id, "delegation-timeout")
+            self.assertEqual(
+                [event.payload.get("sse_name") for event in events],
+                ["subagent_started", "subagent_failed"],
+            )
 
         asyncio.run(scenario())
 

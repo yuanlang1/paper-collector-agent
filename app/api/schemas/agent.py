@@ -7,7 +7,7 @@ from pydantic import (
 
 
 class ChatRequest(BaseModel):
-    user_id: str = Field(..., min_length=1)
+    user_id: str = Field(default="0", min_length=1)
     conversation_id: str = Field(..., min_length=1)
     run_id: str = Field(..., min_length=1)
     message: str = Field(..., min_length = 1)
@@ -15,7 +15,7 @@ class ChatRequest(BaseModel):
 
 
 class ChatResumeRequest(BaseModel):
-    user_id: str = Field(..., min_length=1)
+    user_id: str = Field(default="0", min_length=1)
     conversation_id: str = Field(..., min_length = 1)
     run_id: str = Field(..., min_length=1)
     action_id: str = Field(..., min_length=1)
@@ -26,3 +26,22 @@ class ChatResumeRequest(BaseModel):
     query_understanding: dict[str, Any] | None = None
     search_tag: dict[str, Any] | None = None
     comment: str | None = None
+
+
+class RunResumeRequest(BaseModel):
+    user_id: str = Field(default="0", min_length=1)
+    conversation_id: str = Field(..., min_length=1)
+    action_id: str = Field(..., min_length=1)
+    decision: Literal[
+        "approved",
+        "rejected",
+    ]
+    query_understanding: dict[str, Any] | None = None
+    search_tag: dict[str, Any] | None = None
+    comment: str | None = None
+
+
+class RunStartResponse(BaseModel):
+    conversation_id: str
+    run_id: str
+    status: Literal["started", "resumed"]

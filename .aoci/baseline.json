@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-22T01:46:30Z",
-  "updated_at": "2026-10-01T09:19:09Z",
+  "updated_at": "2026-10-03T07:31:15Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -17317,9 +17317,9 @@
       "normalized_sha256": "724ed4aacc75083441f7b33bf38187ae2c3afb328506645faca206e97f827085"
     },
     "aoci.code.txt": {
-      "sha256": "3f9242933f8da50142f216c3ded737bbb894b70a6263a53e050a56242dddf423",
-      "size": 66532,
-      "normalized_sha256": "3f9242933f8da50142f216c3ded737bbb894b70a6263a53e050a56242dddf423"
+      "sha256": "6f81d4cfbf6145443a8725432b68893d7698472bee03e009045b21bbfc699a1c",
+      "size": 68114,
+      "normalized_sha256": "6f81d4cfbf6145443a8725432b68893d7698472bee03e009045b21bbfc699a1c"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -17526,9 +17526,9 @@
       "normalized_sha256": "4d2b5217d9b172a1874dcfb2716a45e5d8c17277b3bae85325e8a6b08d6ff99a"
     },
     "app/llm/agent.py": {
-      "sha256": "d25e78fa23a514320651ddc7e4d76172e335b7c0193b0756ce7bb9dc883dddc2",
-      "size": 9178,
-      "normalized_sha256": "e5deae198d9ca93d1cbb29eead98a529f5947c0cb5be44cb8df262063d355f3e"
+      "sha256": "9ac4e397ebb704de1af66318972a7e5e0810da50d712f8b7958f092292619aa8",
+      "size": 8921,
+      "normalized_sha256": "636f5351e327f01ec8a2a92f20cbd31a6c1319115489a5673b1981463b70af8a"
     },
     "app/llm/graph/main/condition.py": {
       "role": "index",
@@ -17571,9 +17571,9 @@
       "normalized_sha256": "cdeaba3a0651b14a7953c181ee6dc9cdf68928fa8ab64f77aca36e01194af030"
     },
     "app/llm/graph/main/nodes/subgraph.py": {
-      "sha256": "ef7f24626614bfc3d6d54dbe0930def341bde71723c9d7c36b19f13fb106c98d",
-      "size": 5816,
-      "normalized_sha256": "e2b59685016339728ddc7f5e463969bf1e726cbc91cd33bb103f52a66af2a612"
+      "sha256": "6000c38710bff0c3efb568a9d9806efdc6aabc1a78984973caecf07bed71ead0",
+      "size": 6222,
+      "normalized_sha256": "bae4de76343c955d881ec9683d443ed6d563bb871af190942691217eb19ca52c"
     },
     "app/llm/graph/main/nodes/tool.py": {
       "sha256": "fa0830e465fcc8addff4b60eb9d8433e9d5bac946782d32c8c812cbfc672c32d",
@@ -17599,9 +17599,9 @@
       "normalized_sha256": "89216332cb01e0d71d8ed0925c28cc4800c6f818bac1cac5f16965e02f287800"
     },
     "app/llm/graph/workflows/paper_search/nodes/abstract_enrich.py": {
-      "sha256": "8d55e138245d8f9d355d187f5345e04c7c29a90f11273fb31836b9d8ed50201a",
-      "size": 12676,
-      "normalized_sha256": "8d55e138245d8f9d355d187f5345e04c7c29a90f11273fb31836b9d8ed50201a"
+      "sha256": "78e6863a5670b43879c87590f8be6c5587f28e87bb7db525e9aa3f753f765d7c",
+      "size": 12791,
+      "normalized_sha256": "78e6863a5670b43879c87590f8be6c5587f28e87bb7db525e9aa3f753f765d7c"
     },
     "app/llm/graph/workflows/paper_search/nodes/build_search_tag.py": {
       "sha256": "bb9d46079fdf083524ea8961363d5f4bc4f92142aa13aea0079a6b49686d0a25",
@@ -17621,38 +17621,39 @@
       "normalized_sha256": "ee1e2b054690f9de0858c4dd274d56cff96cc0e179ef35a938044861ee820771"
     },
     "app/llm/graph/workflows/paper_search/nodes/create_task.py": {
-      "role": "index",
-      "sha256": "b58a8372910b707e4b9cdc3209eb2730d55bb9e4aa6aedc84aeb71febfe3575f",
-      "size": 9142,
-      "normalized_sha256": "eeebcb6a7011b61d75160d17b7b95b6b51e98664e17556eb27bd428535bf99f3"
+      "sha256": "a69da0b3f66533d053c39419c07887a983099290d4da2e87419adbfc744f44ef",
+      "size": 8811,
+      "normalized_sha256": "7024918da1ed7b302ecb9ec525e73f95ed691d98931fa738ba50036a2a360cc6"
     },
     "app/llm/graph/workflows/paper_search/nodes/crossref_enrich.py": {
-      "sha256": "44e30cae6b4b8ca1dda587a13165a95f1665e4b548979fc6cfad8cbe46dc49c7",
-      "size": 10634,
-      "normalized_sha256": "44e30cae6b4b8ca1dda587a13165a95f1665e4b548979fc6cfad8cbe46dc49c7"
+      "sha256": "d5235b3d3e885db2cb755988cd0e5a88ad732ec11a0aaeb228076b5c5c7f01db",
+      "size": 10427,
+      "normalized_sha256": "d5235b3d3e885db2cb755988cd0e5a88ad732ec11a0aaeb228076b5c5c7f01db"
     },
     "app/llm/graph/workflows/paper_search/nodes/dowload_pdf.py": {
-      "role": "index",
-      "sha256": "7e687b11e3645a34d35cd9412a09a3542967a6867da0bf4c40531a4c6dd2881b",
-      "size": 8549,
-      "normalized_sha256": "30c0613334b259e9b9e40cfc934eaa5c241be693b3c8f96a1ff035703a0fdb64"
+      "sha256": "1a7f372284f9d222575ae9e98b0c7f4eae11b3347d2d0f2a4e9e0b1eb71ce7ec",
+      "size": 8236,
+      "normalized_sha256": "1a7f372284f9d222575ae9e98b0c7f4eae11b3347d2d0f2a4e9e0b1eb71ce7ec"
     },
     "app/llm/graph/workflows/paper_search/nodes/enrich.py": {
-      "sha256": "dfb15bc337ebc288b4a0eedb9040748d2f5dd8508eabcb1986c6273f6031be2d",
-      "size": 4148,
-      "normalized_sha256": "dfb15bc337ebc288b4a0eedb9040748d2f5dd8508eabcb1986c6273f6031be2d"
+      "sha256": "f2be456d7caefec17265d0034e6fdc92f111c72abf8c751c94987b47cc5f3009",
+      "size": 3839,
+      "normalized_sha256": "f2be456d7caefec17265d0034e6fdc92f111c72abf8c751c94987b47cc5f3009"
     },
     "app/llm/graph/workflows/paper_search/nodes/filter.py": {
-      "role": "index",
-      "sha256": "a4630e9fa322cea847788ebe43f659fb17e923efd90afcf42f7392bf46fd5da7",
-      "size": 27015,
-      "normalized_sha256": "e70945f6c13d17438343c8eecc29c12c0081fe6881aef3fb0babb10f96526da5"
+      "sha256": "51f7bca8f70b953ec3e1178fed2f3089c225a1bf65808c403b133b3e1c8c987e",
+      "size": 26694,
+      "normalized_sha256": "7724a17a7395062a1ec77cead524c971ac90f3b08bdcd8042287dee8548ccf1f"
     },
     "app/llm/graph/workflows/paper_search/nodes/finalize.py": {
-      "role": "index",
-      "sha256": "14c08d63cb8048a7d99b86286af58a2502cbb618be7e065f2cecb759afd5a0cc",
-      "size": 2817,
-      "normalized_sha256": "6bf0fdbe457a815232b441689d80c8b0c0f30ffe549c7d09113c364af8954f3d"
+      "sha256": "81d573f68e2cfc2b990f6b7ae494358754c57ad8c1c325831a1b539067dd47f9",
+      "size": 2427,
+      "normalized_sha256": "5b1b326c1e0bb62c5a11d8b54305b965eb36622cf0ae9fd035f15c96c5df4a8f"
+    },
+    "app/llm/graph/workflows/paper_search/nodes/finalize_pdfs.py": {
+      "sha256": "4d38f49b4a3d8adcd89677217036963b7abc972d812984a1b0cb365b87f9ec7e",
+      "size": 5596,
+      "normalized_sha256": "4d38f49b4a3d8adcd89677217036963b7abc972d812984a1b0cb365b87f9ec7e"
     },
     "app/llm/graph/workflows/paper_search/nodes/finalize_search.py": {
       "role": "index",
@@ -17666,10 +17667,9 @@
       "normalized_sha256": "e53e0b883907e9dc3daaba4b8f837540d779440a07e56841b0f8745c40386852"
     },
     "app/llm/graph/workflows/paper_search/nodes/initialize.py": {
-      "role": "index",
-      "sha256": "ebac7ba3532c9e0f72e3e605d6ecea7c7d600f194d23f44336639344c1688b77",
-      "size": 1368,
-      "normalized_sha256": "b90e1a99db7c0f698f07fa52a090ddc91aff6963183120fe362da3c56b44cfcc"
+      "sha256": "a1b83366a5afb24a74598233c1185c5d84f03c5afe1389518fe5528138284d9b",
+      "size": 1161,
+      "normalized_sha256": "df86b63b838a0d6aebd6de54025893d78bf142438a16cacefc7819951ce09f8a"
     },
     "app/llm/graph/workflows/paper_search/nodes/intent.py": {
       "sha256": "0288c83f740aeb9ec2e78f619d85f241d7f586a1e9981a75874e96d6dacd9b76",
@@ -17683,15 +17683,24 @@
       "normalized_sha256": "f619cf2cc1c72ab86f6fafa1a69c3bb5574096d0636c2b1a02f1cf04d538b005"
     },
     "app/llm/graph/workflows/paper_search/nodes/persist.py": {
-      "role": "index",
-      "sha256": "7b35a416109f3aae04eff5b5b8020db349d59b1c18590185d694bb21d20feee3",
-      "size": 19532,
-      "normalized_sha256": "7b35a416109f3aae04eff5b5b8020db349d59b1c18590185d694bb21d20feee3"
+      "sha256": "78cda3050fbba389253f3600948dad5edc9aac3bf55d67fcc861b43868e15b4e",
+      "size": 19058,
+      "normalized_sha256": "78cda3050fbba389253f3600948dad5edc9aac3bf55d67fcc861b43868e15b4e"
+    },
+    "app/llm/graph/workflows/paper_search/nodes/plan_search.py": {
+      "sha256": "bf3a421fb5442eb36496317f498f4670ae5d9d185cbbc4621639da13a6efccc9",
+      "size": 8523,
+      "normalized_sha256": "bf3a421fb5442eb36496317f498f4670ae5d9d185cbbc4621639da13a6efccc9"
     },
     "app/llm/graph/workflows/paper_search/nodes/recommend.py": {
-      "sha256": "1a40ec1116302d0f1b0e2f2d75fea58681929c1bbc4551d04336a2de80230b37",
-      "size": 16435,
-      "normalized_sha256": "330dc99ec523dc36ab0d414b285aff72e159215c2b1eb4fa3752bc5b0faf5ea6"
+      "sha256": "0ae0454948fec732d0e815200f884289cca19358ba805eca161b5ac5a47d7369",
+      "size": 15995,
+      "normalized_sha256": "fa21e323f9e82f93d127c92fe20b011fa2f899ffaeabb04e38acac1cbd051976"
+    },
+    "app/llm/graph/workflows/paper_search/nodes/review.py": {
+      "sha256": "7d37c5ff40610ba91db0fae556e3924db181560c23e6cc911f14735edc7c7d1f",
+      "size": 8750,
+      "normalized_sha256": "7d37c5ff40610ba91db0fae556e3924db181560c23e6cc911f14735edc7c7d1f"
     },
     "app/llm/graph/workflows/paper_search/nodes/save_oss.py": {
       "role": "index",
@@ -17700,9 +17709,9 @@
       "normalized_sha256": "d59d41bdd5288fad0c3aca4af238fb5c80b3c3d2f3369a6c26180f3756f50f4e"
     },
     "app/llm/graph/workflows/paper_search/nodes/search.py": {
-      "sha256": "0f4dd02921929a4e55d2c0ce0c1c384481bf52bdc1a56ef23231ef8f20f89e57",
-      "size": 837,
-      "normalized_sha256": "0f4dd02921929a4e55d2c0ce0c1c384481bf52bdc1a56ef23231ef8f20f89e57"
+      "sha256": "ef1759bf8f9a75807adff2ec7aba535adfbc33c01c645d6f95ec36b1f288bb14",
+      "size": 7735,
+      "normalized_sha256": "ef1759bf8f9a75807adff2ec7aba535adfbc33c01c645d6f95ec36b1f288bb14"
     },
     "app/llm/graph/workflows/paper_search/nodes/search_review.py": {
       "sha256": "16c661254ab6657a6e87695634578870c1ae8c81c8b435b4ec55e984ab162bbd",
@@ -17720,35 +17729,39 @@
       "normalized_sha256": "4bd1cad328ecbeeeff2b5bb98f8aeab3c6524d19944128f9c3880522352a4cf2"
     },
     "app/llm/graph/workflows/paper_search/nodes/update_task_status.py": {
-      "role": "index",
-      "sha256": "1d779187751af4a50fdda1dec194dee9c2bee055c5c7ed1c405528dc8a27fc3f",
-      "size": 3025,
-      "normalized_sha256": "a90a8edbe7798775ee1fe6c613d9f228e0738bf841f3a0bffa4e7f86cc1127c4"
+      "sha256": "ff471aaf8d331766fd619c9020c0d003f864dce4eff9860b3ecdbd47c228817b",
+      "size": 2536,
+      "normalized_sha256": "c2c38e0cff9a6c5af61ce4d5e601b1b1cdca324a69693af3376d17caa2c7be9b"
     },
     "app/llm/graph/workflows/paper_search/nodes/venue.py": {
-      "sha256": "c879847fd68868032c5babfd7ada3315fbdc60b8881a2ee6075103891f6ae7b6",
-      "size": 18623,
-      "normalized_sha256": "e6dfdbd30c0ad224d1cd54d06431da7437edf73326c38b08c758a9403fc4c11b"
+      "sha256": "c12d09e6f5447e8e26734165520a27cf266efc8b9e82d817a99462075d63c2ca",
+      "size": 18559,
+      "normalized_sha256": "70b74a477e7560d7705c772e13e49003cd2954e2323fd85fa96d68d9e4cf4aba"
+    },
+    "app/llm/graph/workflows/paper_search/paper_cache.py": {
+      "sha256": "2d55cf93dc6e1e6243f0354c9e26a423811fcfffba7bde0f72d6b5d6a999db91",
+      "size": 4777,
+      "normalized_sha256": "2d55cf93dc6e1e6243f0354c9e26a423811fcfffba7bde0f72d6b5d6a999db91"
     },
     "app/llm/graph/workflows/paper_search/progress.py": {
-      "sha256": "a6596aec5b978bff3e6741ea2389f0782f5a4291ed478990cbfafba7be8534e6",
-      "size": 2942,
-      "normalized_sha256": "a6596aec5b978bff3e6741ea2389f0782f5a4291ed478990cbfafba7be8534e6"
+      "sha256": "2e251ae003e4065cf4eb734485c6f181c94f97571fa77212c495defc26f22cf6",
+      "size": 2578,
+      "normalized_sha256": "2e251ae003e4065cf4eb734485c6f181c94f97571fa77212c495defc26f22cf6"
     },
     "app/llm/graph/workflows/paper_search/state.py": {
-      "sha256": "4adcea7bf31963541c96e27d9bfd3d5cf02fd0d3310c7326154373acb0e5f728",
-      "size": 3658,
-      "normalized_sha256": "9928a935e2486bd53d7bff27b97ad82d810d9d7a65fc168b772af5a564a8c599"
+      "sha256": "b53829dc7b8e7503c99f883bde3f5d613a337e29f96e9300b58c03aa39ef7bec",
+      "size": 3200,
+      "normalized_sha256": "bf93d52b9e92c1732f0d3859dc63575ffcc75cb09e25359eac749d9fc448ed1a"
     },
     "app/llm/graph/workflows/paper_search/workflow.py": {
-      "sha256": "1adff9792bdcbe1d3cc07be96d497f4eb5ca7b9f0fad1fc09c22d8eb4a03c4fe",
-      "size": 10736,
-      "normalized_sha256": "795fdbae7d249f7b392c71c706240a4ec2c8d064cf4450b2cfe5f4815e8f8b5c"
+      "sha256": "7d17ae00e71c406bfe1e85b8db56f908db29adb90845436ea4d4507f67d0ac2f",
+      "size": 7360,
+      "normalized_sha256": "1f71e25b60e9ca5f8dc4eca5f744ee924ccdaa6702c72f0bb89f1032618dd984"
     },
     "app/llm/graph/workflows/paper_search_schemas.py": {
-      "sha256": "cb1ef3aab697fa8a1254d69834228318dc95b6fe1484c3892bfb2cdc15b4715c",
-      "size": 3716,
-      "normalized_sha256": "cb1ef3aab697fa8a1254d69834228318dc95b6fe1484c3892bfb2cdc15b4715c"
+      "sha256": "2223c50ff5cfd0994089913123835378893176a3879e5373a307d8c18eb6b076",
+      "size": 6757,
+      "normalized_sha256": "2223c50ff5cfd0994089913123835378893176a3879e5373a307d8c18eb6b076"
     },
     "app/llm/graph/workflows/progress.py": {
       "sha256": "514eef89ace0e201c81495b54dc265ca7ad8216d601653b146bb3789f3084b81",
@@ -17762,29 +17775,29 @@
       "normalized_sha256": "c433d5a92456eb056b984101900fdeafbcc298369b036e2f5709927dd973aecc"
     },
     "app/llm/graph/workflows/review_generate/contracts.py": {
-      "sha256": "a9f53887dc038b5ee1b89feb058cad4fe79d80ff40d67ee999995489c0a46b99",
-      "size": 5665,
-      "normalized_sha256": "8ce1c682b9c61beef6bb79ce00c31f4f0bdb4d89149b9891ddf727c3173d9fc6"
+      "sha256": "852ea18b4db7b1d058504175909156a19ff5bc277659201923b2d4ac545afeff",
+      "size": 5671,
+      "normalized_sha256": "9b661f8d38d1e9789d2c1d6a71720bfa340bc3f2dcbb24a95407f411f260d4d3"
     },
     "app/llm/graph/workflows/review_generate/nodes/assemble_review.py": {
-      "sha256": "ddfb30932472d78d84090f5623458cc2b465500fd52c8c9d2e9f82bed6bbcf51",
-      "size": 12338,
-      "normalized_sha256": "ad943552b4ce4dbaaf4cc27662ad4b351a139eeb0813f4b3371a93975830ef21"
+      "sha256": "b4ba1a3c113bcd27a61d6ec1b9f363c3023760656054aeeb7dd9756ce65b6424",
+      "size": 12344,
+      "normalized_sha256": "4dd761b81cededf2eb07b7846e9946760ba2c44d04691481c01aa11ae04e434d"
     },
     "app/llm/graph/workflows/review_generate/nodes/extract_studies.py": {
-      "sha256": "ee8a6229638152763fdb7c617ce8a2f454620047d3160827941c544a1996f9d8",
-      "size": 23971,
-      "normalized_sha256": "6876a21f6c8cf19ab48b9bf5b4cc20436e74a6a3d09139d33543c2fc931cdee5"
+      "sha256": "547a2dea6969160117ad353d52ff5081c376899d13c647246196e17ba28ac386",
+      "size": 23983,
+      "normalized_sha256": "22a7f3c652635997f51c4981586f41c4613fd68a52e996268fb7a88f088c6779"
     },
     "app/llm/graph/workflows/review_generate/nodes/finalize.py": {
-      "sha256": "10a82761f2401ae04d24470a019caf8096b2d38c7e4ef17d654e50f9ad243c95",
-      "size": 2670,
-      "normalized_sha256": "5fc806225d62b1f3ee6ceadede22b50f911a1d3ef2ea32c82705d1bf3824a8f0"
+      "sha256": "c4fe8956339a4c2259ceb5d10d4d6f6367ca16b32c2a0193cedc42d6ed776275",
+      "size": 2214,
+      "normalized_sha256": "24eace159f1f2fce5050307b1686b8355ff04ba13ad5d21ddc766ba5125ad6dd"
     },
     "app/llm/graph/workflows/review_generate/nodes/finalizing_handoff.py": {
-      "sha256": "469c3c93d3fd009889e589748d0048f8406b6d62a7bac6e1e6b118b2cca5fe04",
-      "size": 9143,
-      "normalized_sha256": "c5af9afce9fbe3c6cdf0826cfd62dd9becb8d2f0f71bce600747949ac1c4bf95"
+      "sha256": "3f0bb040bcb47841e558f7b812a122384a7054d266397c7878afb8a251dffcab",
+      "size": 9149,
+      "normalized_sha256": "30fea32aaf6de7082109d7b45a006a81dc100af4cdaeb9f7d60aedd2de708697"
     },
     "app/llm/graph/workflows/review_generate/nodes/generate_claim.py": {
       "sha256": "de5b73efca64742cdbf261963b9ae2cfb38096c2c7b33d5af08f84b99a75dfe2",
@@ -17797,15 +17810,14 @@
       "normalized_sha256": "f5a2a712d53f044a7aba61b976a7c76315d8cf461b551a510a37066d3c253914"
     },
     "app/llm/graph/workflows/review_generate/nodes/initialize.py": {
-      "sha256": "74080bce56d945997bae245db6104a38891b83af2114b97c2c3c2064a2f5efc4",
-      "size": 2475,
-      "normalized_sha256": "adc3a938b152af1e913ccc4791e8ed3bfa0a12940122d49cb0e7ad6d136c4033"
+      "sha256": "92570154f557455b4450df1f69472a4f3d83844d3ad0daf1ba62adcbcbad501f",
+      "size": 2320,
+      "normalized_sha256": "9f6b2ea9a74b84ed5b5d94e5a22ce8a0084279c2321051a2423cc13e334dd0c3"
     },
     "app/llm/graph/workflows/review_generate/nodes/load.py": {
-      "role": "index",
-      "sha256": "15932e3b5b202d29c682526b999e13255f208b48587dc6b5c5ffbd89989eec9a",
-      "size": 7883,
-      "normalized_sha256": "95aeeeac38f3aa0c094b6feede0c0d0398c54011dfc5b635563f015f4d225a63"
+      "sha256": "e752c339f7bca98e6b1c85d53abfc14125cf54ea333a7a8bad34afa20585f1d2",
+      "size": 7783,
+      "normalized_sha256": "a7488507ac4bfe45240d54d25c1f223781c445a10006286114602cb5a677c6e2"
     },
     "app/llm/graph/workflows/review_generate/nodes/persist_review.py": {
       "role": "index",
@@ -17844,9 +17856,9 @@
       "normalized_sha256": "1eec28bbbf5d83cef74a37df5f0313f149b2e31d03cb76a479d54f6fa2e32595"
     },
     "app/llm/graph/workflows/review_generate/state.py": {
-      "sha256": "bb16b6688ddfbd855751a3c62858d058d4fed80170782419caff9ae21e5978a0",
-      "size": 1653,
-      "normalized_sha256": "94d4c1313ab4464a774b6b6e8560373bf4246228f41d1f480287581564712e21"
+      "sha256": "70b2103abc7243cb4a03bd47a9ed59e802e6e475a34b53078bc5150bd5493914",
+      "size": 1676,
+      "normalized_sha256": "d2e8e78d5cda8874a100e6e482c4991c993959e2beea074dd61572057e8b7185"
     },
     "app/llm/graph/workflows/review_generate/workflow.py": {
       "sha256": "27051812a6e28c792000cf0bdcdd169f330169b19cc429623f8cd5e71db7f760",
@@ -17854,10 +17866,9 @@
       "normalized_sha256": "c93d17f8e3f9f6c360b9f136b6e5ae009e6932d9652dc5568b6bce423061a8f6"
     },
     "app/llm/graph/workflows/task_indexing/nodes/check_rag_status.py": {
-      "role": "index",
-      "sha256": "f9671d98a55c17e602a4710543435539e6a5a29354febbac90c1f7011d8033ec",
-      "size": 1505,
-      "normalized_sha256": "f9671d98a55c17e602a4710543435539e6a5a29354febbac90c1f7011d8033ec"
+      "sha256": "799e79b89fa860145d30e0997bf2e7c71af4c3d498cbdb2ca14f3a6249b00e14",
+      "size": 1823,
+      "normalized_sha256": "799e79b89fa860145d30e0997bf2e7c71af4c3d498cbdb2ca14f3a6249b00e14"
     },
     "app/llm/graph/workflows/task_indexing/nodes/common.py": {
       "sha256": "1b5d88cf44c54b5fcaf905c2e83305e5f9ec52af2664d891df813fa1d7e14915",
@@ -17865,10 +17876,9 @@
       "normalized_sha256": "1b5d88cf44c54b5fcaf905c2e83305e5f9ec52af2664d891df813fa1d7e14915"
     },
     "app/llm/graph/workflows/task_indexing/nodes/finalize.py": {
-      "role": "index",
-      "sha256": "820d964c1ad1464ecdaab9cd695973f0c192a28f9e1e811c407339ffafd18874",
-      "size": 1580,
-      "normalized_sha256": "820d964c1ad1464ecdaab9cd695973f0c192a28f9e1e811c407339ffafd18874"
+      "sha256": "2ef633e953ce1f2e4d6b740552c12d53f1ce37f9c141c9db098f0f56713a083c",
+      "size": 2154,
+      "normalized_sha256": "2ef633e953ce1f2e4d6b740552c12d53f1ce37f9c141c9db098f0f56713a083c"
     },
     "app/llm/graph/workflows/task_indexing/nodes/initialize.py": {
       "role": "index",
@@ -17882,16 +17892,14 @@
       "normalized_sha256": "27214e1cd6e4c72483e709a0e6e107b1cc556e4a25cc8ceb51c4ee1ba474f060"
     },
     "app/llm/graph/workflows/task_indexing/nodes/verify_completion.py": {
-      "role": "index",
-      "sha256": "4046e7d8f4aafff4ce85df81ce9150047e30e268109255e6778b532126a2c6a8",
-      "size": 1143,
-      "normalized_sha256": "4046e7d8f4aafff4ce85df81ce9150047e30e268109255e6778b532126a2c6a8"
+      "sha256": "b7026d412a0e089423001d2aedae7346ed10df4f1d21bf7ac3f724a1b020d04a",
+      "size": 1461,
+      "normalized_sha256": "b7026d412a0e089423001d2aedae7346ed10df4f1d21bf7ac3f724a1b020d04a"
     },
     "app/llm/graph/workflows/task_indexing/state.py": {
-      "role": "index",
-      "sha256": "3addac0a3a1d1bdb87c2a57ad7fce42680b963db2cb56d629f66d413e9555317",
-      "size": 1072,
-      "normalized_sha256": "3addac0a3a1d1bdb87c2a57ad7fce42680b963db2cb56d629f66d413e9555317"
+      "sha256": "880559e44e650376b85f37cc27aae7651685d6250184adc9d569c15e01511ac5",
+      "size": 1094,
+      "normalized_sha256": "880559e44e650376b85f37cc27aae7651685d6250184adc9d569c15e01511ac5"
     },
     "app/llm/graph/workflows/task_indexing/workflow.py": {
       "sha256": "594559ebe86d5a17f641dfd8e166d67a951dbd6a90049c663c28f3f8ea18af6c",
@@ -17982,19 +17990,24 @@
       "normalized_sha256": "3e47226375b1193f2bb7d1f3be129f4af25169b527d7dc57a2cb973312d7392f"
     },
     "app/llm/subagents/paper_search.py": {
-      "sha256": "03d17a128aebfd7fd492b4c0af88e70d301d14e2cfe2a63d178ac527050d0d26",
-      "size": 3608,
-      "normalized_sha256": "16bb6ab35911f3f90f1a99e821e745f1ff6a16cd6a79e8949d12f3ebf0730748"
+      "sha256": "1ca6f61481c1dfbc9b4cf1ffcff8c0cc76040eb134182bef6e95b2d628131bb9",
+      "size": 1329,
+      "normalized_sha256": "d5c484925ab4c74d3fb04bf8e709849a442207f7dce70413bb8097b9cc1ebcb9"
     },
     "app/llm/subagents/registry.py": {
-      "sha256": "0b440e448e00a6750251921a81e321bdb115ecf07a366b8fa19da3697af6de66",
-      "size": 3402,
-      "normalized_sha256": "cb7a4d290ddab1e16b31c6045e582d4db820f744d4dd7600039925115cf248ef"
+      "sha256": "a73862e8fc302ff40e446d071fe31a04dbbeaf601af69626462b7181e7c0b8ed",
+      "size": 3303,
+      "normalized_sha256": "8bbf8cc2076302de7cec36df964a68e01adc3555605bef6f49a081f32d1356d7"
+    },
+    "app/llm/subagents/run_context.py": {
+      "sha256": "6252ef3794756fd92f1910ccb1ee09bf5f3103e66336d7a6f9a123f1273ad182",
+      "size": 333,
+      "normalized_sha256": "6252ef3794756fd92f1910ccb1ee09bf5f3103e66336d7a6f9a123f1273ad182"
     },
     "app/llm/subagents/task_indexing.py": {
-      "sha256": "a30670069c53e8931cf841784ab11bff6661438fe02add45e1df40f970ecc37e",
-      "size": 1350,
-      "normalized_sha256": "a30670069c53e8931cf841784ab11bff6661438fe02add45e1df40f970ecc37e"
+      "sha256": "7f7f6895b61617dc85006fcca35bc45019e597dcaa4f630b04223f6b7db5d419",
+      "size": 1351,
+      "normalized_sha256": "7f7f6895b61617dc85006fcca35bc45019e597dcaa4f630b04223f6b7db5d419"
     },
     "app/llm/subagents/task_review.py": {
       "sha256": "4a4c8527730b507a8b2aa4342ec395ff14df5fbe0cc224d142a64f2d291b09bf",
@@ -18012,9 +18025,9 @@
       "normalized_sha256": "8dd84c650d39440058ffd0bcd69daf3078ad9e4292021d54eb24a5e1ba955eca"
     },
     "app/llm/tools/artifact_tools/read_artifact.py": {
-      "sha256": "f2e76b643652851e22b9c794afc3a9f125a0d4e2bb7feae0b70301b8d92ca865",
-      "size": 3119,
-      "normalized_sha256": "f2e76b643652851e22b9c794afc3a9f125a0d4e2bb7feae0b70301b8d92ca865"
+      "sha256": "480ebe6e65350c085a2b900c2522033de64929743c7d0b37f6bbf9cdcae6d292",
+      "size": 3071,
+      "normalized_sha256": "480ebe6e65350c085a2b900c2522033de64929743c7d0b37f6bbf9cdcae6d292"
     },
     "app/llm/tools/base.py": {
       "sha256": "2d57560359df58092b02c1ad4f1119fddb9240194e275bc42ebb1509da845a33",
@@ -18417,9 +18430,9 @@
       "normalized_sha256": "2cb25bedf9ec16008843c87b5c18d90e39811fa98e8d0ef5d86b20f7336ebd6f"
     },
     "app/runtime/agent_runtime.py": {
-      "sha256": "40e612f1d6ef3e23ed4be599f9f2ab4c73a5c30a6ff0e3a80db2c72bf7caf366",
-      "size": 26475,
-      "normalized_sha256": "40e612f1d6ef3e23ed4be599f9f2ab4c73a5c30a6ff0e3a80db2c72bf7caf366"
+      "sha256": "ff385632cc75ea1143e175efe98cb89088c43bc12d9572e62448781546f061fe",
+      "size": 25935,
+      "normalized_sha256": "ff385632cc75ea1143e175efe98cb89088c43bc12d9572e62448781546f061fe"
     },
     "app/runtime/session.py": {
       "sha256": "028a21864b3ae807004aa6a2220d77708a90424aacb3c4a68ad494f26e3e9913",
@@ -18593,27 +18606,27 @@
     },
     "tests/test_abstract_enrich.py": {
       "role": "observe",
-      "sha256": "de2af707db7e12db84216239bafe2344ab587c861ba7ccaf75324949cbc9000e",
-      "size": 5510,
-      "normalized_sha256": "de2af707db7e12db84216239bafe2344ab587c861ba7ccaf75324949cbc9000e"
+      "sha256": "9cbde1813f38d05450faa89fd077a35032bcdee7e21644fcbd37176ad01c94bf",
+      "size": 5555,
+      "normalized_sha256": "9cbde1813f38d05450faa89fd077a35032bcdee7e21644fcbd37176ad01c94bf"
     },
     "tests/test_agent_stream_lifecycle.py": {
       "role": "observe",
-      "sha256": "311cca36f626d0b938b9ed432d005efda97c131f639ade42ddffa51691ad4458",
-      "size": 41158,
-      "normalized_sha256": "311cca36f626d0b938b9ed432d005efda97c131f639ade42ddffa51691ad4458"
+      "sha256": "043fdea2bf5c16bc26f1fa72fe9b6024d34e59e35ada36dc22a6b37d6e9f959c",
+      "size": 44270,
+      "normalized_sha256": "043fdea2bf5c16bc26f1fa72fe9b6024d34e59e35ada36dc22a6b37d6e9f959c"
     },
     "tests/test_artifact_access.py": {
       "role": "observe",
-      "sha256": "fa9ee8abaf88e3aacbbc7f4d984c1aae0431d1e8e5bfb501ff73174744630b9d",
-      "size": 6215,
-      "normalized_sha256": "fa9ee8abaf88e3aacbbc7f4d984c1aae0431d1e8e5bfb501ff73174744630b9d"
+      "sha256": "aea6b766a2e53cc3b767060dc8d0c84cf592b579a65769463814b436231a0666",
+      "size": 8768,
+      "normalized_sha256": "aea6b766a2e53cc3b767060dc8d0c84cf592b579a65769463814b436231a0666"
     },
     "tests/test_conversation_deletion.py": {
       "role": "observe",
-      "sha256": "c0034087ca949da6f1cce89249dfea65dcac304d3a28e46b8446778c611ed5df",
-      "size": 11007,
-      "normalized_sha256": "c0034087ca949da6f1cce89249dfea65dcac304d3a28e46b8446778c611ed5df"
+      "sha256": "077658fdcf13a3869c3b9343e9d4922d2ccf158d79bf48b03d82a0fdab579a12",
+      "size": 10857,
+      "normalized_sha256": "077658fdcf13a3869c3b9343e9d4922d2ccf158d79bf48b03d82a0fdab579a12"
     },
     "tests/test_events.py": {
       "role": "observe",
@@ -18653,15 +18666,15 @@
     },
     "tests/test_paper_search_oss.py": {
       "role": "observe",
-      "sha256": "ce5c4480035bef612641de0ef484b49f40f704e7f2493e1b0329f3ee00132090",
-      "size": 11029,
-      "normalized_sha256": "ce5c4480035bef612641de0ef484b49f40f704e7f2493e1b0329f3ee00132090"
+      "sha256": "9c58ef846b8aedda8cf71385cdefb78d89f9399b431073c346e1c6dc98d7bfe6",
+      "size": 13721,
+      "normalized_sha256": "9c58ef846b8aedda8cf71385cdefb78d89f9399b431073c346e1c6dc98d7bfe6"
     },
     "tests/test_paper_search_single_source.py": {
       "role": "observe",
-      "sha256": "b4a7ff98905542273a39db64924cdb55687bd9b01afa466c7e7491cfed1952c3",
-      "size": 8398,
-      "normalized_sha256": "b4a7ff98905542273a39db64924cdb55687bd9b01afa466c7e7491cfed1952c3"
+      "sha256": "682f25a33dfc6807a4c371ebecf004ce227b11cad6a72eb354fe1d099ede23f4",
+      "size": 30426,
+      "normalized_sha256": "682f25a33dfc6807a4c371ebecf004ce227b11cad6a72eb354fe1d099ede23f4"
     },
     "tests/test_pdf_page_aware_chunking.py": {
       "role": "observe",
@@ -18701,21 +18714,21 @@
     },
     "tests/test_review_citations.py": {
       "role": "observe",
-      "sha256": "80568a0fb055f03b238bd704ac7031bbde0a8dbc43da8b9627829b30bceb04b5",
-      "size": 5960,
-      "normalized_sha256": "80568a0fb055f03b238bd704ac7031bbde0a8dbc43da8b9627829b30bceb04b5"
+      "sha256": "90a1a31e6adbef41f9dfc408cefb04260d50896768424d87571a4ab7b7c0db33",
+      "size": 6017,
+      "normalized_sha256": "90a1a31e6adbef41f9dfc408cefb04260d50896768424d87571a4ab7b7c0db33"
     },
     "tests/test_review_extract_studies.py": {
       "role": "observe",
-      "sha256": "900b4fca0f04e9c669d51eb0dee5b39f58987b177f1eb28b278583df149b9abf",
-      "size": 18460,
-      "normalized_sha256": "eb3d14cdb31453516b28f7c968a7bbf6947fac9a9073d1afc869d136edf0dd30"
+      "sha256": "520312c8768691683ca7b930bd38e92cfba34517df83fbff3bd6ed534543601b",
+      "size": 18680,
+      "normalized_sha256": "bfd39e99bd5215f6af84a0f925197fe2178df13ed01436d1334be442aae6905e"
     },
     "tests/test_review_refactor.py": {
       "role": "observe",
-      "sha256": "7ecd4790da8402254586e7e61997d443ba1260c520aa33637875ca769dad7b87",
-      "size": 48404,
-      "normalized_sha256": "7ecd4790da8402254586e7e61997d443ba1260c520aa33637875ca769dad7b87"
+      "sha256": "48daf3cb2f49816ba8f9dd7ea182229b17ee0238a775f36945db77471b4fbd66",
+      "size": 48506,
+      "normalized_sha256": "48daf3cb2f49816ba8f9dd7ea182229b17ee0238a775f36945db77471b4fbd66"
     },
     "tests/test_search_dblp.py": {
       "role": "observe",
@@ -18737,9 +18750,9 @@
     },
     "tests/test_task_indexing.py": {
       "role": "observe",
-      "sha256": "4c5ad9beecf415e68eed4611fe4e18049488d53fec33238ab8223139bd9ce82b",
-      "size": 8305,
-      "normalized_sha256": "4c5ad9beecf415e68eed4611fe4e18049488d53fec33238ab8223139bd9ce82b"
+      "sha256": "8826e55fa0cb5e78e4349b459b67e3ab64cd2a0af4972cf7a7249fb74c4e46f6",
+      "size": 8333,
+      "normalized_sha256": "8826e55fa0cb5e78e4349b459b67e3ab64cd2a0af4972cf7a7249fb74c4e46f6"
     },
     "tests/test_task_rag_batch_runner.py": {
       "role": "observe",
@@ -18755,9 +18768,9 @@
     },
     "tests/test_update_paper_search_task_status.py": {
       "role": "observe",
-      "sha256": "4caf85355c27d856d4c89fb67afdcae711cd164d0ddd5e67fc966f157aa379d7",
-      "size": 1036,
-      "normalized_sha256": "4caf85355c27d856d4c89fb67afdcae711cd164d0ddd5e67fc966f157aa379d7"
+      "sha256": "abd179358cd44c680b08b759e0bc4edcbcbb3c8d1425c70ce94c14fd49cb6158",
+      "size": 1037,
+      "normalized_sha256": "abd179358cd44c680b08b759e0bc4edcbcbb3c8d1425c70ce94c14fd49cb6158"
     }
   },
   "managed_scope": {

@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 import inspect
 import logging
+import re
 from typing import Any, Literal
 import uuid
 
@@ -20,7 +21,11 @@ from app.rag.index_construction.paper_content_index_construction import (
 from app.rag.index_construction.paper_index_construction import (
     PaperIndexConstructionModule,
 )
-from app.rag.processing.paper_rag_processor import PaperRagInput, PaperRagProcessor
+from app.rag.processing.paper_rag_processor import (
+    PaperRagInput,
+    PaperRagProcessor,
+    PaperRagResult,
+)
 from app.rag.processing.task_rag_status import (
     empty_rag_summary,
     normalize_rag_summary,
@@ -31,7 +36,9 @@ from app.rag.processing.task_rag_status import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_CLAIM_LIMIT = 20
-DEFAULT_LEASE_SECONDS = 1800
+DEFAULT_LEASE_SECONDS = settings.TASK_RAG_LEASE_SECONDS
+_URL_IN_ERROR = re.compile(r"https?://[^\s'\"<>]+")
+_MAX_LOGGED_ERROR_CHARS = 500
 _default_task_rag_batch_runner: TaskRagBatchRunner | None = None
 
 
@@ -495,6 +502,11 @@ class TaskRagBatchRunner:
                 inputs,
                 on_paper_result=on_paper_result,
             )
+            self._log_paper_results(
+                task_id=task_id,
+                batch_id=batch_id,
+                results=processed,
+            )
         except Exception as exc:
             logger.exception(
                 "Task RAG processing failed: task_id=%s, batch_id=%s",
@@ -548,6 +560,16 @@ class TaskRagBatchRunner:
         run.summary = summary
         run.committed_summary = dict(summary)
         task_state = str(complete_result["task_state"])
+        logger.info(
+            "Task RAG batch committed: task_id=%s, batch_id=%s, "
+            "claimed=%s, ready=%s, skipped=%s, failed=%s",
+            task_id,
+            batch_id,
+            len(papers),
+            summary["ready"],
+            summary["skipped"],
+            summary["failed"],
+        )
         await self._publish_progress(
             task_id=task_id,
             run=run,
@@ -576,6 +598,18 @@ class TaskRagBatchRunner:
         run: _TaskRagRun,
     ) -> _BatchRunResult:
         message = str(error) or error.__class__.__name__
+        self._log_paper_results(
+            task_id=task_id,
+            batch_id=batch_id,
+            results=[
+                PaperRagResult(
+                    paper_id=paper["paper_id"],
+                    status="failed",
+                    error=message,
+                )
+                for paper in papers
+            ],
+        )
         try:
             complete = await self.client.complete_task_rag_batch(
                 task_id=task_id,
@@ -618,6 +652,17 @@ class TaskRagBatchRunner:
         summary = self._summary_from_complete(complete_result)
         run.summary = summary
         run.committed_summary = dict(summary)
+        logger.info(
+            "Task RAG batch committed after processing failure: "
+            "task_id=%s, batch_id=%s, claimed=%s, ready=%s, skipped=%s, "
+            "failed=%s",
+            task_id,
+            batch_id,
+            len(papers),
+            summary["ready"],
+            summary["skipped"],
+            summary["failed"],
+        )
         await self._publish_progress(
             task_id=task_id,
             run=run,
@@ -671,6 +716,43 @@ class TaskRagBatchRunner:
             "ready_chunks": 0,
         })
 
+    @staticmethod
+    def _log_paper_results(
+        *,
+        task_id: int,
+        batch_id: str,
+        results: list[PaperRagResult],
+    ) -> None:
+        counts = {
+            status: sum(item.status == status for item in results)
+            for status in ("ready", "skipped", "failed")
+        }
+        logger.info(
+            "Task RAG batch processed: task_id=%s, batch_id=%s, "
+            "ready=%s, skipped=%s, failed=%s",
+            task_id,
+            batch_id,
+            counts["ready"],
+            counts["skipped"],
+            counts["failed"],
+        )
+        for item in results:
+            if item.status != "failed":
+                continue
+            logger.warning(
+                "Task RAG paper failed: task_id=%s, batch_id=%s, "
+                "paper_id=%s, error=%s",
+                task_id,
+                batch_id,
+                item.paper_id,
+                TaskRagBatchRunner._sanitize_error_for_log(item.error),
+            )
+
+    @staticmethod
+    def _sanitize_error_for_log(error: str | None) -> str:
+        value = _URL_IN_ERROR.sub("<url>", str(error or "unknown error")).strip()
+        return value[:_MAX_LOGGED_ERROR_CHARS]
+
     def _get_processor(self) -> PaperRagProcessor:
         if self.processor is None:
             assert self.processor_factory is not None
@@ -693,7 +775,10 @@ def get_task_rag_batch_runner() -> TaskRagBatchRunner:
 def _build_paper_rag_processor() -> PaperRagProcessor:
     return PaperRagProcessor(
         file_parser=FileParser(
-            mineru_client=MinerUClient(token=settings.MINERU_TOKEN),
+            mineru_client=MinerUClient(
+                token=settings.MINERU_TOKEN,
+                parse_timeout=settings.MINERU_PARSE_TIMEOUT_SECONDS,
+            ),
         ),
         data_preparation=DataPreparationModule(),
         paper_index=PaperIndexConstructionModule(),

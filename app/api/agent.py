@@ -17,6 +17,8 @@ from app.history.sqlite import get_history_database
 from app.api.schemas.agent import (
     ChatRequest,
     ChatResumeRequest,
+    RunResumeRequest,
+    RunStartResponse,
 )
 from app.core.response import ServiceResponse
 from app.database import get_db
@@ -30,10 +32,9 @@ router = APIRouter(
 )
 
 
-async def _start_chat_stream(
+async def _start_chat(
     payload: ChatRequest,
-    response: Response,
-    db: Session = Depends(get_db),
+    db: Session,
 ) -> AgentStreamSubscription:
     try:
         subscription = await get_agent_runtime().chat_stream(
@@ -46,15 +47,23 @@ async def _start_chat_stream(
         )
     except chat_log.RunAlreadyExistsError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return subscription
+
+
+async def _start_chat_stream(
+    payload: ChatRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> AgentStreamSubscription:
+    subscription = await _start_chat(payload, db)
     response.headers["X-Agent-Run-ID"] = subscription.run_id
     response.headers["Access-Control-Expose-Headers"] = "X-Agent-Run-ID"
     return subscription
 
 
-async def _start_resume_stream(
+async def _start_resume(
     payload: ChatResumeRequest,
-    response: Response,
-    db: Session = Depends(get_db),
+    db: Session,
 ) -> AgentStreamSubscription:
     subscription = await get_agent_runtime().resume_chat_stream(
         user_id=payload.user_id,
@@ -67,6 +76,15 @@ async def _start_resume_stream(
         requested_action_id=payload.action_id,
         db=db,
     )
+    return subscription
+
+
+async def _start_resume_stream(
+    payload: ChatResumeRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> AgentStreamSubscription:
+    subscription = await _start_resume(payload, db)
     response.headers["X-Agent-Run-ID"] = subscription.run_id
     response.headers["Access-Control-Expose-Headers"] = "X-Agent-Run-ID"
     return subscription
@@ -74,11 +92,12 @@ async def _start_resume_stream(
 
 async def _subscribe_to_run(
     run_id: str,
-    user_id: Annotated[str, Query(min_length=1)],
     conversation_id: Annotated[str, Query(min_length=1)],
+    user_id: Annotated[str, Query(min_length=1)] = "0",
     last_event_id: Annotated[str | None, Header()] = None,
+    after_sequence: Annotated[int | None, Query(ge=1)] = None,
 ) -> AgentStreamSubscription:
-    cursor: int | None = None
+    cursor = after_sequence
     if last_event_id is not None:
         if not last_event_id.isdecimal() or int(last_event_id) < 1:
             raise HTTPException(status_code=400, detail="Invalid Last-Event-ID")
@@ -107,7 +126,58 @@ async def _sse_events(
         )
 
 
-@router.post("/chat/stream", response_class=EventSourceResponse)
+@router.post(
+    "/runs",
+    status_code=202,
+    response_model=ServiceResponse[RunStartResponse],
+)
+async def start_run(
+    payload: ChatRequest,
+    db: Session = Depends(get_db),
+) -> ServiceResponse[RunStartResponse]:
+    subscription = await _start_chat(payload, db)
+    return ServiceResponse[RunStartResponse].build_success_response(
+        data=RunStartResponse(
+            conversation_id=payload.conversation_id,
+            run_id=subscription.run_id,
+            status="started",
+        ),
+        message="Accepted",
+    )
+
+
+@router.post(
+    "/runs/{run_id}/resume",
+    status_code=202,
+    response_model=ServiceResponse[RunStartResponse],
+)
+async def resume_run(
+    run_id: str,
+    payload: RunResumeRequest,
+    db: Session = Depends(get_db),
+) -> ServiceResponse[RunStartResponse]:
+    subscription = await _start_resume(
+        ChatResumeRequest(
+            **payload.model_dump(),
+            run_id=run_id,
+        ),
+        db,
+    )
+    return ServiceResponse[RunStartResponse].build_success_response(
+        data=RunStartResponse(
+            conversation_id=payload.conversation_id,
+            run_id=subscription.run_id,
+            status="resumed",
+        ),
+        message="Accepted",
+    )
+
+
+@router.post(
+    "/chat/stream",
+    response_class=EventSourceResponse,
+    deprecated=True,
+)
 async def stream_chat(
     subscription: Annotated[AgentStreamSubscription, Depends(_start_chat_stream)],
 ) -> AsyncIterator[ServerSentEvent]:
@@ -115,7 +185,11 @@ async def stream_chat(
         yield event
 
 
-@router.post("/chat/resume/stream", response_class=EventSourceResponse)
+@router.post(
+    "/chat/resume/stream",
+    response_class=EventSourceResponse,
+    deprecated=True,
+)
 async def chat_resume_stream(
     subscription: Annotated[AgentStreamSubscription, Depends(_start_resume_stream)],
 ) -> AsyncIterator[ServerSentEvent]:
@@ -129,6 +203,7 @@ async def stream_run_events(
 ) -> AsyncIterator[ServerSentEvent]:
     async for event in _sse_events(subscription):
         yield event
+
 
 @router.get(
     "/conversations",

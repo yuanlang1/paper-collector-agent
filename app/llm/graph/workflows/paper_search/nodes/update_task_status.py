@@ -36,10 +36,6 @@ class UpdatePaperSearchTaskStatusNode:
             task_state = TaskState.SEARCH_FAILED
             error_message = str(state.get("error") or "paper search failed")
 
-        elif stage == "partial_failed" or status == "partial_failed":
-            task_state = TaskState.SEARCH_PARTIAL_COMPLETED
-            error_message = None
-
         else:
             task_state = TaskState.SEARCH_COMPLETED
             error_message = None
@@ -68,17 +64,9 @@ class UpdatePaperSearchTaskStatusNode:
             }
 
         error = str(result.get("error") or "unknown error")
-        stage = state.get("stage")
-        status = state.get("status")
-
-        if stage == "completed":
-            stage = "partial_failed"
-        if status == "completed":
-            status = "partial_failed"
         return {
-            "stage": stage,
-            "status": status,
-            "degraded": True,
+            "stage": "failed",
+            "status": "failed",
             "progress": {
                 **state.get("progress", {}),
                 "task_status_update_attempted": 1,
@@ -90,8 +78,5 @@ class UpdatePaperSearchTaskStatusNode:
             ],
             "task_status_update_error": error,
             "remote_task_state": None,
-            "error": (
-                state.get("error")
-                or f"Task status update failed: {error}"
-            ),
+            "error": f"Task status update failed: {error}",
         }

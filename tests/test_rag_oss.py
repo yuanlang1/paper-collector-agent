@@ -1,16 +1,27 @@
 import unittest
 from uuid import uuid4
+from unittest.mock import AsyncMock, patch
 
 from langchain_core.documents import Document
+from pydantic import ValidationError
 
+from app.config import settings
 from app.infrastructure.grpc.rag_grpc_client import RagGrpcClient
+from app.infrastructure.grpc.task_service_grpc_client import TaskState
+from app.infrastructure.mineru.mineru_client import MinerUClient
+from app.llm.graph.workflows.task_indexing.nodes.run_or_wait import (
+    RunOrWaitTaskRagNode,
+)
+from app.llm.subagents.task_indexing import TaskIndexingDelegation
 from app.protos.rag.v1 import rag_pb2
 from app.rag.data_preparation.data_preparation import DataPreparationModule
 from app.rag.file_parser.file_parser import FileParser
 from app.rag.processing.paper_rag_processor import (
     PaperRagInput,
     PaperRagProcessor,
+    PaperRagResult,
 )
+from app.rag.processing.task_rag_batch_runner import TaskRagBatchRunner
 from app.schemas.file_parser import (
     BatchDocumentParseResult,
     FileParseRequest,
@@ -185,6 +196,207 @@ class FileParserSourceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result.document.metadata["source"], SOURCE_URL)
+
+
+class MinerUBatchLoggingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_logs_submission_and_batch_result_progress_without_urls(self) -> None:
+        client = MinerUClient(token="test-token")
+        client._request_json = AsyncMock(
+            side_effect=[
+                {"data": {"batch_id": "mineru-batch-1"}},
+                {
+                    "data": {
+                        "extract_result": [
+                            {
+                                "data_id": "paper-7",
+                                "state": "running",
+                                "extract_progress": {
+                                    "extracted_pages": 2,
+                                    "total_pages": 8,
+                                },
+                            }
+                        ]
+                    }
+                },
+                {
+                    "data": {
+                        "extract_result": [
+                            {
+                                "data_id": "paper-7",
+                                "state": "done",
+                                "full_zip_url": (
+                                    "https://bucket.example.test/result.zip?signature=secret"
+                                ),
+                            }
+                        ]
+                    }
+                },
+            ]
+        )
+
+        try:
+            with (
+                self.assertLogs(
+                    "app.infrastructure.mineru.mineru_client",
+                    level="INFO",
+                ) as logs,
+                patch(
+                    "app.infrastructure.mineru.mineru_client.asyncio.sleep",
+                    new=AsyncMock(),
+                ),
+            ):
+                batch_id = await client.submit_batch_urls(
+                    files=[
+                        {
+                            "url": (
+                                "https://bucket.example.test/paper.pdf?signature=secret"
+                            ),
+                            "data_id": "paper-7",
+                        }
+                    ],
+                )
+                results = await client.wait_batch(batch_id)
+        finally:
+            await client.close()
+
+        output = "\n".join(logs.output)
+        self.assertEqual(batch_id, "mineru-batch-1")
+        self.assertEqual(results[0]["state"], "done")
+        self.assertIn("MinerU batch submitted", output)
+        self.assertIn("MinerU batch result update", output)
+        self.assertIn("MinerU batch completed", output)
+        self.assertIn("paper-7", output)
+        self.assertNotIn("signature=secret", output)
+
+
+class TaskIndexingTimeoutTests(unittest.IsolatedAsyncioTestCase):
+    async def test_defaults_leave_post_processing_time_after_mineru(self) -> None:
+        request = TaskIndexingDelegation(task_id=1)
+        client = MinerUClient(token="test-token")
+        try:
+            self.assertEqual(
+                request.timeout_seconds,
+                settings.TASK_RAG_WORKFLOW_TIMEOUT_SECONDS,
+            )
+            self.assertEqual(
+                client.parse_timeout,
+                settings.MINERU_PARSE_TIMEOUT_SECONDS,
+            )
+        finally:
+            await client.close()
+
+    async def test_rejects_timeout_without_post_processing_budget(self) -> None:
+        minimum = (
+            settings.MINERU_PARSE_TIMEOUT_SECONDS
+            + settings.TASK_RAG_POST_PROCESSING_GRACE_SECONDS
+        )
+        with self.assertRaises(ValidationError):
+            TaskIndexingDelegation(task_id=1, timeout_seconds=minimum - 1)
+
+    async def test_timeout_reconciles_remote_terminal_status(self) -> None:
+        cases = (
+            ("RAG_FAILED", False, "failed", "RAG_INDEX_FAILED"),
+            ("RAG_COMPLETED", True, "verifying", None),
+            ("RAG_RUNNING", False, "timed_out", "RAG_INDEX_TIMEOUT"),
+        )
+        for task_status, complete, expected_stage, expected_error in cases:
+            with self.subTest(task_status=task_status):
+                node = RunOrWaitTaskRagNode(runner=_TimeoutRunner())
+                node._wait_for_result_or_publication_failure = AsyncMock(
+                    side_effect=TimeoutError,
+                )
+                status = _rag_status(
+                    task_status=task_status,
+                    is_rag_complete=complete,
+                )
+                with (
+                    patch(
+                        "app.llm.graph.workflows.task_indexing.nodes.run_or_wait"
+                        ".current_event_context",
+                        return_value=_EventContext(),
+                    ),
+                    patch(
+                        "app.llm.graph.workflows.task_indexing.nodes.run_or_wait"
+                        ".get_task_rag_status",
+                        new=AsyncMock(return_value=status),
+                    ),
+                ):
+                    update = await node(
+                        {
+                            "task_id": 1,
+                            "remote_task_state": TaskState.SEARCH_COMPLETED.name,
+                            "overall_summary": {},
+                            "timeout_seconds": 1,
+                        }
+                    )
+
+                self.assertEqual(update["stage"], expected_stage)
+                self.assertEqual(update.get("error_code"), expected_error)
+
+
+class TaskRagLoggingTests(unittest.TestCase):
+    def test_failed_paper_log_redacts_urls(self) -> None:
+        with self.assertLogs(
+            "app.rag.processing.task_rag_batch_runner",
+            level="WARNING",
+        ) as logs:
+            TaskRagBatchRunner._log_paper_results(
+                task_id=23,
+                batch_id="batch-1",
+                results=[
+                    PaperRagResult(
+                        paper_id=7,
+                        status="failed",
+                        error=(
+                            "MinerUError: download failed at "
+                            "https://bucket.example.test/file.pdf?signature=secret"
+                        ),
+                    )
+                ],
+            )
+
+        output = "\n".join(logs.output)
+        self.assertIn("task_id=23", output)
+        self.assertIn("paper_id=7", output)
+        self.assertIn("<url>", output)
+        self.assertNotIn("signature=secret", output)
+
+
+class _TimeoutHandle:
+    async def unsubscribe(self) -> None:
+        return None
+
+
+class _TimeoutRunner:
+    async def start_or_join(self, *args, **kwargs):
+        return _TimeoutHandle()
+
+
+class _EventContext:
+    def scoped(self, **kwargs):
+        return self
+
+
+def _rag_status(*, task_status: str, is_rag_complete: bool) -> dict:
+    return {
+        "ok": True,
+        "result": {
+            "task_id": 1,
+            "task_status": task_status,
+            "summary": {
+                "total": 1,
+                "pending": 0,
+                "indexing": 0,
+                "ready": 0,
+                "skipped": 0,
+                "failed": 1 if task_status == "RAG_FAILED" else 0,
+                "ready_chunks": 0,
+            },
+            "is_rag_complete": is_rag_complete,
+            "can_generate_review": is_rag_complete,
+        },
+        "error": None,
+    }
 
 
 if __name__ == "__main__":

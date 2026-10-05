@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.tools.file_tools.download_file import DOWNLOAD_FILE_TOOL
+from app.llm.tools.file_tools.download_file import download_file_handler
 
 
 LIBRARY_SAVE_DIR = "papers"
@@ -73,7 +73,7 @@ class PdfDownloadNode:
         paper_info: dict[str, Any],
         child_run_id: str,
     ) -> dict[str, Any]:
-        result = await DOWNLOAD_FILE_TOOL.fn(
+        result = await download_file_handler(
             {
                 "url": str(paper_info["pdf_url"]),
                 "save_dir": (
@@ -229,15 +229,7 @@ class PdfDownloadNode:
 
         return {
             "stage": "enriching_abstract",
-            "status": (
-                "partial_failed"
-                if removed_papers
-                else "running"
-            ),
-            "degraded": (
-                bool(state.get("degraded"))
-                or bool(removed_papers)
-            ),
+            "status": "running",
             "pdf_manifest_artifact_ref": artifact.artifact_uri,
             "downloaded_pdf_paths": downloaded_pdf_paths,
             "progress": {

@@ -22,7 +22,6 @@ PaperSearchStage = Literal[
     "resolving_venues",
     "recommending",
     "completed",
-    "partial_failed",
     "failed",
     "blocked",
 ]
@@ -30,7 +29,6 @@ PaperSearchStage = Literal[
 PaperSearchStatus = Literal[
     "running",
     "completed",
-    "partial_failed",
     "failed",
     "blocked",
 ]
@@ -64,7 +62,6 @@ class PaperSearchWorkflowState(TypedDict, total=False):
     original_prompt: str
 
     requested_sources: list[SourceName]
-    download_pdfs: bool
 
     query_understanding: dict[str, Any] | None
     intent_error: str | None
@@ -99,8 +96,6 @@ class PaperSearchWorkflowState(TypedDict, total=False):
     task_bound_recommendation_manifest_artifact_ref: str | None
     persisted_papers_manifest_artifact_ref: str | None
     downloaded_pdf_paths: list[str]
-    pdf_cleanup_error: str | None
-    degraded: bool
     task_status_update_error: str | None
     remote_task_state: str | None
     search_quality_artifact_ref: str | None

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
+from app.config import settings
 from app.llm.provider import ChatClient
 
 if TYPE_CHECKING:
@@ -39,4 +40,5 @@ def build_paper_search_runtime(
         error_code="PAPER_SEARCH_SUBGRAPH_FAILED",
         failure_summary="论文检索工作流执行失败，未完成结果保存。",
         stream=SubAgentStreamSpec(workflow="paper_search"),
+        timeout_seconds=settings.SUBAGENT_DISPATCH_TIMEOUT_SECONDS,
     )

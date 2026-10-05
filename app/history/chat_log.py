@@ -223,7 +223,14 @@ def append_action_result_in_transaction(
 ) -> int:
     action_id = str(result["action_id"])
     result_data = result.get("data")
-    if isinstance(result_data, dict) and set(result_data) == {"content"}:
+    if result.get("action_type") == "subagent":
+        result_content: Any = {
+            **(result_data if isinstance(result_data, dict) else {"data": result_data}),
+            "summary": result.get("summary"),
+            "error_code": result.get("error_code"),
+            "error_message": result.get("error_message"),
+        }
+    elif isinstance(result_data, dict) and set(result_data) == {"content"}:
         result_content: Any = result_data["content"]
     else:
         result_content = result_data if result_data is not None else result.get("summary", "")

@@ -4,13 +4,22 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
+from app.config import settings
+
 if TYPE_CHECKING:
     from app.llm.subagents.registry import SubAgentRuntime
 
 
 class TaskIndexingDelegation(BaseModel):
     task_id: int = Field(gt=0)
-    timeout_seconds: int = Field(default=900, ge=1, le=3_600)
+    timeout_seconds: int = Field(
+        default=settings.TASK_RAG_WORKFLOW_TIMEOUT_SECONDS,
+        ge=(
+            settings.MINERU_PARSE_TIMEOUT_SECONDS
+            + settings.TASK_RAG_POST_PROCESSING_GRACE_SECONDS
+        ),
+        le=3_600,
+    )
     poll_interval_seconds: int = Field(default=5, ge=1, le=60)
 
 
@@ -29,7 +38,7 @@ def build_task_indexing_runtime() -> SubAgentRuntime:
             name="task_indexing_agent",
             description="将已完成论文检索任务的论文索引并保存到知识库。",
             input_model=TaskIndexingDelegation,
-            requires_confirmation=True,
+            requires_confirmation=False,
             display_name="知识库索引子代理",
             confirmation_summary="将解析论文并写入知识库。",
         ),
@@ -37,4 +46,7 @@ def build_task_indexing_runtime() -> SubAgentRuntime:
         error_code="TASK_INDEXING_SUBGRAPH_FAILED",
         failure_summary="知识库索引工作流执行失败，未确认索引完成。",
         stream=SubAgentStreamSpec(workflow="task_indexing"),
+        timeout_seconds=settings.SUBAGENT_DISPATCH_TIMEOUT_SECONDS,
+        timeout_argument_name="timeout_seconds",
+        timeout_grace_seconds=settings.SUBAGENT_DISPATCH_TIMEOUT_GRACE_SECONDS,
     )

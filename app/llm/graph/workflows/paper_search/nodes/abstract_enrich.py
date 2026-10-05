@@ -327,12 +327,7 @@ class AbstractEnrichNode:
 
         return {
             "stage": "recommending",
-            "status": (
-                "partial_failed"
-                if state.get("degraded") or warnings
-                else "running"
-            ),
-            "degraded": bool(state.get("degraded")) or bool(warnings),
+            "status": "running",
             "abstract_manifest_artifact_ref": artifact.artifact_uri,
             "progress": {
                 **state.get("progress", {}),

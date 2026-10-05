@@ -34,8 +34,6 @@ async def initialize_paper_search_node(
         "warnings": [],
         "progress": {},
         "downloaded_pdf_paths": [],
-        "pdf_cleanup_error": None,
-        "degraded": False,
         "stage": "preparing_search",
         "status": "running",
         "error": None,

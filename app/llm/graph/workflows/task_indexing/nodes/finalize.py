@@ -34,10 +34,15 @@ async def finalize_task_indexing_node(
         "worker_result": state.get("worker_result"),
     }
     if state.get("stage") == "completed":
+        ready = int(data["overall_summary"].get("ready", 0))
+        skipped = int(data["overall_summary"].get("skipped", 0))
+        summary = f"知识库索引完成：{ready} 篇论文可用于全文检索。"
+        if skipped:
+            summary += f"已跳过 {skipped} 篇。"
         return build_action_result_update(
             call=call,
             status="success",
-            summary="任务论文已全部保存到知识库。",
+            summary=summary,
             data=data,
             artifact_refs=[],
             retryable=False,

@@ -39,10 +39,9 @@ CLAIM_VERIFICATION_PROMPT = ("""
     `evidence` 只保留真正参与判断的关键原文。
 
     每个 quote 必须：
-    * 逐字来自 original_evidence；
     * 使用正确的 paper_id 和 chunk_id；
     * 标记为 `supports` 或 `opposes`；
-    * 不得改写、拼接或虚构原文。
+    * 简短说明该原文如何支持或反驳 claim；可概括，不得改变原文含义。
 
     优先选择能够直接证明或反驳 claim 的最小充分证据，不要为了数量罗列弱相关片段。
 
@@ -91,8 +90,7 @@ CLAIM_VERIFICATION_PROMPT = ("""
     最终判断应遵循：
     **Evidence 决定 Claim 可以说到什么程度，而不是为了保留 Claim 去解释或选择 Evidence。**
 
-    以下仅为结构示例；quote 必须逐字取自实际 original_evidence，
-    ID 必须来自实际输入，勿照抄内容：
+    以下仅为结构示例；paper_id 和 chunk_id 必须来自实际输入，勿照抄内容：
     supported：
     ```json
     {
@@ -151,7 +149,7 @@ class EvidenceQuote(BaseModel):
     chunk_id: str = Field(description="证据在该论文中的原文片段 ID。")
     quote: str = Field(
         min_length=1,
-        description="逐字摘录自输入 original_evidence 的最小充分原文，不得改写或拼接。",
+        description="概括输入 original_evidence 中支持或反驳 Claim 的关键内容，不得改变原文含义。",
     )
     relation: Literal["supports", "opposes"] = Field(
         description="该原文片段与当前 Claim 的关系：supports 直接支持，opposes 直接反驳。",
@@ -184,7 +182,7 @@ class Verdict(BaseModel):
         description="核验状态：supported 可写作；mixed、contradicted、insufficient 均需修订当前 Claim。",
     )
     evidence: list[EvidenceQuote] = Field(
-        description="真正参与支持或反驳判断的关键逐字原文证据。",
+        description="真正参与支持或反驳判断的关键原文证据及其概括。",
     )
     reason: str = Field(
         min_length=1,
@@ -330,10 +328,8 @@ class VerifyClaimsNode:
                     sources = {(item["paper_id"], item["chunk_id"]): item for item in evidence}
                     for quote in verdict["evidence"]:
                         source = sources.get((quote["paper_id"], quote["chunk_id"]))
-                        if source is None or quote["quote"] not in source["text"]:
-                            raise ValueError(
-                                "verification quote is not locatable in original evidence"
-                            )
+                        if source is None:
+                            raise ValueError("verification source is not in original evidence")
                         quote.update(
                             {
                                 key: source.get(key)
@@ -345,12 +341,9 @@ class VerifyClaimsNode:
                                 )
                             }
                         )
-                        start = source["text"].index(quote["quote"])
-                        quote["char_start"] = start
-                        quote["char_end"] = start + len(quote["quote"])
-                        quote["text"] = source["text"][
-                            max(0, start - 500) : quote["char_end"] + 500
-                        ]
+                        quote["char_start"] = 0
+                        quote["char_end"] = len(source["text"])
+                        quote["text"] = source["text"]
                         quote["evidence_id"] = content_hash(
                             [quote["paper_id"], quote["chunk_id"], quote["quote"]]
                         )[:20]

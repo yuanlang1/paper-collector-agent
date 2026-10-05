@@ -452,13 +452,7 @@ class PersistRecommendedPapersNode:
         except Exception as exc:
             return {"stage": "failed", "status": "failed", "error": str(exc)}
 
-        degraded = bool(state.get("degraded")) or failure_count > 0 or cache_failed > 0
-        if failure_count and not persisted_count:
-            stage = "failed"
-        elif degraded:
-            stage = "partial_failed"
-        else:
-            stage = "completed"
+        stage = "completed" if persisted_count else "failed"
         warnings = list(state.get("warnings", []))
         if failure_count:
             warnings.append(
@@ -471,7 +465,6 @@ class PersistRecommendedPapersNode:
         return {
             "stage": stage,
             "status": stage,
-            "degraded": degraded,
             "persisted_papers_manifest_artifact_ref": artifact.artifact_uri,
             "progress": {
                 **state.get("progress", {}),
@@ -480,11 +473,5 @@ class PersistRecommendedPapersNode:
                 "persistence_failed": failure_count,
             },
             "warnings": warnings,
-            "error": (
-                "partial persistence failure"
-                if failure_count
-                else "paper cache update failure"
-                if cache_failed
-                else None
-            ),
+            "error": "没有推荐论文被成功保存。" if stage == "failed" else None,
         }

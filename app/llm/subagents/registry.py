@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -37,6 +37,21 @@ class SubAgentRuntime:
     error_code: str
     failure_summary: str
     stream: SubAgentStreamSpec
+    timeout_seconds: float | None = None
+    timeout_argument_name: str | None = None
+    timeout_grace_seconds: int = 0
+
+    def resolve_timeout_seconds(self, arguments: Mapping[str, Any]) -> float | None:
+        timeout_seconds = self.timeout_seconds
+        if self.timeout_argument_name:
+            requested = arguments.get(self.timeout_argument_name)
+            if isinstance(requested, int) and not isinstance(requested, bool):
+                timeout_seconds = requested
+
+        if timeout_seconds is None:
+            return None
+
+        return timeout_seconds + self.timeout_grace_seconds
 
 
 class SubAgentRegistry:
@@ -56,6 +71,10 @@ class SubAgentRegistry:
                 raise ValueError(f"子代理 {runtime.spec.name} 缺少执行图。")
             if not runtime.error_code or not runtime.failure_summary:
                 raise ValueError(f"子代理 {runtime.spec.name} 缺少失败策略。")
+            if runtime.timeout_seconds is not None and runtime.timeout_seconds <= 0:
+                raise ValueError(f"子代理 {runtime.spec.name} 的超时必须为正数。")
+            if runtime.timeout_grace_seconds < 0:
+                raise ValueError(f"子代理 {runtime.spec.name} 的超时宽限不能为负数。")
 
     def all_specs(self) -> tuple[SubAgentSpec, ...]:
         return tuple(runtime.spec for runtime in self._runtimes.values())

@@ -146,17 +146,7 @@ class FinalizePdfsNode:
                     paths,
                 )
             except (OSError, ValueError) as exc:
-                stage = state.get("stage")
-                status = state.get("status")
-                if stage == "completed":
-                    stage = "partial_failed"
-                if status == "completed":
-                    status = "partial_failed"
                 return {
-                    "stage": stage,
-                    "status": status,
-                    "degraded": True,
-                    "pdf_cleanup_error": str(exc),
                     "progress": {
                         **state.get("progress", {}),
                         "pdf_files_deleted": 0,
@@ -165,12 +155,10 @@ class FinalizePdfsNode:
                         *state.get("warnings", []),
                         f"PDF cleanup failed: {exc}",
                     ],
-                    "error": state.get("error") or f"PDF cleanup failed: {exc}",
                 }
 
         return {
             "downloaded_pdf_paths": [],
-            "pdf_cleanup_error": None,
             "progress": {
                 **state.get("progress", {}),
                 "pdf_files_deleted": deleted,

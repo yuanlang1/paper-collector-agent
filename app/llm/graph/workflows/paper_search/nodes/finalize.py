@@ -27,18 +27,13 @@ async def finalize_paper_search_node(
 
     stage = str(state.get("stage"))
     progress = state.get("progress") or {}
-    status = {
-        "completed": "success",
-        "partial_failed": "partial",
-    }.get(stage, "error")
+    status = "success" if stage == "completed" else "error"
 
     if stage == "completed":
         summary = (
             f"论文检索完成：推荐 {progress.get('recommendation_kept', 0)} 篇，"
             f"保存关系 {progress.get('persistence_saved', 0)} 条。"
         )
-    elif stage == "partial_failed":
-        summary = "论文检索部分完成，请查看警告与结果。"
     else:
         summary = "论文检索未完成。"
 
@@ -60,13 +55,11 @@ async def finalize_paper_search_node(
             "supplemental_search_rounds": state.get("supplemental_search_round", 0),
             "source_stats": state.get("source_search_stats", {}),
             "warnings": state.get("warnings", []),
-            "degraded": bool(state.get("degraded")),
-            "pdf_cleanup_error": state.get("pdf_cleanup_error"),
             "remote_task_state": state.get("remote_task_state"),
             "task_status_update_error": state.get("task_status_update_error"),
         },
         artifact_refs=[],
-        retryable=stage == "partial_failed",
-        error_code=(None if stage in {"completed", "partial_failed"} else stage),
+        retryable=False,
+        error_code=None if stage == "completed" else stage,
         error_message=state.get("error"),
     )

@@ -64,10 +64,6 @@ class SubagentProgressEvent(PayloadEvent):
     type: Literal["subagent.progress"] = "subagent.progress"
 
 
-class TimelineStepEvent(PayloadEvent):
-    type: Literal["timeline.step"] = "timeline.step"
-
-
 class MemoryProgressEvent(PayloadEvent):
     type: Literal["memory.progress"] = "memory.progress"
 
@@ -100,7 +96,6 @@ Event = Annotated[
     | ToolFinishedEvent
     | ToolFailedEvent
     | SubagentProgressEvent
-    | TimelineStepEvent
     | MemoryProgressEvent
     | NodeErrorEvent
     | SubagentStartedEvent

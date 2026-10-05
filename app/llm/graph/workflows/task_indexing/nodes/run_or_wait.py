@@ -20,6 +20,7 @@ from app.rag.processing.task_rag_batch_runner import (
     wait_for_rag_run,
 )
 from app.rag.processing.task_rag_status import (
+    get_task_rag_status,
     is_rag_failed,
     rag_progress_percent,
     wait_for_rag_terminal_status,
@@ -93,10 +94,27 @@ class RunOrWaitTaskRagNode:
                 timeout_seconds=state["timeout_seconds"],
             )
         except TimeoutError:
+            status = await get_task_rag_status(task_id)
+            update = status_update(status) if status.get("ok") else {}
+            if status.get("ok") and is_rag_failed(status):
+                return {
+                    **update,
+                    **failure(
+                        code="RAG_INDEX_FAILED",
+                        message="RAG 索引在等待超时边界已失败。",
+                        state={**state, **update},
+                    ),
+                }
+            if status.get("ok") and status["result"]["is_rag_complete"]:
+                return {
+                    **update,
+                    "stage": "verifying",
+                    "status": "running",
+                }
             return failure(
                 code="RAG_INDEX_TIMEOUT",
                 message="等待 RAG 索引完成超时，后台索引仍在继续。",
-                state=state,
+                state={**state, **update},
                 timed_out=True,
             )
         finally:

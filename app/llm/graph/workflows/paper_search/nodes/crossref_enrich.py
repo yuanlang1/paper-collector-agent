@@ -324,8 +324,7 @@ class CrossrefMetadataEnrichmentNode:
 
         return {
             "stage": "resolving_venues",
-            "status": "partial_failed" if warnings else "running",
-            "degraded": bool(state.get("degraded")) or bool(warnings),
+            "status": "running",
             "crossref_enrichment_manifest_artifact_ref": artifact.artifact_uri,
             "progress": {
                 **state.get("progress", {}),

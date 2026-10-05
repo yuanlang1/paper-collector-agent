@@ -374,31 +374,16 @@ class RecommendationNode:
             removed_recommendation_failed
             or skipped_invalid_existing
         )
-        degraded = bool(state.get("degraded")) or recommendation_failed
 
         if not kept_papers:
-            if recommendation_failed and not removed_low_recommendation:
-                terminal_stage = "failed"
-            elif degraded:
-                terminal_stage = "partial_failed"
-            else:
-                terminal_stage = "completed"
             empty_warning = (
                 "所有候选论文的推荐评分均失败。"
-                if terminal_stage == "failed"
+                if recommendation_failed and not removed_low_recommendation
                 else "没有推荐星数大于或等于 3 的论文。"
             )
-            terminal_error = {
-                "completed": None,
-                "partial_failed": (
-                    "recommendation candidates were partially unavailable"
-                ),
-                "failed": "all recommendation candidates failed",
-            }[terminal_stage]
             return {
-                "stage": terminal_stage,
-                "status": terminal_stage,
-                "degraded": degraded,
+                "stage": "failed",
+                "status": "failed",
                 "recommendation_manifest_artifact_ref": (
                     artifact.artifact_uri
                 ),
@@ -430,17 +415,12 @@ class RecommendationNode:
                     ),
                     empty_warning,
                 ],
-                "error": terminal_error,
+                "error": "没有可用的推荐论文。",
             }
 
         return {
             "stage": "persisting_papers",
-            "status": (
-                "partial_failed"
-                if degraded
-                else "running"
-            ),
-            "degraded": degraded,
+            "status": "running",
             "recommendation_manifest_artifact_ref": artifact.artifact_uri,
             "progress": {
                 **state.get("progress", {}),

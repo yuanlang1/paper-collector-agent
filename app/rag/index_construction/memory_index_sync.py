@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from functools import lru_cache
@@ -37,6 +38,18 @@ class MemoryIndexSynchronizer:
                 "upsert facts", 
                 lambda: self._fact_index().upsert_facts(facts)
             )
+
+    async def ensure_collections(self) -> None:
+        await self._sync(
+            "ensure memory collections",
+            self._ensure_collections,
+        )
+
+    async def _ensure_collections(self) -> None:
+        await asyncio.gather(
+            self._fact_index().ensure_collection(),
+            self._episode_index().ensure_collection(),
+        )
 
     async def delete_facts(self, fact_ids: Iterable[int]) -> None:
         fact_ids = list(fact_ids)

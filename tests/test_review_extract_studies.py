@@ -75,7 +75,7 @@ class _Model:
         return self
 
     async def ainvoke(self, messages):
-        self.messages.append(messages)
+        self.messages.append(list(messages))
         return self.responses.pop(0)
 
 
@@ -89,6 +89,32 @@ class _FailingModel:
 
 def _tool_call(name: str, arguments: dict, call_id: str) -> AIMessage:
     return AIMessage(content="", tool_calls=[{"name": name, "args": arguments, "id": call_id}],)
+
+
+def _profile_response(
+    *,
+    core_problem: dict | None = None,
+    methods: dict | None = None,
+    main_discussion: dict | None = None,
+) -> AIMessage:
+    return AIMessage(
+        content=json.dumps(
+            {
+                "core_problem": core_problem or {
+                    "summary": "Addresses issue A.",
+                    "source_chunk_ids": ["chunk-1"],
+                },
+                "methods": methods or {
+                    "summary": "Uses method B.",
+                    "source_chunk_ids": ["chunk-2"],
+                },
+                "main_discussion": main_discussion or {
+                    "summary": "Discusses finding C.",
+                    "source_chunk_ids": ["chunk-4"],
+                },
+            }
+        )
+    )
 
 
 class _PaperClient:
@@ -205,22 +231,12 @@ class ExtractStudiesNodeTests(unittest.IsolatedAsyncioTestCase):
     async def test_profile_loop_uses_opening_pages_then_current_paper_rag(self) -> None:
         model = _Model(
             [
-                _tool_call("search_current_paper", {"query": "discussion finding C"}, "search-1",),
                 _tool_call(
-                    "submit_article_profile",
-                    {
-                        "core_problem": {
-                            "summary": "Addresses issue A.",
-                            "source_chunk_ids": ["chunk-1"],
-                        },
-                        "methods": {"summary": "Uses method B.", "source_chunk_ids": ["chunk-2"],},
-                        "main_discussion": {
-                            "summary": "Discusses finding C.",
-                            "source_chunk_ids": ["chunk-4"],
-                        },
-                    },
-                    "submit-1",
+                    "search_paper_index",
+                    {"paper_id": "1", "querys": ["discussion finding C"]},
+                    "search-1",
                 ),
+                _profile_response(),
             ]
         )
         retrieval = _Retrieval({"discussion finding C": [self.documents[3]],})
@@ -253,6 +269,7 @@ class ExtractStudiesNodeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("topic", json.loads(first_prompt))
         self.assertIn("zh-CN", first_prompt)
         self.assertTrue(any(isinstance(message, ToolMessage) for message in model.messages[1]))
+        self.assertEqual(model.tools[0]["function"]["name"], "search_paper_index")
 
     async def test_all_not_reported_is_unusable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -263,14 +280,11 @@ class ExtractStudiesNodeTests(unittest.IsolatedAsyncioTestCase):
                 reading_index=_ReadingIndex(),
                 model=_Model(
                     [
-                        _tool_call(
-                            "submit_article_profile",
-                            {
-                                field: {"summary": "not_reported", "source_chunk_ids": [],}
-                                for field in ("core_problem", "methods", "main_discussion",)
-                            },
-                            "submit-1",
-                        )
+                        _profile_response(
+                            core_problem={"summary": "not_reported", "source_chunk_ids": []},
+                            methods={"summary": "not_reported", "source_chunk_ids": []},
+                            main_discussion={"summary": "not_reported", "source_chunk_ids": []},
+                        ),
                     ]
                 ),
                 corpus_reader=_CorpusReader(self.documents),
@@ -288,21 +302,22 @@ class ExtractStudiesNodeTests(unittest.IsolatedAsyncioTestCase):
                 reading_index=_ReadingIndex(),
                 model=_Model(
                     [
-                        _tool_call(
-                            "submit_article_profile",
-                            {
-                                "core_problem": {
-                                    "summary": "Addresses issue A.",
-                                    "source_chunk_ids": ["unknown-chunk"],
-                                },
-                                "methods": {"summary": "not_reported", "source_chunk_ids": [],},
-                                "main_discussion": {
-                                    "summary": "not_reported",
-                                    "source_chunk_ids": [],
-                                },
+                        _profile_response(
+                            core_problem={
+                                "summary": "Addresses issue A.",
+                                "source_chunk_ids": ["unknown-chunk"],
                             },
-                            "submit-1",
-                        )
+                            methods={"summary": "not_reported", "source_chunk_ids": []},
+                            main_discussion={"summary": "not_reported", "source_chunk_ids": []},
+                        ),
+                        _profile_response(
+                            core_problem={
+                                "summary": "Addresses issue A.",
+                                "source_chunk_ids": ["unknown-chunk"],
+                            },
+                            methods={"summary": "not_reported", "source_chunk_ids": []},
+                            main_discussion={"summary": "not_reported", "source_chunk_ids": []},
+                        ),
                     ]
                 ),
                 corpus_reader=_CorpusReader(self.documents),
@@ -313,6 +328,155 @@ class ExtractStudiesNodeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(update["stage"], "failed")
         self.assertIn("unseen chunks", report["failures"][0]["error"])
+        self.assertEqual(report["failures"][0]["error_category"], "profile_protocol")
+        self.assertNotIn("round_index", report["failures"][0])
+
+    async def test_profile_corrects_invalid_json_once(self) -> None:
+        model = _Model([AIMessage(content="{invalid"), _profile_response()])
+        with tempfile.TemporaryDirectory() as directory:
+            store = LocalArtifactStore(base_dir=directory)
+            corpus = await self._corpus_artifact(store)
+            update = await ExtractStudiesNode(
+                artifact_store=store,
+                reading_index=_ReadingIndex(),
+                model=model,
+                corpus_reader=_CorpusReader(self.documents),
+                content_retrieval=_Retrieval({}),
+            )(self._state(corpus.artifact_uri))
+
+        self.assertEqual(update["stage"], "generating_framework")
+        self.assertIn("invalid JSON", model.messages[1][-1].content)
+
+    async def test_profile_accepts_multiple_search_calls_in_one_round(self) -> None:
+        model = _Model(
+            [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "search_paper_index",
+                            "args": {"paper_id": "1", "querys": ["methods"]},
+                            "id": "search-1",
+                        },
+                        {
+                            "name": "search_paper_index",
+                            "args": {"paper_id": "1", "querys": ["discussion"]},
+                            "id": "search-2",
+                        },
+                    ],
+                ),
+                _profile_response(),
+            ]
+        )
+        retrieval = _Retrieval({
+            "methods": [self.documents[1]],
+            "discussion": [self.documents[3]],
+        })
+        with tempfile.TemporaryDirectory() as directory:
+            store = LocalArtifactStore(base_dir=directory)
+            corpus = await self._corpus_artifact(store)
+            update = await ExtractStudiesNode(
+                artifact_store=store,
+                reading_index=_ReadingIndex(),
+                model=model,
+                corpus_reader=_CorpusReader(self.documents),
+                content_retrieval=retrieval,
+                max_rounds=2,
+            )(self._state(corpus.artifact_uri))
+
+        self.assertEqual(update["stage"], "generating_framework")
+        self.assertEqual([call[0] for call in retrieval.calls], ["methods", "discussion"])
+
+    async def test_profile_rejects_wrong_paper_id_then_accepts_json(self) -> None:
+        model = _Model(
+            [
+                _tool_call(
+                    "search_paper_index",
+                    {"paper_id": "2", "querys": ["methods"]},
+                    "search-1",
+                ),
+                _profile_response(),
+            ]
+        )
+        retrieval = _Retrieval({})
+        with tempfile.TemporaryDirectory() as directory:
+            store = LocalArtifactStore(base_dir=directory)
+            corpus = await self._corpus_artifact(store)
+            update = await ExtractStudiesNode(
+                artifact_store=store,
+                reading_index=_ReadingIndex(),
+                model=model,
+                corpus_reader=_CorpusReader(self.documents),
+                content_retrieval=retrieval,
+            )(self._state(corpus.artifact_uri))
+
+        self.assertEqual(update["stage"], "generating_framework")
+        self.assertEqual(retrieval.calls, [])
+        self.assertIn("paper_id must match", model.messages[1][-2].content)
+
+    async def test_profile_report_records_protocol_error(self) -> None:
+        model = _Model(
+            [
+                _tool_call(
+                    "search_paper_index",
+                    {"paper_id": "2", "querys": ["methods"]},
+                    "search-1",
+                ),
+                _tool_call(
+                    "search_paper_index",
+                    {"paper_id": "2", "querys": ["methods"]},
+                    "search-2",
+                ),
+            ]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = LocalArtifactStore(base_dir=directory)
+            corpus = await self._corpus_artifact(store)
+            update = await ExtractStudiesNode(
+                artifact_store=store,
+                reading_index=_ReadingIndex(),
+                model=model,
+                corpus_reader=_CorpusReader(self.documents),
+                content_retrieval=_Retrieval({}),
+            )(self._state(corpus.artifact_uri))
+            report = await store.read_json_uri(update["study_extraction_report_artifact_ref"])
+
+        failure = report["failures"][0]
+        self.assertEqual(failure["error_category"], "profile_protocol")
+        self.assertIn("correction exhausted", failure["error"])
+
+    async def test_profile_rejects_search_after_budget_then_accepts_json(self) -> None:
+        model = _Model(
+            [
+                _tool_call(
+                    "search_paper_index",
+                    {"paper_id": "1", "querys": ["methods"]},
+                    "search-1",
+                ),
+                _tool_call(
+                    "search_paper_index",
+                    {"paper_id": "1", "querys": ["discussion"]},
+                    "search-2",
+                ),
+                _profile_response(),
+            ]
+        )
+        retrieval = _Retrieval({"methods": [self.documents[1]]})
+        with tempfile.TemporaryDirectory() as directory:
+            store = LocalArtifactStore(base_dir=directory)
+            corpus = await self._corpus_artifact(store)
+            update = await ExtractStudiesNode(
+                artifact_store=store,
+                reading_index=_ReadingIndex(),
+                model=model,
+                corpus_reader=_CorpusReader(self.documents),
+                content_retrieval=retrieval,
+                max_rounds=2,
+            )(self._state(corpus.artifact_uri))
+
+        self.assertEqual(update["stage"], "generating_framework")
+        self.assertEqual([call[0] for call in retrieval.calls], ["methods"])
+        self.assertIn("budget is exhausted", model.messages[2][-2].content)
 
     async def test_profiles_run_with_bounded_paper_concurrency(self) -> None:
         active = 0

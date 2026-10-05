@@ -49,13 +49,11 @@ def _terminal_target(state: PaperSearchWorkflowState) -> str:
         and (
             state.get("stage") in {
                 "completed",
-                "partial_failed",
                 "failed",
                 "blocked",
             }
             or state.get("status") in {
                 "completed",
-                "partial_failed",
                 "failed",
                 "blocked",
             }

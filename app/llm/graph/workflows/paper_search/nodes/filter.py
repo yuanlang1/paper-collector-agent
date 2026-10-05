@@ -737,15 +737,7 @@ class NormalizeDeduplicateFilterNode:
 
         return {
             "stage": "reviewing_search",
-            "status": (
-                "partial_failed"
-                if lookup_warning
-                else "running"
-            ),
-            "degraded": (
-                bool(state.get("degraded"))
-                or lookup_warning is not None
-            ),
+            "status": "running",
             "normalized_manifest_artifact_ref": artifact.artifact_uri,
             "existing_papers_manifest_artifact_ref": (
                 existing_artifact.artifact_uri

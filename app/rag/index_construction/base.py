@@ -183,6 +183,17 @@ class BaseQdrantIndexConstructionModule(ABC):
     async def collection_exists(self) -> bool:
         return await self.client.collection_exists(collection_name = self.collection_name)
 
+    async def ensure_collection(self) -> None:
+        if await self.collection_exists():
+            return
+
+        vector = await self.dense_embeddings.aembed_query(
+            "collection bootstrap",
+        )
+        if not vector:
+            raise RuntimeError("dense embedding provider returned an empty vector")
+        await self._ensure_collection(len(vector))
+
     async def delete_by_business_ids(
         self,
         business_ids: Sequence[object],

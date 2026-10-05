@@ -28,7 +28,16 @@ async def check_task_rag_status_node(
 
     update = status_update(status)
     if status["result"]["is_rag_complete"]:
-        return {**update, "stage": "completed", "status": "completed"}
+        if status["result"]["can_generate_review"]:
+            return {**update, "stage": "completed", "status": "completed"}
+        return {
+            **update,
+            **failure(
+                code="RAG_NO_USABLE_CONTENT",
+                message="RAG 已完成，但没有可用于全文检索的论文。",
+                state={**state, **update},
+            ),
+        }
     if is_rag_failed(status):
         return {
             **update,

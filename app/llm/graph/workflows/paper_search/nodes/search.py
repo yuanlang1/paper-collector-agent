@@ -222,12 +222,10 @@ class SearchNode:
                     "error": "所有检索来源均失败。",
                 }
 
-        degraded = bool(failed_sources or partial_sources)
         return {
             **update,
             "stage": "normalizing",
-            "status": "partial_failed" if partial_sources else "running",
-            "degraded": bool(state.get("degraded")) or degraded,
+            "status": "running",
             "progress": progress,
             "error": None,
         }

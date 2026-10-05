@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
+
+from app.config import settings
 from app.llm.provider import ChatClient
 
 if TYPE_CHECKING:
@@ -46,7 +48,7 @@ def build_task_review_runtime(*, chat: ChatClient) -> SubAgentRuntime:
                 "systematic/scoping 仅指定组织方式，不代表执行了正式系统综述检索与筛选协议。"
             ),
             input_model=TaskReviewDelegation,
-            requires_confirmation=True,
+            requires_confirmation=False,
             display_name="文献综述子代理",
             confirmation_summary="将分析已有文献并生成综述建议。",
         ),
@@ -54,4 +56,5 @@ def build_task_review_runtime(*, chat: ChatClient) -> SubAgentRuntime:
         error_code="TASK_REVIEW_SUBGRAPH_FAILED",
         failure_summary="文献综述工作流执行失败，未完成结果保存。",
         stream=SubAgentStreamSpec(workflow="task_review"),
+        timeout_seconds=settings.SUBAGENT_DISPATCH_TIMEOUT_SECONDS,
     )

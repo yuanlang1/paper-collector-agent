@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping
 from typing import Any
@@ -38,6 +39,31 @@ def build_subagent_failure_update(
         retryable=retryable,
         error_code=error_code,
         error_message=str(exception),
+    )
+
+
+def build_subagent_timeout_update(
+    *,
+    call: Mapping[str, Any],
+    subagent: str,
+    child_run_id: str,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    error = TimeoutError(f"subagent timed out after {timeout_seconds} seconds")
+    return build_action_result_update(
+        call=call,
+        status="error",
+        summary="子代理执行超时。",
+        data={
+            "subagent": subagent,
+            "child_run_id": child_run_id,
+            "timeout_seconds": timeout_seconds,
+            "exception_type": type(error).__name__,
+        },
+        artifact_refs=[],
+        retryable=True,
+        error_code="SUBAGENT_TIMEOUT",
+        error_message=str(error),
     )
 
 
@@ -92,6 +118,10 @@ class SubAgentNode:
         }
         if runtime.stream.workflow == "task_review":
             child_config["recursion_limit"] = 128
+        arguments = call.get("args")
+        timeout_seconds = runtime.resolve_timeout_seconds(
+            arguments if isinstance(arguments, Mapping) else {},
+        )
         with bind_event_context(child_context):
             await child_bus.publish(
                 child_context.event(
@@ -106,9 +136,55 @@ class SubAgentNode:
                 ),
             )
             try:
-                result = await runtime.graph.ainvoke(
-                    child_state,
-                    config=child_config,
+                child_task = asyncio.create_task(
+                    runtime.graph.ainvoke(
+                        child_state,
+                        config=child_config,
+                    ),
+                    name=(
+                        f"subagent-{runtime.spec.name}-{call['id']}"
+                    ),
+                )
+                if timeout_seconds is None:
+                    result = await child_task
+                else:
+                    result = await asyncio.wait_for(
+                        child_task,
+                        timeout=timeout_seconds,
+                    )
+            except TimeoutError:
+                if child_task.done() and not child_task.cancelled():
+                    raise
+                if not child_task.done():
+                    child_task.cancel()
+                await asyncio.gather(child_task, return_exceptions=True)
+                assert timeout_seconds is not None
+                logger.warning(
+                    "Subgraph timed out: subagent=%s, child_run_id=%s, "
+                    "timeout_seconds=%s",
+                    runtime.spec.name,
+                    child_run_id,
+                    timeout_seconds,
+                )
+                await child_bus.publish(
+                    child_context.event(
+                        "subagent_failed",
+                        {
+                            "message": "子代理执行超时。",
+                            "status": "error",
+                            "data": {
+                                "error_code": "SUBAGENT_TIMEOUT",
+                                "timeout_seconds": timeout_seconds,
+                                "child_run_id": child_run_id,
+                            },
+                        },
+                    ),
+                )
+                return build_subagent_timeout_update(
+                    call=call,
+                    subagent=runtime.spec.name,
+                    child_run_id=child_run_id,
+                    timeout_seconds=timeout_seconds,
                 )
             except GraphInterrupt:
                 raise

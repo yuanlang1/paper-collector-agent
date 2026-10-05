@@ -17,7 +17,6 @@ from app.events.models import (
     SubagentFinishedEvent,
     SubagentProgressEvent,
     SubagentStartedEvent,
-    TimelineStepEvent,
     ToolFailedEvent,
     ToolFinishedEvent,
     ToolStartedEvent,
@@ -70,7 +69,6 @@ def event_from_envelope(envelope: Mapping[str, Any], *, run_id: str) -> Event:
         "subagent_progress": SubagentProgressEvent,
         "subagent_completed": SubagentProgressEvent,
         "subagent_failed": SubagentProgressEvent,
-        "timeline_step": TimelineStepEvent,
         "node_error": NodeErrorEvent,
     }.get(name)
     if event_class is not None:
@@ -112,8 +110,6 @@ def sse_name_for(event: Event) -> str:
         return "subagent_completed" if event.status in {"success", "partial"} else "subagent_failed"
     if isinstance(event, SubagentProgressEvent):
         return str(event.payload["sse_name"])
-    if isinstance(event, TimelineStepEvent):
-        return "timeline_step"
     if isinstance(event, MemoryProgressEvent):
         return str(event.payload["sse_name"])
     if isinstance(event, NodeErrorEvent):

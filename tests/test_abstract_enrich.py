@@ -134,7 +134,7 @@ class AbstractEnrichNodeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(paper["paper_info"]["keywords"], "source keyword")
         self.assertIsNone(paper["paper_info"]["ai_abstract"])
         self.assertEqual(model.calls, [])
-        self.assertEqual(update["status"], "partial_failed")
+        self.assertEqual(update["status"], "running")
 
     async def test_keeps_source_fields_when_single_request_fails(self) -> None:
         model = RecordingModel(RuntimeError("LLM unavailable"))
@@ -153,7 +153,7 @@ class AbstractEnrichNodeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(paper["paper_info"]["keywords"], "source keyword")
         self.assertIsNone(paper["paper_info"]["ai_abstract"])
         self.assertEqual(len(model.calls), 1)
-        self.assertEqual(update["status"], "partial_failed")
+        self.assertEqual(update["status"], "running")
 
 
 if __name__ == "__main__":

@@ -12,9 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.provider import ChatClient, ModelOptions
-from app.llm.tools.venue_tools.easy_scholar import (
-    EASY_SCHOLAR_VENUE_TOOL,
-)
+from app.llm.tools.venue_tools.easy_scholar import easy_scholar_venue_handler
 
 
 VENUE_FALLBACK_SYSTEM_PROMPT = """
@@ -335,7 +333,7 @@ class VenueResolutionNode:
             ModelVenueInfoDraft,
             options=ModelOptions(temperature=0),
         )
-        self.easy_scholar_handler = easy_scholar_handler or EASY_SCHOLAR_VENUE_TOOL.fn
+        self.easy_scholar_handler = easy_scholar_handler or easy_scholar_venue_handler
     
     async def _query_easy_scholar(
         self,
@@ -549,15 +547,7 @@ class VenueResolutionNode:
 
         return {
             "stage": "downloading_pdfs",
-            "status": (
-                "partial_failed"
-                if failed_count
-                else "running"
-            ),
-            "degraded": (
-                bool(state.get("degraded"))
-                or failed_count > 0
-            ),
+            "status": "running",
             "venue_manifest_artifact_ref": artifact.artifact_uri,
             "progress": {
                 **state.get("progress", {}),

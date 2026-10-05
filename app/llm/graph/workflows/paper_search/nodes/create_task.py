@@ -128,11 +128,7 @@ class CreatePaperSearchTaskNode:
                 }
             return {
                 "stage": "persisting_papers",
-                "status": (
-                    "partial_failed"
-                    if state.get("degraded")
-                    else "running"
-                ),
+                "status": "running",
                 "task_bound_recommendation_manifest_artifact_ref": (
                     bound_artifact_uri
                 ),
@@ -234,11 +230,7 @@ class CreatePaperSearchTaskNode:
 
         return {
             "stage": "persisting_papers",
-            "status": (
-                "partial_failed"
-                if state.get("degraded")
-                else "running"
-            ),
+            "status": "running",
             "create_task_payload": payload,
             "paper_service_task_id": task_id,
             "task_bound_recommendation_manifest_artifact_ref": (

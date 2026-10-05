@@ -24,11 +24,12 @@ from app.llm.graph.workflows.review_generate.nodes.assemble_review import (
 )
 from app.llm.graph.workflows.review_generate.nodes.extract_studies import (
     ARTICLE_PROFILE_PROMPT,
-    ARTICLE_PROFILE_TOOLS,
-    PROFILE_SUBMISSION_PROMPT,
     ProfileField,
-    SearchCurrentPaperArgs,
     SubmittedArticleProfile,
+)
+from app.llm.tools.search_tools.search_paper_index import (
+    SEARCH_PAPER_INDEX_TOOL_SCHEMA,
+    SearchPaperIndexArgs,
 )
 from app.llm.graph.workflows.review_generate.nodes.generate_claim import (
     CLAIM_GENERATION_PROMPT,
@@ -77,7 +78,10 @@ from app.llm.graph.workflows.task_indexing.nodes.common import (
     total_progress_payload,
 )
 from app.llm.provider.structured_output import build_json_mode_instruction
-from app.llm.subagents.task_review import TaskReviewDelegation
+from app.llm.subagents.task_review import (
+    TaskReviewDelegation,
+    build_task_review_runtime,
+)
 
 
 class Model:
@@ -467,6 +471,23 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
         result["revisions"] = [revision("add_claim", "other_section")]
         update = await self.verify(result)
         self.assertEqual(update["error_code"], "VERIFICATION_FAILED")
+
+    async def test_verify_allows_a_nonliteral_quote_from_a_known_source(self):
+        await self.seed_claim()
+        await self.retrieve()
+        result = verdict()
+        result["evidence"][0]["quote"] = "The result varies by condition."
+
+        update = await self.verify(result)
+
+        self.assertEqual(update["stage"], "rendering_sections")
+        verification = await self.store.read_json_uri(
+            update["claim_verification_artifact_ref"]
+        )
+        evidence = verification["claims"][0]["evidence"][0]
+        self.assertEqual(evidence["text"], "The result is conditional.")
+        self.assertEqual(evidence["char_start"], 0)
+        self.assertEqual(evidence["char_end"], len(evidence["text"]))
 
     async def test_verify_rejects_non_claim_revision_types(self):
         await self.seed_claim()
@@ -877,6 +898,11 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
                     max_reflection_rounds=value,
                 )
 
+    def test_review_subagent_does_not_require_confirmation(self):
+        runtime = build_task_review_runtime(chat=Mock())
+
+        self.assertFalse(runtime.spec.requires_confirmation)
+
     def test_writing_revision_budget_default_and_bounds(self):
         self.assertEqual(TaskReviewDelegation(task_id=1, topic="topic").max_writing_revision_rounds, 1)
         for value in (0, 5):
@@ -1170,7 +1196,7 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
 
 class ReviewPromptSchemaTests(unittest.TestCase):
     schemas = (
-        SearchCurrentPaperArgs,
+        SearchPaperIndexArgs,
         ProfileField,
         SubmittedArticleProfile,
         ExcludedPaper,
@@ -1210,17 +1236,15 @@ class ReviewPromptSchemaTests(unittest.TestCase):
         self.assertIn("章节正文中绑定 Claim 与证据引用的一个论证单元", instruction)
         self.assertIn("本节 arguments 的简短衔接性概述", instruction)
 
-        search_parameters = ARTICLE_PROFILE_TOOLS[0]["function"]["parameters"]
-        submit_parameters = ARTICLE_PROFILE_TOOLS[1]["function"]["parameters"]
-        self.assertTrue(search_parameters["properties"]["query"].get("description"))
-        self.assertTrue(submit_parameters["properties"]["core_problem"].get("description"))
+        search_parameters = SEARCH_PAPER_INDEX_TOOL_SCHEMA["function"]["parameters"]
+        self.assertTrue(search_parameters["properties"]["querys"].get("description"))
+        self.assertTrue(search_parameters["properties"]["paper_id"].get("description"))
+        self.assertNotIn("quote 必须逐字", CLAIM_VERIFICATION_PROMPT)
+        self.assertIn("可概括", EvidenceQuote.model_fields["quote"].description)
 
         extract_examples = self.json_examples(ARTICLE_PROFILE_PROMPT)
-        SearchCurrentPaperArgs.model_validate(extract_examples[0])
+        SearchPaperIndexArgs.model_validate(extract_examples[0])
         SubmittedArticleProfile.model_validate(extract_examples[1])
-        SubmittedArticleProfile.model_validate(
-            self.json_examples(PROFILE_SUBMISSION_PROMPT)[0]
-        )
         for prompt, model in (
             (FRAMEWORK_PROMPT, ReviewFramework),
             (CLAIM_GENERATION_PROMPT, ClaimsPlan),

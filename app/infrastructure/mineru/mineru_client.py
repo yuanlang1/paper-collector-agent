@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
+from collections import Counter
 from io import BytesIO
 from typing import Any, Literal
 from zipfile import BadZipFile, ZipFile
 import httpx
 from app.config import settings
+
+
+logger = logging.getLogger(__name__)
 
 MinerUModelVersion = Literal[
     "pipeline",
@@ -51,7 +56,7 @@ class MinerUClient:
         token: str,
         base_url: str = BASE_URL,
         request_timeout: float = 60,
-        parse_timeout: float = 900,
+        parse_timeout: float = settings.MINERU_PARSE_TIMEOUT_SECONDS,
         poll_interval: float = 3,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -139,6 +144,11 @@ class MinerUClient:
         if len(files) > 50:
             raise ValueError("MinerU batch supports at most 50 files")
 
+        logger.info(
+            "MinerU batch submission started: file_count=%s, model_version=%s",
+            len(files),
+            model_version,
+        )
         body = {
             "files": files,
             "model_version": model_version,
@@ -156,13 +166,20 @@ class MinerUClient:
         if not batch_id:
             raise MinerUResultError("MinerU response does not contain batch_id")
 
-        return str(batch_id)
+        normalized_batch_id = str(batch_id)
+        logger.info(
+            "MinerU batch submitted: batch_id=%s, file_count=%s",
+            normalized_batch_id,
+            len(files),
+        )
+        return normalized_batch_id
 
     async def wait_batch(
         self,
         batch_id: str,
     ) -> list[dict[str, Any]]:
         deadline = time.monotonic() + self.parse_timeout
+        last_snapshot: tuple[tuple[str, str, int | None, int | None], ...] | None = None
 
         while time.monotonic() < deadline:
             payload = await self._request_json(
@@ -171,20 +188,66 @@ class MinerUClient:
             )
 
             results = payload.get("data", {}).get("extract_result", [])
+            snapshot = self._batch_result_snapshot(results)
 
             if not results:
+                if snapshot != last_snapshot:
+                    logger.info(
+                        "MinerU batch result pending: batch_id=%s, result_count=0",
+                        batch_id,
+                    )
+                    last_snapshot = snapshot
                 await asyncio.sleep(self.poll_interval)
                 continue
+
+            if snapshot != last_snapshot:
+                logger.info(
+                    "MinerU batch result update: batch_id=%s, result_count=%s, "
+                    "states=%s, progress=%s",
+                    batch_id,
+                    len(results),
+                    dict(Counter(str(item.get("state") or "missing") for item in results)),
+                    [
+                        {
+                            "data_id": str(item.get("data_id") or ""),
+                            "state": str(item.get("state") or "missing"),
+                            "extracted_pages": (item.get("extract_progress") or {}).get("extracted_pages"),
+                            "total_pages": (item.get("extract_progress") or {}).get("total_pages"),
+                        }
+                        for item in results
+                    ],
+                )
+                last_snapshot = snapshot
 
             if all(
                 item.get("state") in {"done", "failed"}
                 for item in results
             ):
+                logger.info(
+                    "MinerU batch completed: batch_id=%s, result_count=%s, states=%s",
+                    batch_id,
+                    len(results),
+                    dict(Counter(str(item.get("state") or "missing") for item in results)),
+                )
                 return results
 
             await asyncio.sleep(self.poll_interval)
 
         raise MinerUTaskTimeoutError(f"MinerU batch timed out: {batch_id}")
+
+    @staticmethod
+    def _batch_result_snapshot(
+        results: list[dict[str, Any]],
+    ) -> tuple[tuple[str, str, int | None, int | None], ...]:
+        return tuple(
+            (
+                str(item.get("data_id") or ""),
+                str(item.get("state") or "missing"),
+                (item.get("extract_progress") or {}).get("extracted_pages"),
+                (item.get("extract_progress") or {}).get("total_pages"),
+            )
+            for item in results
+        )
 
     async def download_result_zip(
         self,

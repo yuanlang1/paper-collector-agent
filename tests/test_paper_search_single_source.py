@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import date
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -15,6 +16,7 @@ from app.events.context import EventContext, bind_event_context
 from app.llm.graph.workflows.paper_search.nodes.enrich import (
     PaperEnrichmentNode,
 )
+from app.llm.graph.workflows.paper_search.nodes.dowload_pdf import PdfDownloadNode
 from app.llm.graph.workflows.paper_search.nodes.plan_search import PlanSearchNode
 from app.llm.graph.workflows.paper_search.nodes.review import ReviewNode
 from app.llm.graph.workflows.paper_search.nodes.search import (
@@ -24,6 +26,11 @@ from app.llm.graph.workflows.paper_search.nodes.search import (
 from app.llm.graph.workflows.paper_search.progress import (
     instrument_paper_search_node,
 )
+from app.llm.graph.workflows.paper_search.nodes.venue import (
+    VenueCacheStore,
+    VenueResolutionNode,
+)
+from app.llm.graph.workflows.paper_search.state import PaperSearchWorkflowState
 from app.llm.graph.workflows.paper_search.workflow import (
     build_paper_search_workflow,
 )
@@ -333,7 +340,7 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["stage"], "normalizing")
         self.assertEqual(result["status"], "running")
-        self.assertTrue(result["degraded"])
+        self.assertNotIn("degraded", result)
         self.assertEqual(
             result["source_summaries"]["Google Scholar"]["status"],
             "failed",
@@ -366,7 +373,7 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["error"], "所有检索来源均失败。")
 
-    async def test_partial_search_result_keeps_partial_failed_status(self) -> None:
+    async def test_partial_search_result_continues_as_running(self) -> None:
         async def handler(_arguments: dict, _session) -> dict:
             return {
                 "ok": True,
@@ -389,8 +396,8 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
             result = await SearchNode()(_search_state(), {})
 
         self.assertEqual(result["stage"], "normalizing")
-        self.assertEqual(result["status"], "partial_failed")
-        self.assertTrue(result["degraded"])
+        self.assertEqual(result["status"], "running")
+        self.assertNotIn("degraded", result)
 
     async def test_review_skips_model_at_target_and_enters_enrichment(self) -> None:
         model = _ReviewModel(RuntimeError("model should not run"))
@@ -475,7 +482,7 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
             1,
         )
 
-    async def test_review_marks_unavailable_supplement_as_degraded(self) -> None:
+    async def test_review_warns_when_supplement_is_unavailable(self) -> None:
         model = _ReviewModel({
             "action": "supplement",
             "required_additional_count": 1,
@@ -505,8 +512,9 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
             })
 
         self.assertEqual(result["stage"], "enriching")
-        self.assertEqual(result["status"], "partial_failed")
-        self.assertTrue(result["degraded"])
+        self.assertEqual(result["status"], "running")
+        self.assertNotIn("degraded", result)
+        self.assertIn("无可用补充检索来源，继续后续流程。", result["warnings"])
 
     async def test_review_fails_when_decision_artifact_cannot_be_saved(self) -> None:
         result = await ReviewNode(
@@ -619,6 +627,110 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["data"]["phase_state"], "started")
 
+    async def test_pdf_download_uses_raw_dict_handler(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = LocalArtifactStore(directory)
+            child_run_id = "child-tool-result-pdf"
+            downloaded_path = store.base_dir / "papers" / "paper.pdf"
+            downloaded_path.parent.mkdir(parents=True)
+            downloaded_path.write_bytes(b"%PDF-1.4")
+            input_artifact = await store.write_json(
+                run_id=child_run_id,
+                step_key="resolve_venues",
+                source="venue",
+                kind="paper_info_venue_manifest_json",
+                payload={
+                    "papers": [
+                        {
+                            "paper_info": {
+                                "title": "A Paper",
+                                "authors": "Ada Lovelace",
+                                "pdf_url": "https://example.test/paper.pdf",
+                            }
+                        }
+                    ]
+                },
+            )
+            calls: list[dict] = []
+
+            async def fake_download(params: dict, _context: object) -> dict:
+                calls.append(params)
+                return {
+                    "ok": True,
+                    "data": {
+                        "saved_path": str(downloaded_path),
+                        "artifact_uri": store.to_artifact_uri(downloaded_path),
+                        "final_url": params["url"],
+                        "sha256": "a" * 64,
+                        "size_bytes": downloaded_path.stat().st_size,
+                    },
+                }
+
+            with patch(
+                "app.llm.graph.workflows.paper_search.nodes.dowload_pdf."
+                "download_file_handler",
+                new=fake_download,
+            ):
+                update = await PdfDownloadNode(artifact_store=store)(
+                    {
+                        "child_run_id": child_run_id,
+                        "venue_manifest_artifact_ref": input_artifact.artifact_uri,
+                    }
+                )
+
+            self.assertEqual(update["stage"], "enriching_abstract")
+            self.assertEqual(update["downloaded_pdf_paths"], [str(downloaded_path)])
+            self.assertEqual(calls[0]["url"], "https://example.test/paper.pdf")
+            manifest = await store.read_json_uri(
+                update["pdf_manifest_artifact_ref"]
+            )
+            self.assertEqual(
+                manifest["papers"][0]["pdf_download"]["status"],
+                "success",
+            )
+
+    async def test_venue_resolution_uses_raw_dict_handler(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = LocalArtifactStore(directory)
+            calls: list[dict] = []
+
+            async def fake_venue(params: dict, _context: object) -> dict:
+                calls.append(params)
+                return {
+                    "ok": True,
+                    "data": {
+                        "publication_name": "Journal of Testing",
+                        "abbreviation": "J Test",
+                        "official_rank": {},
+                        "custom_rank": [],
+                    },
+                }
+
+            with patch(
+                "app.llm.graph.workflows.paper_search.nodes.venue."
+                "easy_scholar_venue_handler",
+                new=fake_venue,
+            ):
+                node = VenueResolutionNode(
+                    artifact_store=store,
+                    cache_store=VenueCacheStore(
+                        Path(directory) / "venue_cache.json"
+                    ),
+                    model=object(),
+                )
+                venue, source = await node.resolve_venue(
+                    title="A Paper",
+                    venue_candidates=["Journal of Testing"],
+                )
+
+            self.assertEqual(
+                calls,
+                [{"publication_name": "Journal of Testing"}],
+            )
+            self.assertEqual(source, "easy_scholar")
+            self.assertIsNotNone(venue)
+            self.assertEqual(venue.standard_name, "Journal of Testing")
+
 
 class PaperSearchSingleSourceValidationTests(unittest.TestCase):
     def test_workflow_has_search_and_review_nodes(self) -> None:
@@ -667,6 +779,9 @@ class PaperSearchSingleSourceValidationTests(unittest.TestCase):
     def test_delegation_schema_does_not_expose_constraints(self) -> None:
         schema = PaperSearchDelegation.model_json_schema()
         self.assertNotIn("constraints", schema["properties"])
+
+    def test_state_does_not_include_unused_pdf_download_flag(self) -> None:
+        self.assertNotIn("download_pdfs", PaperSearchWorkflowState.__annotations__)
 
     def test_subgraph_only_uses_google_scholar(self) -> None:
         names = {schema["name"] for schema in build_tool_registry().schemas()}

@@ -328,7 +328,7 @@ class PaperSearchOssTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(update["downloaded_pdf_paths"], [])
             self.assertEqual(update["progress"]["pdf_files_deleted"], 1)
 
-    async def test_cleanup_failure_marks_completed_run_partial_failed(self) -> None:
+    async def test_cleanup_failure_keeps_completed_run_successful(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = LocalArtifactStore(directory)
             node = FinalizePdfsNode(artifact_store=store)
@@ -351,10 +351,11 @@ class PaperSearchOssTests(unittest.IsolatedAsyncioTestCase):
                     }
                 )
 
-        self.assertEqual(update["stage"], "partial_failed")
-        self.assertEqual(update["status"], "partial_failed")
-        self.assertTrue(update["degraded"])
-        self.assertEqual(update["pdf_cleanup_error"], "locked")
+        self.assertNotIn("stage", update)
+        self.assertNotIn("status", update)
+        self.assertNotIn("degraded", update)
+        self.assertNotIn("pdf_cleanup_error", update)
+        self.assertIn("PDF cleanup failed: locked", update["warnings"])
 
 
 if __name__ == "__main__":
