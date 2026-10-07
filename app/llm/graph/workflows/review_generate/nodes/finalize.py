@@ -27,16 +27,16 @@ async def finalize_task_review_node(state: Mapping[str, Any],) -> dict[str, Any]
     if not isinstance(call, Mapping):
         raise RuntimeError("task review finalized without an active tool call")
 
-    try:
-        await LocalArtifactStore().delete_run_directories(
-            (state["child_run_id"],)
-        )
-    except OSError:
-        logger.warning("Task-review artifact cleanup failed.", exc_info=True)
-
     stage = state["stage"]
     success = stage == "completed"
     blocked = stage == "blocked"
+    if success:
+        try:
+            await LocalArtifactStore().delete_run_directories(
+                (state["child_run_id"],)
+            )
+        except OSError:
+            logger.warning("Task-review artifact cleanup failed.", exc_info=True)
     summary = "学术综述已生成并通过反思审核。" if success else "学术综述未能完成。"
     if blocked:
         summary = "RAG 尚未完成，暂时无法生成综述。"
@@ -55,7 +55,11 @@ async def finalize_task_review_node(state: Mapping[str, Any],) -> dict[str, Any]
             "version_number": state.get("review_version_number"),
             "warnings": state.get("warnings", []),
         },
-        artifact_refs=[],
+        artifact_refs=(
+            [state["claim_verification_artifact_ref"]]
+            if not success and state.get("claim_verification_artifact_ref")
+            else []
+        ),
         retryable=False if success else blocked or state.get("retryable", False),
         error_code=None
         if success

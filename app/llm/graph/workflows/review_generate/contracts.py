@@ -68,7 +68,7 @@ class CandidateClaim(BaseModel):
     )
     retrieval_queries: list[str] = Field(
         min_length=1,
-        max_length=3,
+        max_length=2,
         description="围绕该论点分别检索支持、反证或适用条件的独立查询语句。",
     )
     claim_type: Literal["descriptive", "comparative", "critical", "gap"] = Field(
@@ -108,11 +108,14 @@ def claim_hash(claim):
     )
 
 
-def retrieval_plan_hash(claim):
+def retrieval_plan_hash(claim, *, queries=None, settings=None):
     return content_hash(
         {
             "candidate_paper_ids": claim["candidate_paper_ids"],
-            "retrieval_queries": claim["retrieval_queries"],
+            "retrieval_queries": (
+                claim["retrieval_queries"] if queries is None else queries
+            ),
+            "settings": settings or {},
         }
     )
 

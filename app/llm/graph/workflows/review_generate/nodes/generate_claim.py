@@ -1,3 +1,5 @@
+import asyncio
+
 from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
@@ -19,8 +21,12 @@ CLAIM_GENERATION_PROMPT = """
     且不得与 existing_candidates 重复。论文画像不是原文证据，不得预设一致性、优越性或因果结论，
     也不可新增论文。
 
-    保留分歧、条件和局限。comparative 论点必须使用 multiple_fulltext；
-    每条 retrieval_queries 独立表达该论点的检索意图，合起来覆盖支持、反证和适用条件。
+    保留分歧、条件和局限。跨论文比较必须使用 `comparative + multiple_fulltext`；
+    明确归属于单篇研究的实验比较只能描述该研究结果，使用 `descriptive + fulltext`。
+    每条论点只表达一个独立的核心判断；将同一发现的条件、局限和轻微改写合并到原论点，
+    不按论文数量或讨论问题数量机械增加论点。
+    本节最多生成 claim_budget 条论点，允许少于额度；按对讨论问题的重要性排序，不为填满额度生成内容。
+    retrieval_queries 默认只用一条；只有独立的比较、条件或反证检索确有必要时才增加第二条。
     revisions 非空时，只执行其中针对当前章节的新增要求。使用 output_language。
 
     以下仅为格式示例；使用实际论文 ID 和章节内容，勿照抄：
@@ -30,11 +36,7 @@ CLAIM_GENERATION_PROMPT = """
         {
         "text": "在给定研究条件下，两种方法的结果差异可能与测量设置有关。",
         "candidate_paper_ids": ["paper_001", "paper_002"],
-        "retrieval_queries": [
-            "方法 A 与方法 B 的结果比较",
-            "测量设置对结果的影响",
-            "方法比较中的相反结果"
-        ],
+        "retrieval_queries": ["方法 A 与方法 B 的结果比较及其测量条件"],
         "claim_type": "comparative",
         "evidence_requirement": "multiple_fulltext",
         "withdrawn_reason": "",
@@ -53,10 +55,16 @@ CLAIM_GENERATION_PROMPT = """
 CLAIM_REVISION_PROMPT = """
     你是一名学术综述论点修订者。根据 old_claim 的原文 evidence 和 revisions 调整当前论点，
     必须落实 required_change 和 acceptance_criteria。收缩范围、补充条件或降低强度；
-    条件、对象或结论不可兼容时拆分为多个独立论点。不能成立的非核心候选填写 withdrawn_reason。
+    不能成立的非核心候选填写 withdrawn_reason。
     不可改变 section，不得虚构；ID、section_id 和哈希由程序处理。
 
-    每条检索查询独立表达修改后的论点，并可面向支持、反证或条件改写。
+    修订时必须同步检查正文、claim_type 和 evidence_requirement：跨论文比较仍是
+    `comparative + multiple_fulltext`，不能只降低 evidence_requirement 而保留跨研究结论。
+    若证据只描述单篇研究结果，改为 `descriptive + fulltext`；无法收缩为该类表述时撤回。
+    只能返回一条替换论点或一条撤回记录。优先收缩为一条可由现有证据支持的论点，
+    不得将限定条件、反例或措辞变化拆为新的论点。
+
+    retrieval_queries 默认只用一条；只有独立的比较、条件或反证检索确有必要时才增加第二条。
     以下仅为格式示例，使用实际输入内容：
     替换：
     ```json
@@ -70,31 +78,6 @@ CLAIM_REVISION_PROMPT = """
         "withdrawn_reason": "",
         "section_id": ""
     }]
-    }
-    ```
-    拆分：
-    ```json
-    {
-    "claims": [
-        {
-        "text": "条件甲下结果呈现关联。",
-        "candidate_paper_ids": ["paper_001"],
-        "retrieval_queries": ["条件甲 结果关联"],
-        "claim_type": "descriptive",
-        "evidence_requirement": "fulltext",
-        "withdrawn_reason": "",
-        "section_id": ""
-        },
-        {
-        "text": "条件乙下结果存在差异。",
-        "candidate_paper_ids": ["paper_002"],
-        "retrieval_queries": ["条件乙 结果差异"],
-        "claim_type": "descriptive",
-        "evidence_requirement": "fulltext",
-        "withdrawn_reason": "",
-        "section_id": ""
-        }
-    ]
     }
     ```
     撤回：
@@ -127,8 +110,40 @@ class ClaimsPlan(BaseModel):
 class ClaimRevisionPlan(BaseModel):
     claims: list[CandidateClaim] = Field(
         min_length=1,
-        description="替换原论点的一条或多条候选论点；撤回也用一条带 withdrawn_reason 的论点表达。",
+        max_length=1,
+        description="替换原论点的一条候选论点；撤回也用一条带 withdrawn_reason 的论点表达。",
     )
+
+
+MAX_CLAIMS_PER_SECTION = 4
+MAX_CLAIMS_PER_REVIEW = 24
+
+
+def claim_budgets(sections, claims):
+    active = {
+        section["section_id"]: sum(
+            claim["section_id"] == section["section_id"]
+            and not claim["withdrawn_reason"]
+            for claim in claims
+        )
+        for section in sections
+    }
+    remaining = max(0, MAX_CLAIMS_PER_REVIEW - sum(active.values()))
+    budgets = {section["section_id"]: 0 for section in sections}
+    while remaining:
+        allocated = False
+        for section in sections:
+            section_id = section["section_id"]
+            if active[section_id] + budgets[section_id] >= MAX_CLAIMS_PER_SECTION:
+                continue
+            budgets[section_id] += 1
+            remaining -= 1
+            allocated = True
+            if not remaining:
+                break
+        if not allocated:
+            break
+    return budgets
 
 
 class GenerateClaimsNode:
@@ -139,15 +154,19 @@ class GenerateClaimsNode:
         model=None,
         revision_model=None,
         chat: ChatClient | None = None,
+        max_concurrency: int = 4,
     ):
         self.artifact_store = artifact_store or LocalArtifactStore()
+        self.max_concurrency = max_concurrency
         client = chat or ChatClient()
         self.model = model or client.structured(ClaimsPlan, options=ModelOptions(temperature=0))
         self.revision_model = revision_model or client.structured(
             ClaimRevisionPlan, options=ModelOptions(temperature=0)
         )
 
-    async def _generate_for_section(self, state, section, studies, existing, additions):
+    async def _generate_for_section(
+        self, state, section, studies, existing, additions, claim_budget=MAX_CLAIMS_PER_SECTION
+    ):
         relevant = [
             study for study in studies if study["paper_id"] in section["relevant_paper_ids"]
         ]
@@ -160,6 +179,7 @@ class GenerateClaimsNode:
                 "studies": relevant,
                 "existing_candidates": [claim["text"] for claim in existing],
                 "revisions": additions,
+                "claim_budget": claim_budget,
                 "output_language": state["language"],
             },
         )
@@ -197,43 +217,67 @@ class GenerateClaimsNode:
             if not targets <= {claim["claim_id"] for claim in claims}:
                 raise ValueError("unknown claim revision target")
 
+            async def wait_for(tasks):
+                try:
+                    return await asyncio.gather(*tasks)
+                except (asyncio.CancelledError, Exception):
+                    for task in tasks:
+                        task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    raise
+
+            replacements_by_claim = {}
+            if targets:
+                evidence_by_claim = {
+                    item["claim_id"]: item
+                    for item in (
+                        await self.artifact_store.read_json_uri(
+                            state["evidence_ledger_artifact_ref"]
+                        )
+                    )["claims"]
+                }
+                semaphore = asyncio.Semaphore(self.max_concurrency)
+
+                async def revise(claim):
+                    async with semaphore:
+                        result = await invoke(
+                            self.revision_model,
+                            ClaimRevisionPlan,
+                            CLAIM_REVISION_PROMPT,
+                            {
+                                "old_claim": claim,
+                                "section": sections[claim["section_id"]],
+                                "output_language": state["language"],
+                                "revisions": revisions_for(
+                                    state, "claim", claim["claim_id"]
+                                ),
+                                "evidence": evidence_by_claim[claim["claim_id"]],
+                            },
+                        )
+                    return claim["claim_id"], result["claims"]
+
+                replacements_by_claim = dict(
+                    await wait_for(
+                        [
+                            asyncio.create_task(revise(claim))
+                            for claim in claims
+                            if claim["claim_id"] in targets
+                        ]
+                    )
+                )
+
             revised = []
             for claim in claims:
-                if claim["claim_id"] not in targets:
+                replacements = replacements_by_claim.get(claim["claim_id"])
+                if replacements is None:
                     revised.append(claim)
                     continue
-                evidence = await self.artifact_store.read_json_uri(
-                    state["evidence_ledger_artifact_ref"]
+                replacement = replacements[0]
+                replacement.update(
+                    claim_id=claim["claim_id"], section_id=claim["section_id"]
                 )
-                result = await invoke(
-                    self.revision_model,
-                    ClaimRevisionPlan,
-                    CLAIM_REVISION_PROMPT,
-                    {
-                        "old_claim": claim,
-                        "section": sections[claim["section_id"]],
-                        "output_language": state["language"],
-                        "revisions": revisions_for(state, "claim", claim["claim_id"]),
-                        "evidence": next(
-                            item
-                            for item in evidence["claims"]
-                            if item["claim_id"] == claim["claim_id"]
-                        ),
-                    },
-                )
-                replacements = result["claims"]
-                ids = (
-                    [claim["claim_id"]]
-                    if len(replacements) == 1
-                    else [
-                        f'{claim["claim_id"]}_{index}'
-                        for index in range(1, len(replacements) + 1)
-                    ]
-                )
-                for replacement, claim_id in zip(replacements, ids):
-                    replacement.update(claim_id=claim_id, section_id=claim["section_id"])
-                    replacement["claim_hash"] = claim_hash(replacement)
-                revised.extend(replacements)
+                replacement["claim_hash"] = claim_hash(replacement)
+                revised.append(replacement)
             claims = revised
 
             additions = {
@@ -245,18 +289,58 @@ class GenerateClaimsNode:
             }
             if not payload["claims"]:
                 sections_to_generate = section_ids
+            budgets = claim_budgets(framework["sections"], claims)
+            semaphore = asyncio.Semaphore(self.max_concurrency)
+
+            async def generate(section):
+                async with semaphore:
+                    candidates, reason = await self._generate_for_section(
+                        state,
+                        section,
+                        studies,
+                        [
+                            claim
+                            for claim in claims
+                            if claim["section_id"] == section["section_id"]
+                        ],
+                        additions[section["section_id"]],
+                        budgets[section["section_id"]],
+                    )
+                return section["section_id"], candidates, reason
+
+            generated = {
+                section["section_id"]: ([], "Claim budget exhausted for this section.")
+                for section in framework["sections"]
+                if section["section_id"] in sections_to_generate
+                and not budgets[section["section_id"]]
+            }
+            generated.update(dict(
+                (
+                    section_id,
+                    (candidates, reason),
+                )
+                for section_id, candidates, reason in await wait_for(
+                    [
+                        asyncio.create_task(generate(section))
+                        for section in framework["sections"]
+                        if section["section_id"] in sections_to_generate
+                        and budgets[section["section_id"]]
+                    ]
+                )
+            ))
             used_ids = {claim["claim_id"] for claim in claims}
             next_index = len(claims) + 1
+            warnings = list(state["warnings"])
             for section in framework["sections"]:
                 if section["section_id"] not in sections_to_generate:
                     continue
-                candidates, reason = await self._generate_for_section(
-                    state,
-                    section,
-                    studies,
-                    [claim for claim in claims if claim["section_id"] == section["section_id"]],
-                    additions[section["section_id"]],
-                )
+                candidates, reason = generated[section["section_id"]]
+                budget = budgets[section["section_id"]]
+                if len(candidates) > budget:
+                    warnings.append(
+                        f"Claim budget limited section {section['section_id']} to {budget} claims."
+                    )
+                    candidates = candidates[:budget]
                 unanswered = [
                     item for item in unanswered if item["section_id"] != section["section_id"]
                 ]
@@ -284,6 +368,7 @@ class GenerateClaimsNode:
                     for item in state.get("revision_items", [])
                     if item["target_type"] not in {"claim", "add_claim"}
                 ],
+                "warnings": warnings,
                 "stage": "retrieving_evidence",
                 "status": "running",
             }

@@ -56,5 +56,5 @@ def build_task_review_runtime(*, chat: ChatClient) -> SubAgentRuntime:
         error_code="TASK_REVIEW_SUBGRAPH_FAILED",
         failure_summary="文献综述工作流执行失败，未完成结果保存。",
         stream=SubAgentStreamSpec(workflow="task_review"),
-        timeout_seconds=settings.SUBAGENT_DISPATCH_TIMEOUT_SECONDS,
+        timeout_seconds=settings.TASK_REVIEW_SUBAGENT_TIMEOUT_SECONDS,
     )

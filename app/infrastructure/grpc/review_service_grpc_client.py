@@ -224,7 +224,10 @@ class ReviewServiceGrpcClient:
 
             return {
                 "ok": True,
-                "result": {"review_id": response.review_id},
+                "result": {
+                    "review_id": response.review_id,
+                    "version_number": response.version_number,
+                },
                 "error": None,
                 "metadata": {
                     "source": "review_service_grpc",

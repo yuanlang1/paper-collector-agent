@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import AsyncMock, Mock, patch
 
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.nodes.assemble_review import (
@@ -8,6 +9,10 @@ from app.llm.graph.workflows.review_generate.nodes.assemble_review import (
 )
 from app.llm.graph.workflows.review_generate.nodes.finalizing_handoff import (
     FinalizingHandoffNode,
+)
+from app.llm.graph.workflows.review_generate.nodes.persist_review import PersistReviewNode
+from app.llm.graph.workflows.review_generate.nodes.finalize import (
+    finalize_task_review_node,
 )
 from app.llm.graph.workflows.review_generate.nodes.reflect_review import (
     ReflectReviewNode,
@@ -41,16 +46,12 @@ FRAMEWORK = {
 
 
 class ReviewCitationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_assembly_repairs_synthesis_citations_outside_body(self) -> None:
+    async def test_assembly_inserts_synthesis_citations_from_selected_sources(self) -> None:
         model = _Model(
             [
                 {
-                    "abstract": "Summary [[REF_2]]",
-                    "conclusion": "Conclusion [[REF_2]]",
-                },
-                {
-                    "abstract": "Summary [[REF_1]]",
-                    "conclusion": "Conclusion [[REF_1]]",
+                    "abstract": [{"text": "Summary", "source_indices": [1]}],
+                    "conclusion": [{"text": "Conclusion", "source_indices": [1]}],
                 },
             ]
         )
@@ -83,7 +84,7 @@ class ReviewCitationTests(unittest.IsolatedAsyncioTestCase):
                 payload={
                     "section_id": "evidence",
                     "summary": "Evidence summary.",
-                    "text": "Evidence-backed text [[REF_1]].",
+                    "text": "Evidence-backed text [@paper-1].",
                 },
             )
 
@@ -104,17 +105,18 @@ class ReviewCitationTests(unittest.IsolatedAsyncioTestCase):
             )
             draft = await store.read_json_uri(update["review_draft_artifact_ref"])
 
-        self.assertEqual(len(model.messages), 2)
+        self.assertEqual(len(model.messages), 1)
         self.assertEqual(draft["citation_paper_ids"], ["1"])
         self.assertEqual(draft["sections"][0]["discussion_questions"], ["What does the evidence show?"])
-        self.assertNotIn("[[REF_2]]", draft["abstract"] + draft["conclusion"])
+        self.assertEqual(draft["abstract"], "Summary [@paper-1]")
+        self.assertEqual(draft["conclusion"], "Conclusion [@paper-1]")
 
     def test_reflection_flags_synthesis_citations_outside_body(self) -> None:
         issues = ReflectReviewNode()._check_hard_constraints(
             review_draft={
-                "abstract": "Summary [[REF_2]]",
-                "body_markdown": "Evidence [[REF_1]].",
-                "conclusion": "Conclusion [[REF_1]]",
+                "abstract": "Summary [@paper-2]",
+                "body_markdown": "Evidence [@paper-1].",
+                "conclusion": "Conclusion [@paper-1]",
                 "sections": [{"section_id": "evidence"}],
             },
             corpus_payload={"papers": [{"paper_id": 1}, {"paper_id": 2}]},
@@ -122,8 +124,118 @@ class ReviewCitationTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIn(
-            "synthesis cites a paper outside the evidence-backed body: REF_2",
+            "synthesis cites a paper outside the evidence-backed body: paper-2",
             issues,
+        )
+
+    def test_final_handoff_keeps_pandoc_citation_keys(self) -> None:
+        review = FinalizingHandoffNode()._build_final_review(
+            review_draft={
+                "task_id": 1,
+                "title": "Review",
+                "scope": "Scope",
+                "abstract": "Abstract [@paper-1]",
+                "sections": [],
+                "body_markdown": "Body [@paper-1; @paper-2]",
+                "conclusion": "Conclusion [@paper-2]",
+            },
+            corpus={
+                "papers": [
+                    {
+                        "paper_id": 1,
+                        "title": "One",
+                        "authors": [],
+                        "published_date": None,
+                        "doi": None,
+                    },
+                    {
+                        "paper_id": 2,
+                        "title": "Two",
+                        "authors": [],
+                        "published_date": None,
+                        "doi": None,
+                    },
+                ]
+            },
+            citation_style="harvard",
+            reflection_report_artifact_ref="artifact://review-test/report/report.json",
+        )
+
+        self.assertEqual(review["citation_labels"], {"1": "paper-1", "2": "paper-2"})
+        self.assertEqual(review["citation_paper_ids"], ["1", "2"])
+        self.assertIn("[@paper-1; @paper-2]", review["markdown"])
+        self.assertNotIn("## References", review["markdown"])
+
+    async def test_persistence_uses_the_service_version_number(self) -> None:
+        client = Mock()
+        client.add_review = AsyncMock(
+            return_value={
+                "ok": True,
+                "result": {"review_id": 9, "version_number": 4},
+                "error": None,
+            }
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = LocalArtifactStore(base_dir=directory)
+            final = await store.write_json(
+                run_id="review-test",
+                step_key="final",
+                source="test",
+                kind="final",
+                payload={
+                    "title": "Review",
+                    "scope": "Scope",
+                    "abstract": "Abstract",
+                    "body_markdown": "Body [@paper-1]",
+                    "conclusion": "Conclusion",
+                    "markdown": "# Review\n\nBody [@paper-1]",
+                    "sections": [],
+                    "citation_paper_ids": ["1"],
+                    "citation_labels": {"1": "paper-1"},
+                    "references": [{"paper_id": "1", "formatted": "One"}],
+                },
+            )
+            update = await PersistReviewNode(
+                artifact_store=store, client=client
+            )(
+                {
+                    "stage": "persisting_review",
+                    "final_review_artifact_ref": final.artifact_uri,
+                    "task_id": 1,
+                    "topic": "Topic",
+                    "review_version_number": 1,
+                    "language": "en",
+                    "review_type": "narrative",
+                    "citation_style": "harvard",
+                    "paper_ids_snapshot": ["1"],
+                    "framework_hash": "hash",
+                }
+            )
+
+        self.assertEqual(update["review_id"], 9)
+        self.assertEqual(update["review_version_number"], 4)
+
+    async def test_failed_finalization_keeps_completed_verification(self) -> None:
+        store = AsyncMock()
+        with patch(
+            "app.llm.graph.workflows.review_generate.nodes.finalize.LocalArtifactStore",
+            return_value=store,
+        ):
+            result = await finalize_task_review_node(
+                {
+                    "active_tool_call": {"id": "review", "name": "task_review_agent"},
+                    "child_run_id": "child-review-finalize",
+                    "stage": "failed",
+                    "error_code": "VERIFICATION_PROTOCOL_FAILED",
+                    "error": "invalid source index",
+                    "claim_verification_artifact_ref": "artifact://review/verify/result.json",
+                }
+            )
+
+        store.delete_run_directories.assert_not_awaited()
+        self.assertEqual(
+            result["last_action_result"]["artifact_refs"],
+            ["artifact://review/verify/result.json"],
         )
 
     async def test_stale_reflection_report_cannot_approve_a_new_draft(self) -> None:

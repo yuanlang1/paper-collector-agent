@@ -7,8 +7,8 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.citations import (
-    citation_anchor_ids,
-    unsupported_synthesis_anchor_ids,
+    citation_paper_ids,
+    unsupported_synthesis_citation_ids,
 )
 from app.llm.graph.workflows.review_generate.contracts import invoke, save
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
@@ -301,7 +301,7 @@ class ReflectReviewNode:
                 review_draft.get("conclusion", ""),
             ]
         )
-        anchors = citation_anchor_ids(text)
+        citations = citation_paper_ids(text)
         known_paper_ids = {str(paper["paper_id"]) for paper in corpus_payload["papers"]}
         section_ids = {section["section_id"] for section in review_draft["sections"]}
         issues = []
@@ -311,13 +311,13 @@ class ReflectReviewNode:
             issues.append("review abstract is empty")
         if not review_draft.get("conclusion", "").strip():
             issues.append("review conclusion is empty")
-        if require_citations and not anchors:
-            issues.append("review has no citation anchors")
+        if require_citations and not citations:
+            issues.append("review has no citations")
         for section in framework["sections"]:
             if section["section_id"] not in section_ids:
                 issues.append(f"review omits framework section: {section['section_id']}")
         for paper_id in sorted(
-            unsupported_synthesis_anchor_ids(
+            unsupported_synthesis_citation_ids(
                 body_markdown=review_draft.get("body_markdown", ""),
                 abstract=review_draft.get("abstract", ""),
                 conclusion=review_draft.get("conclusion", ""),
@@ -325,11 +325,9 @@ class ReflectReviewNode:
         ):
             issues.append(
                 "synthesis cites a paper outside the evidence-backed body: "
-                f"REF_{paper_id}"
+                f"paper-{paper_id}"
             )
-        for paper_id in anchors:
-            if not paper_id.isdigit():
-                issues.append(f"malformed citation anchor: REF_{paper_id}")
-            elif paper_id not in known_paper_ids:
-                issues.append(f"citation is outside task corpus: REF_{paper_id}")
+        for paper_id in citations:
+            if paper_id not in known_paper_ids:
+                issues.append(f"citation is outside task corpus: paper-{paper_id}")
         return list(dict.fromkeys(issues))

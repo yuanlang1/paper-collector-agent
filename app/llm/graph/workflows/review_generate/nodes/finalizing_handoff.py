@@ -6,10 +6,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.llm.artifacts.store import LocalArtifactStore
+from app.llm.graph.workflows.review_generate.citations import (
+    citation_paper_ids as cited_paper_ids,
+)
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
-
-
-REF_PATTERN = re.compile(r"\[\[REF_(\d+)\]\]")
 
 
 class FinalizingHandoffNode:
@@ -48,7 +48,6 @@ class FinalizingHandoffNode:
             review_draft=review_draft,
             corpus=corpus,
             citation_style=state["citation_style"],
-            language=state["language"],
             reflection_report_artifact_ref=(
                 state["reflection_report_artifact_ref"]
             ),
@@ -76,7 +75,6 @@ class FinalizingHandoffNode:
         review_draft: dict[str, Any],
         corpus: dict[str, Any],
         citation_style: str,
-        language: str,
         reflection_report_artifact_ref: str,
     ) -> dict[str, Any]:
         raw_text = "\n".join(
@@ -87,11 +85,7 @@ class FinalizingHandoffNode:
             ]
         )
 
-        citation_paper_ids = list(
-            dict.fromkeys(
-                REF_PATTERN.findall(raw_text)
-            )
-        )
+        citation_paper_ids = cited_paper_ids(raw_text)
 
         papers_by_id = {
             str(paper["paper_id"]): paper
@@ -99,15 +93,8 @@ class FinalizingHandoffNode:
         }
 
         citation_labels = {
-            paper_id: self._in_text_citation(
-                paper=papers_by_id[paper_id],
-                number=index,
-                citation_style=citation_style,
-            )
-            for index, paper_id in enumerate(
-                citation_paper_ids,
-                start=1,
-            )
+            paper_id: f"paper-{paper_id}"
+            for paper_id in citation_paper_ids
         }
 
         references = [
@@ -131,54 +118,25 @@ class FinalizingHandoffNode:
             )
         ]
 
-        abstract = self._replace_anchors(
-            review_draft["abstract"],
-            citation_labels,
-        )
-        body_markdown = self._replace_anchors(
-            review_draft["body_markdown"],
-            citation_labels,
-        )
-        conclusion = self._replace_anchors(
-            review_draft["conclusion"],
-            citation_labels,
-        )
-
-        sections = [
-            {
-                **section,
-                "text": self._replace_anchors(
-                    section["text"],
-                    citation_labels,
-                ),
-            }
-            for section in review_draft["sections"]
-        ]
-
-        headings = self._headings(language)
-        references_markdown = "\n".join(
-            reference["formatted"]
-            for reference in references
-        )
-
         markdown = "\n\n".join(
-            [
+            part
+            for part in [
                 f"# {review_draft['title']}",
-                f"## {headings['abstract']}\n\n{abstract}",
-                body_markdown,
-                f"## {headings['conclusion']}\n\n{conclusion}",
-                f"## {headings['references']}\n\n{references_markdown}",
+                review_draft["abstract"],
+                review_draft["body_markdown"],
+                review_draft["conclusion"],
             ]
+            if part
         )
 
         return {
             "task_id": review_draft["task_id"],
             "title": review_draft["title"],
             "scope": review_draft["scope"],
-            "abstract": abstract,
-            "sections": sections,
-            "body_markdown": body_markdown,
-            "conclusion": conclusion,
+            "abstract": review_draft["abstract"],
+            "sections": review_draft["sections"],
+            "body_markdown": review_draft["body_markdown"],
+            "conclusion": review_draft["conclusion"],
             "markdown": markdown,
             "citation_style": citation_style,
             "citation_paper_ids": citation_paper_ids,
@@ -188,36 +146,6 @@ class FinalizingHandoffNode:
                 reflection_report_artifact_ref
             ),
         }
-
-    def _replace_anchors(
-        self,
-        text: str,
-        citation_labels: dict[str, str],
-    ) -> str:
-        return REF_PATTERN.sub(
-            lambda match: citation_labels[match.group(1)],
-            text,
-        )
-
-    def _in_text_citation(
-        self,
-        *,
-        paper: dict[str, Any],
-        number: int,
-        citation_style: str,
-    ) -> str:
-        if citation_style == "ieee":
-            return f"[{number}]"
-
-        if citation_style == "vancouver":
-            return f"({number})"
-
-        author = self._author_key(
-            paper["authors"],
-            paper["title"],
-            citation_style,
-        )
-        return f"({author}, {self._year(paper['published_date'])})"
 
     def _reference(
         self,
@@ -257,29 +185,6 @@ class FinalizingHandoffNode:
             return f"{authors} ({year}) {title}.{doi}"
         return f"{title} ({year}).{doi}"
 
-    def _author_key(
-        self,
-        authors: list[str],
-        title: str,
-        citation_style: str,
-    ) -> str:
-        surnames = [
-            author.split()[-1]
-            for author in authors
-        ]
-
-        if not surnames:
-            return title
-
-        if len(surnames) == 1:
-            return surnames[0]
-
-        if len(surnames) == 2:
-            separator = " & " if citation_style == "apa" else " and "
-            return separator.join(surnames)
-
-        return f"{surnames[0]} et al."
-
     def _year(
         self,
         published_date: str | None,
@@ -289,20 +194,3 @@ class FinalizingHandoffNode:
             published_date or "",
         )
         return match.group(0) if match else "n.d."
-
-    def _headings(
-        self,
-        language: str,
-    ) -> dict[str, str]:
-        if language == "zh-CN":
-            return {
-                "abstract": "摘要",
-                "conclusion": "结论",
-                "references": "参考文献",
-            }
-
-        return {
-            "abstract": "Abstract",
-            "conclusion": "Conclusion",
-            "references": "References",
-        }

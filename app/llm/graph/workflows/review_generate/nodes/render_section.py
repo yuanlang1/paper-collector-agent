@@ -1,7 +1,8 @@
+import asyncio
+
 from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.graph.workflows.review_generate.citations import citation_anchor_ids
 from app.llm.graph.workflows.review_generate.contracts import (
     content_hash,
     invoke,
@@ -17,24 +18,29 @@ SECTION_DRAFT_PROMPT = """
 你是一名严谨的学术综述写作者。基于 claims_with_evidence 为当前章节写作，使用 output_language。
 
 写作目标：围绕 section 的 discussion_questions 比较和综合研究，而不是逐篇复述。只表达当前已核验 Claim 与证据能够支持的内容；保留研究之间的分歧、条件、范围和局限。
+section_outline 是固定的综述目录；本节只讨论当前 section 的范围，避免重复相邻章节，
+不使用“如上文所述”等依赖具体前文内容的指代。
 
 规则：
 1. claims_with_evidence 非空时，arguments 必须覆盖其中每个 claim_id 至少一次；只有直接相关的论点才能放入同一个 Argument。
-2. 每个 Argument 的 claim_ids 和 evidence_ids 必须来自输入。具体事实、比较和结论使用对应的
-   [[REF_论文ID]] 锚点；锚点只能引用 evidence_ids 所属论文。
-3. 不得引入输入之外的论文、事实、方法、数据、因果关系或结论。不得将条件性、相关性或单项发现扩大为普遍结论。
-4. revisions 非空时，完成其中的 required_change；不要沿用旧草稿中无法由当前证据支持的表述。
-5. summary 只概括本节 arguments 已表达的已核验内容，不得新增判断或引用。claims_with_evidence 非空时，insufficient_notice 必须为空。
-6. claims_with_evidence 为空时，arguments 必须为空；仅在 insufficient_notice 中说明材料不足以回答本节问题，且不得使用引用或给出肯定性结论。
+2. 每个 evidence 都有本章节内有效的 source_index。evidence_indices 只能选择输入明确给出的 source_index，
+   不得按列表位置猜测编号，也不得使用旧草稿或其他章节的编号。
+3. 每个 Argument 的 claim_ids 和 evidence_indices 必须来自输入。对每个覆盖的 Claim，所选 supports
+   证据必须满足 evidence_requirement；multiple_fulltext 需要两篇不同论文的 supports 证据，opposes 不计入支持数量。
+4. text 只写正文，不得写 Pandoc 引用、REF 锚点、数字标签或作者年份引用；程序会根据 evidence_indices 插入引用。
+5. 不得引入输入之外的论文、事实、方法、数据、因果关系或结论。不得将条件性、相关性或单项发现扩大为普遍结论。
+6. revisions 非空时，完成其中的 required_change；不要沿用旧草稿中无法由当前证据支持的表述。
+7. summary 只概括本节 arguments 已表达的已核验内容，不得新增判断或引用。claims_with_evidence 非空时，insufficient_notice 必须为空。
+8. claims_with_evidence 为空时，arguments 必须为空；仅在 insufficient_notice 中说明材料不足以回答章节问题，且不得使用引用或给出肯定性结论。
 
 有证据时的输出示例：
 ```json
 {
   "arguments": [
     {
-      "text": "在给定条件下，研究结果呈现差异 [[REF_1]] [[REF_2]]。",
+      "text": "在给定条件下，研究结果呈现差异。",
       "claim_ids": ["claim_001"],
-      "evidence_ids": ["evidence_1", "evidence_2"]
+      "evidence_indices": [1, 2]
     }
   ],
   "summary": "结果差异与研究条件相关。",
@@ -60,15 +66,15 @@ class Argument(BaseModel):
 
     text: str = Field(
         min_length=1,
-        description="基于已核验证据写成的正文论证，应包含对应 [[REF_论文ID]] 锚点。",
+        description="基于已核验证据写成的正文论证，不得自行写入引用。",
     )
     claim_ids: list[str] = Field(
         min_length=1,
         description="该论证直接覆盖的输入已核验 Claim ID。",
     )
-    evidence_ids: list[str] = Field(
+    evidence_indices: list[int] = Field(
         min_length=1,
-        description="直接支撑该论证并限定可用引用论文的输入 evidence_id。",
+        description="直接支撑该论证的输入 evidence.source_index。",
     )
 
 
@@ -91,12 +97,56 @@ class SectionDraft(BaseModel):
 
 
 class RenderSectionsNode:
-    def __init__(self, *, artifact_store=None, model=None, chat: ChatClient | None = None):
+    def __init__(
+        self,
+        *,
+        artifact_store=None,
+        model=None,
+        chat: ChatClient | None = None,
+        max_concurrency: int = 4,
+    ):
         self.artifact_store = artifact_store or LocalArtifactStore()
+        self.max_concurrency = max_concurrency
         self.model = model or (chat or ChatClient()).structured(
             SectionDraft,
             options=ModelOptions(temperature=0),
         )
+
+    @staticmethod
+    def _citation_text(text, paper_ids):
+        citations = "; ".join(f"@paper-{paper_id}" for paper_id in paper_ids)
+        return f"{text.rstrip()} [{citations}]"
+
+    @staticmethod
+    def _model_packages(packages, sources):
+        source_indexes = {
+            item["evidence_id"]: index for index, item in sources.items()
+        }
+        return [
+            {
+                "claim": {
+                    key: pack["claim"][key]
+                    for key in ("claim_id", "text", "evidence_requirement")
+                },
+                "evidence": [
+                    {
+                        "source_index": source_indexes[item["evidence_id"]],
+                        **{
+                            key: item[key]
+                            for key in (
+                                "paper_title",
+                                "section_path",
+                                "text",
+                                "relation",
+                                "assessment",
+                            )
+                        },
+                    }
+                    for item in pack["evidence"]
+                ],
+            }
+            for pack in packages
+        ]
 
     async def __call__(self, state):
         refs = dict(state.get("section_draft_artifact_refs", {}))
@@ -128,8 +178,16 @@ class RenderSectionsNode:
                 for item in state.get("revision_items", [])
                 if item["target_type"] == "section"
             }
-            previous_summary = ""
-            for section in framework["sections"]:
+            section_outline = [
+                {
+                    key: section[key]
+                    for key in ("section_id", "title", "description")
+                }
+                for section in framework["sections"]
+            ]
+            semaphore = asyncio.Semaphore(self.max_concurrency)
+
+            async def render(section):
                 section_claims = [
                     claim
                     for claim in claims.values()
@@ -149,7 +207,7 @@ class RenderSectionsNode:
                         section,
                         packages,
                         state["language"],
-                        previous_summary,
+                        section_outline,
                     ]
                 )
                 old_ref = state.get("section_draft_artifact_refs", {}).get(section["section_id"])
@@ -157,46 +215,52 @@ class RenderSectionsNode:
                 if old and section["section_id"] not in revision_targets and (
                     revision_targets or old.get("input_hash") == signature
                 ):
-                    refs[section["section_id"]] = old_ref
-                    previous_summary = old["summary"]
-                    continue
+                    return section["section_id"], old_ref
 
                 if packages:
-                    result = await invoke(
-                        self.model,
-                        SectionDraft,
-                        SECTION_DRAFT_PROMPT,
-                        {
-                            "output_language": state["language"],
-                            "review_title": framework["title"],
-                            "review_scope": framework["scope"],
-                            "section": section,
-                            "claims_with_evidence": packages,
-                            "old_draft": old if revisions else None,
-                            "revisions": revisions,
-                            "previous_section_summary": previous_summary,
-                        },
-                    )
+                    evidence = {
+                        item["evidence_id"]: item
+                        for pack in packages
+                        for item in pack["evidence"]
+                    }
+                    sources = {
+                        index: item
+                        for index, item in enumerate(evidence.values(), start=1)
+                    }
+                    payload = {
+                        "output_language": state["language"],
+                        "review_title": framework["title"],
+                        "review_scope": framework["scope"],
+                        "section_outline": section_outline,
+                        "section": section,
+                        "claims_with_evidence": self._model_packages(packages, sources),
+                        "old_draft": old if revisions else None,
+                        "revisions": revisions,
+                    }
+                    async with semaphore:
+                        result = await invoke(
+                            self.model, SectionDraft, SECTION_DRAFT_PROMPT, payload
+                        )
                     if result["insufficient_notice"]:
                         raise ValueError(
                             "evidence-backed section cannot contain an insufficiency notice"
                         )
                     claim_ids = {item["claim"]["claim_id"] for item in packages}
-                    evidence = {
-                        item["evidence_id"]: item for pack in packages for item in pack["evidence"]
-                    }
+                    arguments = []
                     for argument in result["arguments"]:
                         if (
                             not set(argument["claim_ids"]) <= claim_ids
-                            or not set(argument["evidence_ids"]) <= evidence.keys()
+                            or not set(argument["evidence_indices"]) <= sources.keys()
                         ):
                             raise ValueError(
                                 "section argument references unknown claim or evidence"
                             )
-                        papers = {evidence[eid]["paper_id"] for eid in argument["evidence_ids"]}
-                        anchors = set(citation_anchor_ids(argument["text"]))
-                        if not anchors or not anchors <= papers:
-                            raise ValueError("section citations are not bound to supplied evidence")
+                        if "@paper-" in argument["text"] or "[[REF_" in argument["text"]:
+                            raise ValueError("section argument must not contain citations")
+                        evidence_ids = [
+                            sources[index]["evidence_id"]
+                            for index in argument["evidence_indices"]
+                        ]
                         for claim_id in argument["claim_ids"]:
                             claim_evidence = {
                                 item["evidence_id"]: item
@@ -204,7 +268,7 @@ class RenderSectionsNode:
                             }
                             support = {
                                 claim_evidence[evidence_id]["paper_id"]
-                                for evidence_id in argument["evidence_ids"]
+                                for evidence_id in evidence_ids
                                 if evidence_id in claim_evidence
                                 and claim_evidence[evidence_id]["relation"] == "supports"
                             }
@@ -213,9 +277,21 @@ class RenderSectionsNode:
                                 if claims[claim_id]["evidence_requirement"] == "multiple_fulltext"
                                 else 1
                             )
-                            if len(support & anchors) < required:
+                            if len(support) < required:
                                 raise ValueError("argument omitted required claim sources")
-                    arguments = result["arguments"]
+                        paper_ids = list(
+                            dict.fromkeys(
+                                sources[index]["paper_id"]
+                                for index in argument["evidence_indices"]
+                            )
+                        )
+                        arguments.append(
+                            {
+                                "text": self._citation_text(argument["text"], paper_ids),
+                                "claim_ids": argument["claim_ids"],
+                                "evidence_ids": evidence_ids,
+                            }
+                        )
                     used = {
                         claim_id
                         for argument in arguments
@@ -226,26 +302,26 @@ class RenderSectionsNode:
                     text = "\n\n".join(item["text"] for item in arguments)
                     summary = result["summary"]
                 else:
-                    result = await invoke(
-                        self.model,
-                        SectionDraft,
-                        SECTION_DRAFT_PROMPT,
-                        {
-                            "output_language": state["language"],
-                            "review_title": framework["title"],
-                            "review_scope": framework["scope"],
-                            "section": section,
-                            "claims_with_evidence": [],
-                            "old_draft": old if revisions else None,
-                            "revisions": revisions,
-                            "previous_section_summary": previous_summary,
-                        },
-                    )
+                    payload = {
+                        "output_language": state["language"],
+                        "review_title": framework["title"],
+                        "review_scope": framework["scope"],
+                        "section_outline": section_outline,
+                        "section": section,
+                        "claims_with_evidence": [],
+                        "old_draft": old if revisions else None,
+                        "revisions": revisions,
+                    }
+                    async with semaphore:
+                        result = await invoke(
+                            self.model, SectionDraft, SECTION_DRAFT_PROMPT, payload
+                        )
                     arguments = result["arguments"]
                     if (
                         arguments
                         or not result["insufficient_notice"]
-                        or citation_anchor_ids(result["insufficient_notice"])
+                        or "@paper-" in result["insufficient_notice"]
+                        or "[[REF_" in result["insufficient_notice"]
                     ):
                         raise ValueError(
                             "insufficient-evidence section must contain only an uncited notice"
@@ -268,10 +344,31 @@ class RenderSectionsNode:
                     "used_claim_ids": [claim["claim_id"] for claim in section_claims],
                     "omitted_claim_ids": [],
                 }
-                refs[section["section_id"]] = await save(
+                ref = await save(
                     self.artifact_store, state, "section_draft", draft
                 )
-                previous_summary = draft["summary"]
+                return section["section_id"], ref
+
+            tasks = [
+                asyncio.create_task(render(section)) for section in framework["sections"]
+            ]
+            try:
+                for task in asyncio.as_completed(tasks):
+                    section_id, ref = await task
+                    refs[section_id] = ref
+            except (asyncio.CancelledError, Exception):
+                for task in tasks:
+                    task.cancel()
+                for result in await asyncio.gather(*tasks, return_exceptions=True):
+                    if not isinstance(result, BaseException):
+                        section_id, ref = result
+                        refs[section_id] = ref
+                raise
+            refs = {
+                section["section_id"]: refs[section["section_id"]]
+                for section in framework["sections"]
+                if section["section_id"] in refs
+            }
             return {
                 "section_draft_artifact_refs": refs,
                 "revision_items": [

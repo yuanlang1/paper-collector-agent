@@ -68,7 +68,7 @@ class PersistReviewNode:
         review_id = result["result"]["review_id"]
         return {
             "review_id": review_id,
-            "review_version_number": state.get("review_version_number", 1),
+            "review_version_number": result["result"]["version_number"],
             "stage": "completed",
             "status": "completed",
             "error": None,

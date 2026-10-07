@@ -1,17 +1,21 @@
+import asyncio
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import (
     content_hash,
     evidence_requirement_met,
     invoke,
+    required_source_count,
     save,
+    supporting_paper_ids,
     verified_pack,
 )
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
+from app.llm.provider.structured_output import StructuredOutputError
 
 
 CLAIM_VERIFICATION_PROMPT = ("""
@@ -37,18 +41,26 @@ CLAIM_VERIFICATION_PROMPT = ("""
 
     ## Evidence 输出
     `evidence` 只保留真正参与判断的关键原文。
+    输入是经过相关性筛选的证据片段，不代表论文全部内容或完整领域证据；未发现支持或反例时，
+    只能判断当前证据不足，不得据此断言相关研究不存在。
 
-    每个 quote 必须：
-    * 使用正确的 paper_id 和 chunk_id；
+    每个 evidence 必须：
+    * 使用 original_evidence 中的 source_index；
     * 标记为 `supports` 或 `opposes`；
     * 简短说明该原文如何支持或反驳 claim；可概括，不得改变原文含义。
 
     优先选择能够直接证明或反驳 claim 的最小充分证据，不要为了数量罗列弱相关片段。
 
+    ## 独立来源要求
+    original_evidence 的 paper_index 只用于识别独立论文，不能输出到 evidence。
+    `fulltext` 至少需要一篇 supports 的论文；`multiple_fulltext` 至少需要两篇 supports 的不同论文。
+    同一篇论文的多个片段只算一篇，片段内转述的其他论文也不增加独立来源数，opposes 不计入支持篇数。
+    支持论文不足时必须返回 `insufficient`，并给出当前 claim 的修订建议。
+
     ## Revision 规则
 
     Claim 必须服从 Evidence。
-    当 `status != supported` 时，必须针对当前 `claim_id` 产生一个 `target_type="claim"` 的修订项。
+    当 `status != supported` 时，必须产生一个 `target_type="claim"` 的修订项；程序会绑定当前 claim。
     修订应根据证据选择：
 
     * 收缩论点范围；
@@ -74,9 +86,9 @@ CLAIM_VERIFICATION_PROMPT = ("""
 
     的重要独立论点时，才允许产生 `target_type="add_claim"`。
 
-    不要把同一 claim 的限定条件、补充说明或轻微改写拆成新 claim。
+    限定条件、反例、补充说明及已有 claim 的轻微改写不构成新增论点。
 
-    `add_claim.target_id` 必须是当前 section_id。
+    `add_claim` 会由程序绑定当前 section。
 
     当当前 claim 为 `supported` 时，可以没有 revision，也可以仅包含 `add_claim`。
 
@@ -90,15 +102,15 @@ CLAIM_VERIFICATION_PROMPT = ("""
     最终判断应遵循：
     **Evidence 决定 Claim 可以说到什么程度，而不是为了保留 Claim 去解释或选择 Evidence。**
 
-    以下仅为结构示例；paper_id 和 chunk_id 必须来自实际输入，勿照抄内容：
+    source_index 必须来自实际输入。若输入包含 validation_feedback，修正所述问题后返回完整 JSON。
+    以下仅为结构示例，勿照抄内容：
     supported：
     ```json
     {
       "status": "supported",
       "evidence": [{
-        "paper_id": "paper_001",
-        "chunk_id": "chunk_001",
-        "quote": "原文支持片段",
+        "source_index": 1,
+        "assessment": "原文在给定条件下支持该论点。",
         "relation": "supports"
       }],
       "reason": "证据直接支持该论点的范围。",
@@ -113,7 +125,6 @@ CLAIM_VERIFICATION_PROMPT = ("""
       "reason": "现有片段不能支持原论点的概括强度。",
       "revisions": [{
         "target_type": "claim",
-        "target_id": "claim_001",
         "issue": "范围超出证据。",
         "required_change": "收缩为已见条件下的描述。",
         "acceptance_criteria": "修改后仅陈述现有片段直接支持的条件性结果。"
@@ -125,15 +136,13 @@ CLAIM_VERIFICATION_PROMPT = ("""
     {
       "status": "supported",
       "evidence": [{
-        "paper_id": "paper_001",
-        "chunk_id": "chunk_001",
-        "quote": "原文支持片段",
+        "source_index": 1,
+        "assessment": "原文在给定条件下支持该论点。",
         "relation": "supports"
       }],
       "reason": "当前论点已被支持，且存在未覆盖的独立发现。",
       "revisions": [{
         "target_type": "add_claim",
-        "target_id": "section_001",
         "issue": "存在未覆盖的独立发现。",
         "required_change": "新增一个仅陈述该发现的候选论点。",
         "acceptance_criteria": "新增论点由现有证据直接支持且不重复已有论点。"
@@ -145,11 +154,13 @@ CLAIM_VERIFICATION_PROMPT = ("""
 
 
 class EvidenceQuote(BaseModel):
-    paper_id: str = Field(description="证据所属的当前任务论文 ID。")
-    chunk_id: str = Field(description="证据在该论文中的原文片段 ID。")
-    quote: str = Field(
+    source_index: int = Field(
+        ge=1,
+        description="本次 original_evidence 中从 1 开始的证据编号。",
+    )
+    assessment: str = Field(
         min_length=1,
-        description="概括输入 original_evidence 中支持或反驳 Claim 的关键内容，不得改变原文含义。",
+        description="概括该原文如何支持或反驳 Claim，不得改变原文含义。",
     )
     relation: Literal["supports", "opposes"] = Field(
         description="该原文片段与当前 Claim 的关系：supports 直接支持，opposes 直接反驳。",
@@ -159,9 +170,6 @@ class EvidenceQuote(BaseModel):
 class ClaimRevision(BaseModel):
     target_type: Literal["claim", "add_claim"] = Field(
         description="修改类型：claim 修订当前论点，add_claim 在当前章节新增独立候选论点。",
-    )
-    target_id: str = Field(
-        description="claim 类型必须为当前 claim_id；add_claim 类型必须为当前 section_id。",
     )
     issue: str = Field(
         min_length=1,
@@ -203,11 +211,138 @@ class Verdict(BaseModel):
         return self
 
 
+class VerificationProtocolError(ValueError):
+    pass
+
+
 class VerifyClaimsNode:
-    def __init__(self, *, artifact_store=None, model=None, chat: ChatClient | None = None):
+    def __init__(
+        self,
+        *,
+        artifact_store=None,
+        model=None,
+        chat: ChatClient | None = None,
+        max_concurrency: int = 4,
+    ):
         self.artifact_store = artifact_store or LocalArtifactStore()
         self.chat = chat or ChatClient()
-        self.model = model or self.chat.structured(Verdict, options=ModelOptions(temperature=0))
+        self.max_concurrency = max_concurrency
+        self.model = model or self.chat.structured(
+            Verdict,
+            max_attempts=1,
+            options=ModelOptions(temperature=0),
+        )
+
+    @staticmethod
+    def _sources(evidence, titles):
+        return {
+            index: {
+                "paper_id": item["paper_id"],
+                "chunk_id": item["chunk_id"],
+                "paper_title": titles.get(item["paper_id"], ""),
+                "section_path": item.get("section_path"),
+                "text": item["text"],
+                **{
+                    key: item.get(key)
+                    for key in ("page_start", "page_end", "page_numbers")
+                },
+            }
+            for index, item in enumerate(evidence, start=1)
+        }
+
+    @staticmethod
+    def _bind_verdict(result, claim, sources):
+        verdict = dict(result)
+        evidence = []
+        for item in verdict["evidence"]:
+            source = sources.get(item["source_index"])
+            if source is None:
+                raise VerificationProtocolError(
+                    f"source_index={item['source_index']} is not available; "
+                    f"choose one of {list(sources)}"
+                )
+            evidence.append(
+                {
+                    **source,
+                    "relation": item["relation"],
+                    "assessment": item["assessment"],
+                    "char_start": 0,
+                    "char_end": len(source["text"]),
+                    "evidence_id": content_hash(
+                        [source["paper_id"], source["chunk_id"], source["text"]]
+                    )[:20],
+                }
+            )
+        verdict["evidence"] = evidence
+        verdict["revisions"] = [
+            {
+                **item,
+                "target_id": (
+                    claim["claim_id"]
+                    if item["target_type"] == "claim"
+                    else claim["section_id"]
+                ),
+            }
+            for item in verdict["revisions"]
+        ]
+        if verdict["status"] == "supported" and not evidence_requirement_met(
+            claim, verdict
+        ):
+            support_count = len(supporting_paper_ids(verdict))
+            required_count = required_source_count(claim)
+            verdict["status"] = "insufficient"
+            verdict["reason"] = (
+                f"{verdict['reason']} Program check found {support_count} supporting "
+                f"papers; {required_count} required."
+            )
+            verdict["revisions"].append(
+                {
+                    "target_type": "claim",
+                    "target_id": claim["claim_id"],
+                    "issue": "Supporting paper count is below the claim requirement.",
+                    "required_change": (
+                        "Narrow the claim to the available evidence. For a single-study "
+                        "result, use a descriptive claim with a fulltext requirement; "
+                        "otherwise withdraw it."
+                    ),
+                    "acceptance_criteria": (
+                        "The revised text, claim type, and evidence requirement match "
+                        "the available supporting papers."
+                    ),
+                }
+            )
+        return verdict
+
+    async def _verify_claim(self, *, claim, section, section_claims, sources):
+        paper_indices = {}
+        for source in sources.values():
+            if source["paper_id"] not in paper_indices:
+                paper_indices[source["paper_id"]] = len(paper_indices) + 1
+        payload = {
+            "claim": claim,
+            "section": section,
+            "section_claims": section_claims,
+            "original_evidence": [
+                {
+                    "source_index": index,
+                    "paper_index": paper_indices[source["paper_id"]],
+                    "paper_title": source["paper_title"],
+                    "section_path": source["section_path"],
+                    "text": source["text"],
+                }
+                for index, source in sources.items()
+            ],
+        }
+        for attempt in range(2):
+            try:
+                result = await invoke(
+                    self.model, Verdict, CLAIM_VERIFICATION_PROMPT, payload
+                )
+                return self._bind_verdict(result, claim, sources)
+            except (StructuredOutputError, ValidationError, VerificationProtocolError) as exc:
+                if attempt:
+                    raise VerificationProtocolError(str(exc)) from exc
+                payload["validation_feedback"] = str(exc)
 
     async def _revision_snapshot(self, state):
         values = []
@@ -261,20 +396,20 @@ class VerifyClaimsNode:
         }
 
     async def __call__(self, state):
+        verification_ref = state.get("claim_verification_artifact_ref")
         try:
-            claims = (await self.artifact_store.read_json_uri(state["claims_artifact_ref"]))[
-                "claims"
-            ]
+            claims = (await self.artifact_store.read_json_uri(state["claims_artifact_ref"]))["claims"]
             ledger = {
                 item["claim_id"]: item
-                for item in (
-                    await self.artifact_store.read_json_uri(state["evidence_ledger_artifact_ref"])
-                )["claims"]
+                for item in (await self.artifact_store.read_json_uri(state["evidence_ledger_artifact_ref"]))["claims"]
             }
-            framework = (
-                await self.artifact_store.read_json_uri(state["framework_artifact_ref"])
-            )["framework"]
+            framework = (await self.artifact_store.read_json_uri(state["framework_artifact_ref"]))["framework"]
+            corpus = await self.artifact_store.read_json_uri(state["corpus_artifact_ref"])
             sections = {section["section_id"]: section for section in framework["sections"]}
+            titles = {
+                str(paper["paper_id"]): paper.get("title", "")
+                for paper in corpus["papers"]
+            }
             previous = {}
             if state.get("claim_verification_artifact_ref"):
                 previous = {
@@ -285,7 +420,8 @@ class VerifyClaimsNode:
                         )
                     )["claims"]
                 }
-            verdicts, revisions = [], []
+            verdicts = {}
+            pending = []
             for claim in claims:
                 if claim["withdrawn_reason"]:
                     continue
@@ -300,16 +436,14 @@ class VerifyClaimsNode:
                     and cached["evidence_digest"] == digest
                     and not cached.get("revisions")
                 ):
-                    verdict = cached
+                    verdicts[claim["claim_id"]] = cached
                 else:
-                    verdict = await invoke(
-                        self.model,
-                        Verdict,
-                        CLAIM_VERIFICATION_PROMPT,
-                        {
-                            "claim": claim,
-                            "section": sections[claim["section_id"]],
-                            "section_claims": [
+                    pending.append(
+                        (
+                            claim,
+                            digest,
+                            sections[claim["section_id"]],
+                            [
                                 {
                                     key: item[key]
                                     for key in (
@@ -322,88 +456,86 @@ class VerifyClaimsNode:
                                 for item in claims
                                 if item["section_id"] == claim["section_id"]
                             ],
-                            "original_evidence": evidence,
-                        },
-                    )
-                    sources = {(item["paper_id"], item["chunk_id"]): item for item in evidence}
-                    for quote in verdict["evidence"]:
-                        source = sources.get((quote["paper_id"], quote["chunk_id"]))
-                        if source is None:
-                            raise ValueError("verification source is not in original evidence")
-                        quote.update(
-                            {
-                                key: source.get(key)
-                                for key in (
-                                    "page_start",
-                                    "page_end",
-                                    "page_numbers",
-                                    "section_path",
-                                )
-                            }
+                            self._sources(evidence, titles),
                         )
-                        quote["char_start"] = 0
-                        quote["char_end"] = len(source["text"])
-                        quote["text"] = source["text"]
-                        quote["evidence_id"] = content_hash(
-                            [quote["paper_id"], quote["chunk_id"], quote["quote"]]
-                        )[:20]
-                    verdict.update(
-                        claim_id=claim["claim_id"],
-                        claim_hash=claim["claim_hash"],
-                        evidence_digest=digest,
                     )
-                if verdict["status"] == "supported" and not evidence_requirement_met(
-                    claim, verdict
-                ):
-                    verdict.update(
-                        status="insufficient",
-                        reason=(
-                            f'{verdict["reason"]} '
-                            "Supporting sources do not meet the claim requirement."
-                        ),
-                        revisions=[
-                            *[
-                                item
-                                for item in verdict["revisions"]
-                                if item["target_type"] == "add_claim"
-                            ],
-                            dict(
-                                target_type="claim",
-                                target_id=claim["claim_id"],
-                                issue="Supporting source count is below the claim requirement",
-                                required_change=(
-                                    "Narrow, revise, or withdraw the claim to match "
-                                    "the available evidence"
-                                ),
-                                acceptance_criteria=(
-                                    "The revised claim's scope and source requirement "
-                                    "match the evidence"
-                                ),
-                            )
-                        ],
+
+            def completed_verdicts():
+                return [
+                    verdicts[claim["claim_id"]]
+                    for claim in claims
+                    if not claim["withdrawn_reason"] and claim["claim_id"] in verdicts
+                ]
+
+            if verdicts:
+                verification_ref = await save(
+                    self.artifact_store,
+                    state,
+                    "claim_verification",
+                    {"claims": completed_verdicts()},
+                )
+
+            semaphore = asyncio.Semaphore(self.max_concurrency)
+
+            async def verify(claim, digest, section, section_claims, sources):
+                async with semaphore:
+                    try:
+                        verdict = await self._verify_claim(
+                            claim=claim,
+                            section=section,
+                            section_claims=section_claims,
+                            sources=sources,
+                        )
+                    except VerificationProtocolError as exc:
+                        raise VerificationProtocolError(
+                            f"claim_id={claim['claim_id']}: {exc}"
+                        ) from exc
+                    except Exception as exc:
+                        raise RuntimeError(f"claim_id={claim['claim_id']}: {exc}") from exc
+                verdict.update(
+                    claim_id=claim["claim_id"],
+                    claim_hash=claim["claim_hash"],
+                    evidence_digest=digest,
+                )
+                return claim["claim_id"], verdict
+
+            tasks = [asyncio.create_task(verify(*item)) for item in pending]
+            try:
+                for task in asyncio.as_completed(tasks):
+                    claim_id, verdict = await task
+                    verdicts[claim_id] = verdict
+                    verification_ref = await save(
+                        self.artifact_store,
+                        state,
+                        "claim_verification",
+                        {"claims": completed_verdicts()},
                     )
+            except (asyncio.CancelledError, Exception):
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
+
+            ordered_verdicts = completed_verdicts()
+            revisions = []
+            for claim in claims:
+                if claim["withdrawn_reason"]:
+                    continue
+                verdict = verdicts[claim["claim_id"]]
                 if verdict["status"] == "supported":
                     verified_pack(claim, verdict)
-                elif not any(item["target_type"] == "claim" for item in verdict["revisions"]):
-                    raise ValueError("unsupported verdict needs a current claim revision")
-                for item in verdict["revisions"]:
-                    if item["target_type"] == "claim" and item["target_id"] != claim["claim_id"]:
-                        raise ValueError("claim revision must target the current claim")
-                    if (
-                        item["target_type"] == "add_claim"
-                        and item["target_id"] != claim["section_id"]
-                    ):
-                        raise ValueError("added claim must target the current section")
-                verdicts.append(verdict)
                 revisions.extend(verdict["revisions"])
-            supported = {item["claim_id"] for item in verdicts if item["status"] == "supported"}
-            ref = await save(
-                self.artifact_store,
-                state,
-                "claim_verification",
-                {"claims": verdicts},
-            )
-            update = {"claim_verification_artifact_ref": ref}
+            supported = {
+                item["claim_id"] for item in ordered_verdicts if item["status"] == "supported"
+            }
+            if verification_ref is None:
+                verification_ref = await save(
+                    self.artifact_store,
+                    state,
+                    "claim_verification",
+                    {"claims": ordered_verdicts},
+                )
+            update = {"claim_verification_artifact_ref": verification_ref}
             if revisions:
                 if (
                     state["reflection_round"]
@@ -440,9 +572,16 @@ class VerifyClaimsNode:
                 "stage": "rendering_sections",
                 "status": "running",
             }
+        except VerificationProtocolError as exc:
+            return failed(
+                f"claim verification protocol failed: {exc}",
+                claim_verification_artifact_ref=verification_ref,
+                error_code="VERIFICATION_PROTOCOL_FAILED",
+            )
         except Exception as exc:
             return failed(
                 f"claim verification failed: {exc}",
+                claim_verification_artifact_ref=verification_ref,
                 error_code="VERIFICATION_FAILED",
                 retryable=True,
             )

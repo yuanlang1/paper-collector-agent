@@ -3,19 +3,19 @@ from __future__ import annotations
 import re
 
 
-REF_PATTERN = re.compile(r"\[\[REF_([^\]]+)\]\]")
+CITATION_KEY_PATTERN = re.compile(r"@paper-(\d+)")
 
 
-def citation_anchor_ids(text: str) -> list[str]:
-    return list(dict.fromkeys(REF_PATTERN.findall(text)))
+def citation_paper_ids(text: str) -> list[str]:
+    return list(dict.fromkeys(CITATION_KEY_PATTERN.findall(text)))
 
 
-def unsupported_synthesis_anchor_ids(
+def unsupported_synthesis_citation_ids(
     *,
     body_markdown: str,
     abstract: str,
     conclusion: str,
 ) -> set[str]:
-    return set(citation_anchor_ids(abstract) + citation_anchor_ids(conclusion)) - set(
-        citation_anchor_ids(body_markdown)
+    return set(citation_paper_ids(abstract) + citation_paper_ids(conclusion)) - set(
+        citation_paper_ids(body_markdown)
     )
