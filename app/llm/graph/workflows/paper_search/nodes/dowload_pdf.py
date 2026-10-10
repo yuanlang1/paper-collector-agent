@@ -12,6 +12,7 @@ from app.llm.tools.file_tools.download_file import download_file_handler
 
 
 LIBRARY_SAVE_DIR = "papers"
+PDF_DOWNLOAD_CONCURRENCY = 4
 
 
 def _safe_filename_part(value: str, max_length: int) -> str:
@@ -93,6 +94,79 @@ class PdfDownloadNode:
         error = result.get("error") or {}
         raise ValueError(error.get("message") or "PDF 下载失败。")
 
+    async def _download_paper(
+        self,
+        paper: Any,
+        child_run_id: str,
+        semaphore: asyncio.Semaphore,
+    ) -> dict[str, Any]:
+        if not isinstance(paper, dict):
+            return {
+                "paper": None,
+                "removed": {"title": "", "reason": "论文记录格式无效。"},
+                "warning": None,
+                "saved_path": None,
+            }
+
+        paper_info = paper.get("paper_info")
+        if not isinstance(paper_info, dict) or not paper_info.get("pdf_url"):
+            return {
+                "paper": None,
+                "removed": {
+                    "title": str(
+                        paper_info.get("title")
+                        if isinstance(paper_info, dict)
+                        else ""
+                    ),
+                    "reason": "缺少 PDF 下载地址。",
+                },
+                "warning": None,
+                "saved_path": None,
+            }
+
+        title = str(paper_info.get("title") or "")
+        try:
+            file_name = self._pdf_file_name(paper_info)
+            async with semaphore:
+                downloaded = await self._download_one(paper_info, child_run_id)
+
+            paper_info["file_name"] = file_name
+            paper["pdf_download"] = {
+                "status": "success",
+                "file_name": file_name,
+                "local_pdf_path": downloaded["saved_path"],
+                "artifact_uri": downloaded["artifact_uri"],
+                "final_url": downloaded["final_url"],
+                "sha256": downloaded["sha256"],
+                "size_bytes": downloaded["size_bytes"],
+            }
+            return {
+                "paper": paper,
+                "removed": None,
+                "warning": None,
+                "saved_path": downloaded["saved_path"],
+            }
+        except Exception as exc:
+            reason = f"PDF 下载失败：{exc}"
+            return {
+                "paper": None,
+                "removed": {"title": title, "reason": reason},
+                "warning": f"{title} 的 {reason}",
+                "saved_path": None,
+            }
+
+    @staticmethod
+    async def _gather_or_cancel(
+        tasks: list[asyncio.Task[dict[str, Any]]],
+    ) -> list[dict[str, Any]]:
+        try:
+            return list(await asyncio.gather(*tasks))
+        except asyncio.CancelledError:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+
     async def __call__(
         self,
         state: Mapping[str, Any],
@@ -136,56 +210,26 @@ class PdfDownloadNode:
             removed_papers: list[dict[str, str]] = []
             warnings: list[str] = []
 
-            for paper in papers:
-                paper_info = paper.get("paper_info")
-
-                if (
-                    not isinstance(paper_info, dict)
-                    or not paper_info.get("pdf_url")
-                ):
-                    removed_papers.append(
-                        {
-                            "title": str(
-                                paper_info.get("title")
-                                if isinstance(paper_info, dict)
-                                else ""
-                            ),
-                            "reason": "缺少 PDF 下载地址。",
-                        }
-                    )
-                    continue
-
-                try:
-                    file_name = self._pdf_file_name(paper_info)
-                    downloaded = await self._download_one(paper_info, child_run_id)
-                    downloaded_pdf_paths.append(downloaded["saved_path"])
-
-                    paper_info["file_name"] = file_name
-                    pdf_download = {
-                        "status": "success",
-                        "file_name": file_name,
-                        "local_pdf_path": downloaded["saved_path"],
-                        "artifact_uri": downloaded["artifact_uri"],
-                        "final_url": downloaded["final_url"],
-                        "sha256": downloaded["sha256"],
-                        "size_bytes": downloaded["size_bytes"],
-                    }
-                    paper["pdf_download"] = pdf_download
-
+            semaphore = asyncio.Semaphore(PDF_DOWNLOAD_CONCURRENCY)
+            tasks = [
+                asyncio.create_task(
+                    self._download_paper(paper, child_run_id, semaphore)
+                )
+                for paper in papers
+            ]
+            for result in await self._gather_or_cancel(tasks):
+                paper = result["paper"]
+                removed = result["removed"]
+                warning = result["warning"]
+                saved_path = result["saved_path"]
+                if isinstance(paper, dict):
                     downloaded_papers.append(paper)
-
-                except Exception as exc:
-                    title = str(paper_info.get("title") or "")
-
-                    removed_papers.append(
-                        {
-                            "title": title,
-                            "reason": f"PDF 下载失败：{exc}",
-                        }
-                    )
-                    warnings.append(
-                        f"{title} 的 PDF 下载失败：{exc}"
-                    )
+                if isinstance(removed, dict):
+                    removed_papers.append(removed)
+                if isinstance(warning, str):
+                    warnings.append(warning)
+                if isinstance(saved_path, str):
+                    downloaded_pdf_paths.append(saved_path)
 
             manifest["papers"] = downloaded_papers
             manifest["removed_pdf_download_failed"] = removed_papers
@@ -205,6 +249,33 @@ class PdfDownloadNode:
                 },
             )
 
+            if not downloaded_papers:
+                existing_artifact_uri = state.get(
+                    "existing_papers_manifest_artifact_ref"
+                )
+                if existing_artifact_uri is not None:
+                    existing_manifest = await self.artifact_store.read_json_uri(
+                        existing_artifact_uri
+                    )
+                    if existing_manifest.get("papers"):
+                        return {
+                            "stage": "enriching_abstract",
+                            "status": "running",
+                            "pdf_manifest_artifact_ref": artifact.artifact_uri,
+                            "downloaded_pdf_paths": downloaded_pdf_paths,
+                            "progress": {
+                                **state.get("progress", {}),
+                                "pdf_downloaded": 0,
+                                "pdf_download_failed": len(removed_papers),
+                            },
+                            "warnings": [
+                                *state.get("warnings", []),
+                                *warnings,
+                                "无新增 PDF 可用，继续处理已有论文。",
+                            ],
+                            "error": None,
+                        }
+
         except Exception as exc:
             return {
                 "stage": "failed",
@@ -214,6 +285,11 @@ class PdfDownloadNode:
             }
 
         if not downloaded_papers:
+            warning = (
+                "没有可继续处理的论文。"
+                if not papers
+                else "所有论文的 PDF 下载均失败。"
+            )
             return {
                 "stage": "failed",
                 "status": "failed",
@@ -222,7 +298,7 @@ class PdfDownloadNode:
                 "warnings": [
                     *state.get("warnings", []),
                     *warnings,
-                    "所有论文的 PDF 下载均失败。",
+                    warning,
                 ],
                 "error": "没有可继续处理的论文。",
             }

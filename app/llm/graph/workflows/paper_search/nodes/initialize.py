@@ -31,9 +31,12 @@ async def initialize_paper_search_node(
 
     return {
         "original_prompt": request.prompt,
+        "paper_service_task_id": request.task_id,
         "warnings": [],
         "progress": {},
         "downloaded_pdf_paths": [],
+        "task_status_update_error": None,
+        "remote_task_state": None,
         "stage": "preparing_search",
         "status": "running",
         "error": None,

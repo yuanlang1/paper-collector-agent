@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import unittest
 from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from langgraph.errors import GraphInterrupt
 from pydantic import ValidationError
@@ -13,12 +15,29 @@ from pydantic import ValidationError
 from app.events.adapter import event_data, sse_name_for
 from app.events.bus import EventBus
 from app.events.context import EventContext, bind_event_context
+from app.infrastructure.grpc.task_service_grpc_client import TaskState
 from app.llm.graph.workflows.paper_search.nodes.enrich import (
     PaperEnrichmentNode,
 )
 from app.llm.graph.workflows.paper_search.nodes.dowload_pdf import PdfDownloadNode
+from app.llm.graph.workflows.paper_search.nodes.crossref_enrich import (
+    CrossrefMetadataEnrichmentNode,
+)
+from app.llm.graph.workflows.paper_search.nodes.create_task import (
+    CreatePaperSearchTaskNode,
+)
+from app.llm.graph.workflows.paper_search.nodes.initialize import (
+    initialize_paper_search_node,
+)
+from app.llm.graph.workflows.paper_search.nodes.update_task_status import (
+    UpdatePaperSearchTaskStatusNode,
+)
 from app.llm.graph.workflows.paper_search.nodes.plan_search import PlanSearchNode
 from app.llm.graph.workflows.paper_search.nodes.review import ReviewNode
+from app.llm.graph.workflows.paper_search.nodes.recommend import (
+    PaperRecommendationResult,
+    RecommendationNode,
+)
 from app.llm.graph.workflows.paper_search.nodes.search import (
     SEARCH_HANDLERS,
     SearchNode,
@@ -117,7 +136,84 @@ def _search_state(*, progress: dict | None = None) -> dict:
     }
 
 
+def _concurrent_paper(index: int, *, doi: str | None = None) -> dict:
+    paper_info = {
+        "title": f"Paper {index}",
+        "authors": "Ada Lovelace",
+        "paper_abstract": "Abstract",
+    }
+    if doi:
+        paper_info["doi"] = doi
+    return {"paper_info": paper_info}
+
+
+_RECOMMENDATION_QUERY_UNDERSTANDING = {
+    "topic": "retrieval augmented generation",
+    "intent": "method",
+    "reasoning": "用户要求检索检索增强生成方法论文。",
+}
+
+
 class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_initialize_binds_provided_task_id(self) -> None:
+        update = await initialize_paper_search_node(
+            {
+                "active_tool_call": {
+                    "args": {
+                        "prompt": "检索 RAG 方法论文",
+                        "task_id": 24,
+                    }
+                }
+            }
+        )
+
+        self.assertEqual(update["paper_service_task_id"], 24)
+        self.assertEqual(update["stage"], "preparing_search")
+        self.assertEqual(update["status"], "running")
+
+    async def test_initialize_clears_task_id_when_none_is_provided(self) -> None:
+        update = await initialize_paper_search_node(
+            {"active_tool_call": {"args": {"prompt": "检索 RAG 方法论文"}}}
+        )
+
+        self.assertIsNone(update["paper_service_task_id"])
+
+    async def test_existing_task_is_marked_running_before_planning(self) -> None:
+        client = Mock(update_task_status=AsyncMock(return_value={"ok": True}))
+        update = await UpdatePaperSearchTaskStatusNode(client=client)(
+            {
+                "paper_service_task_id": 24,
+                "stage": "preparing_search",
+                "status": "running",
+            }
+        )
+
+        client.update_task_status.assert_awaited_once_with(
+            task_id=24,
+            task_state=TaskState.SEARCH_RUNNING,
+            error_message=None,
+        )
+        self.assertEqual(update["remote_task_state"], "SEARCH_RUNNING")
+
+    async def test_running_status_update_failure_stops_search(self) -> None:
+        client = Mock(
+            update_task_status=AsyncMock(
+                return_value={"ok": False, "error": "offline"}
+            )
+        )
+        update = await UpdatePaperSearchTaskStatusNode(client=client)(
+            {
+                "paper_service_task_id": 24,
+                "stage": "preparing_search",
+                "status": "running",
+                "warnings": [],
+                "progress": {},
+            }
+        )
+
+        self.assertEqual(update["stage"], "failed")
+        self.assertIn("offline", update["error"])
+
     async def test_plan_search_writes_intent_tag_and_plan_in_one_call(self) -> None:
         model = _PlanningModel()
         result = await PlanSearchNode(
@@ -651,6 +747,13 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
                     ]
                 },
             )
+            existing_artifact = await store.write_json(
+                run_id=child_run_id,
+                step_key="filter_existing",
+                source="filter",
+                kind="existing_papers_manifest_json",
+                payload={"papers": [{"paper_id": 1}]},
+            )
             calls: list[dict] = []
 
             async def fake_download(params: dict, _context: object) -> dict:
@@ -675,6 +778,9 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
                     {
                         "child_run_id": child_run_id,
                         "venue_manifest_artifact_ref": input_artifact.artifact_uri,
+                        "existing_papers_manifest_artifact_ref": (
+                            existing_artifact.artifact_uri
+                        ),
                     }
                 )
 
@@ -687,6 +793,685 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 manifest["papers"][0]["pdf_download"]["status"],
                 "success",
+            )
+
+    async def test_pdf_download_continues_when_only_existing_papers_remain(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as directory:
+            store = LocalArtifactStore(directory)
+            child_run_id = "child-existing-papers-only"
+            input_artifact = await store.write_json(
+                run_id=child_run_id,
+                step_key="resolve_venues",
+                source="venue",
+                kind="paper_info_venue_manifest_json",
+                payload={"papers": []},
+            )
+            existing_artifact = await store.write_json(
+                run_id=child_run_id,
+                step_key="filter_existing",
+                source="filter",
+                kind="existing_papers_manifest_json",
+                payload={"papers": [{"paper_id": 24}]},
+            )
+
+            update = await PdfDownloadNode(artifact_store=store)(
+                {
+                    "child_run_id": child_run_id,
+                    "venue_manifest_artifact_ref": input_artifact.artifact_uri,
+                    "existing_papers_manifest_artifact_ref": (
+                        existing_artifact.artifact_uri
+                    ),
+                }
+            )
+
+            self.assertEqual(update["stage"], "enriching_abstract")
+            self.assertIn("无新增 PDF 可用，继续处理已有论文。", update["warnings"])
+            manifest = await store.read_json_uri(
+                update["pdf_manifest_artifact_ref"]
+            )
+            self.assertEqual(manifest["papers"], [])
+
+    async def test_pdf_download_continues_when_new_downloads_fail_but_existing_remain(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as directory:
+            store = LocalArtifactStore(directory)
+            child_run_id = "child-pdf-failure-existing-papers"
+            input_artifact = await store.write_json(
+                run_id=child_run_id,
+                step_key="resolve_venues",
+                source="venue",
+                kind="paper_info_venue_manifest_json",
+                payload={
+                    "papers": [
+                        {
+                            "paper_info": {
+                                "title": "New Paper",
+                                "authors": "Ada Lovelace",
+                                "pdf_url": "https://example.test/new.pdf",
+                            }
+                        }
+                    ]
+                },
+            )
+            existing_artifact = await store.write_json(
+                run_id=child_run_id,
+                step_key="filter_existing",
+                source="filter",
+                kind="existing_papers_manifest_json",
+                payload={"papers": [{"paper_id": 24}]},
+            )
+
+            async def failed_download(_params: dict, _context: object) -> dict:
+                return {"ok": False, "error": {"message": "forbidden"}}
+
+            with patch(
+                "app.llm.graph.workflows.paper_search.nodes.dowload_pdf."
+                "download_file_handler",
+                new=failed_download,
+            ):
+                update = await PdfDownloadNode(artifact_store=store)(
+                    {
+                        "child_run_id": child_run_id,
+                        "venue_manifest_artifact_ref": input_artifact.artifact_uri,
+                        "existing_papers_manifest_artifact_ref": (
+                            existing_artifact.artifact_uri
+                        ),
+                    }
+                )
+
+            self.assertEqual(update["stage"], "enriching_abstract")
+            self.assertEqual(update["progress"]["pdf_downloaded"], 0)
+            self.assertEqual(update["progress"]["pdf_download_failed"], 1)
+            self.assertIn("无新增 PDF 可用，继续处理已有论文。", update["warnings"])
+
+    async def test_pdf_download_fails_when_no_new_or_existing_papers_remain(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as directory:
+            store = LocalArtifactStore(directory)
+            child_run_id = "child-no-papers"
+            input_artifact = await store.write_json(
+                run_id=child_run_id,
+                step_key="resolve_venues",
+                source="venue",
+                kind="paper_info_venue_manifest_json",
+                payload={"papers": []},
+            )
+            existing_artifact = await store.write_json(
+                run_id=child_run_id,
+                step_key="filter_existing",
+                source="filter",
+                kind="existing_papers_manifest_json",
+                payload={"papers": []},
+            )
+
+            update = await PdfDownloadNode(artifact_store=store)(
+                {
+                    "child_run_id": child_run_id,
+                    "venue_manifest_artifact_ref": input_artifact.artifact_uri,
+                    "existing_papers_manifest_artifact_ref": (
+                        existing_artifact.artifact_uri
+                    ),
+                }
+            )
+
+            self.assertEqual(update["stage"], "failed")
+            self.assertEqual(update["warnings"][-1], "没有可继续处理的论文。")
+            self.assertEqual(update["error"], "没有可继续处理的论文。")
+
+    async def test_pdf_download_limits_concurrency_and_keeps_input_order(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as directory:
+            store = LocalArtifactStore(directory)
+            child_run_id = "child-concurrent-pdf"
+            papers = [
+                {
+                    "paper_info": {
+                        "title": f"Paper {index}",
+                        "authors": "Ada Lovelace",
+                        "pdf_url": f"https://example.test/{index}.pdf",
+                    }
+                }
+                for index in range(5)
+            ]
+            input_artifact = await store.write_json(
+                run_id=child_run_id,
+                step_key="resolve_venues",
+                source="venue",
+                kind="paper_info_venue_manifest_json",
+                payload={"papers": papers},
+            )
+            active = 0
+            max_active = 0
+            started = asyncio.Event()
+            release = asyncio.Event()
+
+            async def fake_download(params: dict, _context: object) -> dict:
+                nonlocal active, max_active
+                active += 1
+                max_active = max(max_active, active)
+                if active == 4:
+                    started.set()
+                try:
+                    await release.wait()
+                finally:
+                    active -= 1
+                saved_path = str(store.base_dir / "papers" / params["file_name"])
+                return {
+                    "ok": True,
+                    "data": {
+                        "saved_path": saved_path,
+                        "artifact_uri": store.to_artifact_uri(Path(saved_path)),
+                        "final_url": params["url"],
+                        "sha256": "a" * 64,
+                        "size_bytes": 1,
+                    },
+                }
+
+            with patch(
+                "app.llm.graph.workflows.paper_search.nodes.dowload_pdf."
+                "download_file_handler",
+                new=fake_download,
+            ):
+                task = asyncio.create_task(
+                    PdfDownloadNode(artifact_store=store)(
+                        {
+                            "child_run_id": child_run_id,
+                            "venue_manifest_artifact_ref": input_artifact.artifact_uri,
+                        }
+                    )
+                )
+                await asyncio.wait_for(started.wait(), timeout=1)
+                self.assertEqual(max_active, 4)
+                release.set()
+                update = await task
+
+            manifest = await store.read_json_uri(update["pdf_manifest_artifact_ref"])
+            self.assertEqual(
+                [paper["paper_info"]["title"] for paper in manifest["papers"]],
+                [f"Paper {index}" for index in range(5)],
+            )
+
+    async def test_recommendation_limits_concurrency_and_preserves_results(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as directory:
+            store = LocalArtifactStore(directory)
+            child_run_id = "child-concurrent-recommendation"
+            artifact = await store.write_json(
+                run_id=child_run_id,
+                step_key="abstract_enrichment",
+                source="test",
+                kind="paper_info_abstract_manifest_json",
+                payload={
+                    "papers": [
+                        _concurrent_paper(index)
+                        for index in range(4)
+                    ]
+                },
+            )
+            started = asyncio.Event()
+            release = asyncio.Event()
+
+            class Model:
+                def __init__(self) -> None:
+                    self.active = 0
+                    self.max_active = 0
+
+                async def ainvoke(self, messages: list):
+                    self.active += 1
+                    self.max_active = max(self.max_active, self.active)
+                    if self.active == 3:
+                        started.set()
+                    try:
+                        await release.wait()
+                    finally:
+                        self.active -= 1
+
+                    title = json.loads(messages[1].content)["paper"]["title"]
+                    if title == "Paper 2":
+                        raise RuntimeError("model unavailable")
+                    return PaperRecommendationResult(
+                        recommendation_stars=(
+                            2 if title == "Paper 1" else 4
+                        ),
+                        recommendation_reason="相关。",
+                    )
+
+            model = Model()
+            task = asyncio.create_task(
+                RecommendationNode(artifact_store=store, model=model)(
+                    {
+                        "child_run_id": child_run_id,
+                        "abstract_manifest_artifact_ref": artifact.artifact_uri,
+                        "query_understanding": (
+                            _RECOMMENDATION_QUERY_UNDERSTANDING
+                        ),
+                    }
+                )
+            )
+            await asyncio.wait_for(started.wait(), timeout=1)
+            self.assertEqual(model.max_active, 3)
+            release.set()
+            update = await task
+
+            manifest = await store.read_json_uri(
+                update["recommendation_manifest_artifact_ref"]
+            )
+            self.assertEqual(
+                [
+                    paper["paper_info"]["title"]
+                    for paper in manifest["papers"]
+                ],
+                ["Paper 0", "Paper 3"],
+            )
+            self.assertEqual(
+                manifest["removed_low_recommendation"][0]["title"],
+                "Paper 1",
+            )
+            self.assertEqual(
+                manifest["removed_recommendation_failed"][0]["title"],
+                "Paper 2",
+            )
+            self.assertEqual(update["progress"]["recommendation_failed"], 1)
+
+    async def test_recommendation_cancellation_cancels_active_scores(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as directory:
+            store = LocalArtifactStore(directory)
+            child_run_id = "child-cancel-recommendation"
+            artifact = await store.write_json(
+                run_id=child_run_id,
+                step_key="abstract_enrichment",
+                source="test",
+                kind="paper_info_abstract_manifest_json",
+                payload={
+                    "papers": [
+                        _concurrent_paper(index)
+                        for index in range(3)
+                    ]
+                },
+            )
+            started = asyncio.Event()
+
+            class Model:
+                def __init__(self) -> None:
+                    self.active = 0
+                    self.cancelled = 0
+
+                async def ainvoke(self, _messages: list):
+                    self.active += 1
+                    if self.active == 3:
+                        started.set()
+                    try:
+                        await asyncio.Event().wait()
+                    except asyncio.CancelledError:
+                        self.cancelled += 1
+                        raise
+                    finally:
+                        self.active -= 1
+
+            model = Model()
+            task = asyncio.create_task(
+                RecommendationNode(artifact_store=store, model=model)(
+                    {
+                        "child_run_id": child_run_id,
+                        "abstract_manifest_artifact_ref": artifact.artifact_uri,
+                        "query_understanding": (
+                            _RECOMMENDATION_QUERY_UNDERSTANDING
+                        ),
+                    }
+                )
+            )
+            await asyncio.wait_for(started.wait(), timeout=1)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+            self.assertEqual(model.cancelled, 3)
+
+    async def test_crossref_limits_concurrency_and_preserves_results(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as directory:
+            store = LocalArtifactStore(directory)
+            child_run_id = "child-concurrent-crossref"
+            artifact = await store.write_json(
+                run_id=child_run_id,
+                step_key="enrich_papers",
+                source="test",
+                kind="paper_info_enrichment_manifest_json",
+                payload={
+                    "papers": [
+                        _concurrent_paper(0, doi="10.1/paper-0"),
+                        *[
+                            _concurrent_paper(index)
+                            for index in range(1, 5)
+                        ],
+                    ]
+                },
+            )
+            started = asyncio.Event()
+            release = asyncio.Event()
+            calls: list[dict] = []
+            active = 0
+            max_active = 0
+
+            async def crossref_search(params: dict, _context: object) -> dict:
+                nonlocal active, max_active
+                calls.append(params)
+                active += 1
+                max_active = max(max_active, active)
+                if active == 4:
+                    started.set()
+                try:
+                    await release.wait()
+                finally:
+                    active -= 1
+
+                if "doi" in params:
+                    return {"ok": True, "papers": []}
+                if params["title"] == "Paper 1":
+                    return {
+                        "ok": True,
+                        "papers": [{"title": "Different Paper"}],
+                    }
+                if params["title"] == "Paper 2":
+                    return {"ok": False, "error": "service unavailable"}
+                return {
+                    "ok": True,
+                    "papers": [
+                        {
+                            "title": params["title"],
+                            "authors": "Ada Lovelace",
+                            "citation_count": 1,
+                        }
+                    ],
+                }
+
+            task = asyncio.create_task(
+                CrossrefMetadataEnrichmentNode(
+                    artifact_store=store,
+                    crossref_search=crossref_search,
+                )(
+                    {
+                        "child_run_id": child_run_id,
+                        "enrichment_manifest_artifact_ref": (
+                            artifact.artifact_uri
+                        ),
+                    }
+                )
+            )
+            await asyncio.wait_for(started.wait(), timeout=1)
+            self.assertEqual(max_active, 4)
+            release.set()
+            update = await task
+
+            manifest = await store.read_json_uri(
+                update["crossref_enrichment_manifest_artifact_ref"]
+            )
+            self.assertEqual(
+                [
+                    paper["paper_info"]["title"]
+                    for paper in manifest["papers"]
+                ],
+                [f"Paper {index}" for index in range(5)],
+            )
+            self.assertEqual(
+                [
+                    paper["crossref_metadata"]["status"]
+                    for paper in manifest["papers"]
+                ],
+                ["matched", "not_matched", "failed", "matched", "matched"],
+            )
+            self.assertEqual(update["progress"]["crossref_matched"], 3)
+            self.assertEqual(update["progress"]["crossref_unmatched"], 1)
+            self.assertEqual(update["progress"]["crossref_failed"], 1)
+            self.assertIn({"doi": "10.1/paper-0"}, calls)
+            self.assertIn(
+                {
+                    "title": "Paper 0",
+                    "limit": 5,
+                    "author": "Ada Lovelace",
+                },
+                calls,
+            )
+
+    async def test_crossref_cancellation_cancels_active_queries(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as directory:
+            store = LocalArtifactStore(directory)
+            child_run_id = "child-cancel-crossref"
+            artifact = await store.write_json(
+                run_id=child_run_id,
+                step_key="enrich_papers",
+                source="test",
+                kind="paper_info_enrichment_manifest_json",
+                payload={
+                    "papers": [
+                        _concurrent_paper(index)
+                        for index in range(4)
+                    ]
+                },
+            )
+            started = asyncio.Event()
+            active = 0
+            cancelled = 0
+
+            async def crossref_search(_params: dict, _context: object) -> dict:
+                nonlocal active, cancelled
+                active += 1
+                if active == 4:
+                    started.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    cancelled += 1
+                    raise
+                finally:
+                    active -= 1
+
+            task = asyncio.create_task(
+                CrossrefMetadataEnrichmentNode(
+                    artifact_store=store,
+                    crossref_search=crossref_search,
+                )(
+                    {
+                        "child_run_id": child_run_id,
+                        "enrichment_manifest_artifact_ref": (
+                            artifact.artifact_uri
+                        ),
+                    }
+                )
+            )
+            await asyncio.wait_for(started.wait(), timeout=1)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+            self.assertEqual(cancelled, 4)
+
+    async def test_crossref_keeps_doi_fallback_in_the_same_slot(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as directory:
+            store = LocalArtifactStore(directory)
+            child_run_id = "child-crossref-fallback-slot"
+            artifact = await store.write_json(
+                run_id=child_run_id,
+                step_key="enrich_papers",
+                source="test",
+                kind="paper_info_enrichment_manifest_json",
+                payload={
+                    "papers": [
+                        _concurrent_paper(0, doi="10.1/paper-0"),
+                        *[
+                            _concurrent_paper(index)
+                            for index in range(1, 5)
+                        ],
+                    ]
+                },
+            )
+            initial_started = asyncio.Event()
+            doi_release = asyncio.Event()
+            fallback_started = asyncio.Event()
+            fallback_release = asyncio.Event()
+            fifth_started = asyncio.Event()
+            fifth_release = asyncio.Event()
+            other_release = asyncio.Event()
+            initial_calls = 0
+
+            async def crossref_search(params: dict, _context: object) -> dict:
+                nonlocal initial_calls
+                if "doi" in params:
+                    initial_calls += 1
+                    await doi_release.wait()
+                    return {"ok": True, "papers": []}
+
+                title = params["title"]
+                if title == "Paper 0":
+                    fallback_started.set()
+                    await fallback_release.wait()
+                elif title == "Paper 4":
+                    fifth_started.set()
+                    await fifth_release.wait()
+                else:
+                    initial_calls += 1
+                    if initial_calls == 4:
+                        initial_started.set()
+                    await other_release.wait()
+
+                return {
+                    "ok": True,
+                    "papers": [
+                        {"title": title, "authors": "Ada Lovelace"}
+                    ],
+                }
+
+            task = asyncio.create_task(
+                CrossrefMetadataEnrichmentNode(
+                    artifact_store=store,
+                    crossref_search=crossref_search,
+                )(
+                    {
+                        "child_run_id": child_run_id,
+                        "enrichment_manifest_artifact_ref": (
+                            artifact.artifact_uri
+                        ),
+                    }
+                )
+            )
+            await asyncio.wait_for(initial_started.wait(), timeout=1)
+            doi_release.set()
+            await asyncio.wait_for(fallback_started.wait(), timeout=1)
+            self.assertFalse(fifth_started.is_set())
+            fallback_release.set()
+            await asyncio.wait_for(fifth_started.wait(), timeout=1)
+            other_release.set()
+            fifth_release.set()
+            await task
+
+    async def test_empty_recommendation_and_crossref_skip_external_calls(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as directory:
+            store = LocalArtifactStore(directory)
+            child_run_id = "child-empty-concurrent-nodes"
+            crossref_artifact = await store.write_json(
+                run_id=child_run_id,
+                step_key="enrich_papers",
+                source="test",
+                kind="paper_info_enrichment_manifest_json",
+                payload={"papers": []},
+            )
+
+            async def crossref_search(_params: dict, _context: object) -> dict:
+                raise AssertionError("Crossref should not run for an empty manifest")
+
+            crossref_update = await CrossrefMetadataEnrichmentNode(
+                artifact_store=store,
+                crossref_search=crossref_search,
+            )(
+                {
+                    "child_run_id": child_run_id,
+                    "enrichment_manifest_artifact_ref": (
+                        crossref_artifact.artifact_uri
+                    ),
+                }
+            )
+            self.assertEqual(crossref_update["stage"], "resolving_venues")
+
+            recommendation_artifact = await store.write_json(
+                run_id=child_run_id,
+                step_key="abstract_enrichment",
+                source="test",
+                kind="paper_info_abstract_manifest_json",
+                payload={"papers": []},
+            )
+
+            class Model:
+                async def ainvoke(self, _messages: list):
+                    raise AssertionError(
+                        "Recommendation should not run for an empty manifest"
+                    )
+
+            recommendation_update = await RecommendationNode(
+                artifact_store=store,
+                model=Model(),
+            )(
+                {
+                    "child_run_id": child_run_id,
+                    "abstract_manifest_artifact_ref": (
+                        recommendation_artifact.artifact_uri
+                    ),
+                    "query_understanding": _RECOMMENDATION_QUERY_UNDERSTANDING,
+                }
+            )
+            self.assertEqual(recommendation_update["stage"], "failed")
+
+    async def test_existing_task_is_bound_without_creating_a_new_task(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = LocalArtifactStore(directory)
+            child_run_id = "child-existing-task"
+            recommendation = await store.write_json(
+                run_id=child_run_id,
+                step_key="recommend_papers",
+                source="recommendation",
+                kind="paper_recommendation_manifest_json",
+                payload={
+                    "papers": [
+                        {"task_paper_relation_draft": {"search_task_id": None}}
+                    ]
+                },
+            )
+            client = Mock(add_query_task=AsyncMock())
+            update = await CreatePaperSearchTaskNode(
+                client=client,
+                artifact_store=store,
+            )(
+                {
+                    "child_run_id": child_run_id,
+                    "paper_service_task_id": 24,
+                    "recommendation_manifest_artifact_ref": recommendation.artifact_uri,
+                }
+            )
+
+            client.add_query_task.assert_not_awaited()
+            self.assertEqual(update["stage"], "persisting_papers")
+            bound_manifest = await store.read_json_uri(
+                update["task_bound_recommendation_manifest_artifact_ref"]
+            )
+            self.assertEqual(bound_manifest["search_task_id"], 24)
+            self.assertEqual(
+                bound_manifest["papers"][0]["task_paper_relation_draft"]
+                ["search_task_id"],
+                24,
             )
 
     async def test_venue_resolution_uses_raw_dict_handler(self) -> None:
@@ -762,6 +1547,22 @@ class PaperSearchSingleSourceValidationTests(unittest.TestCase):
         self.assertIn("search", targets)
         self.assertNotIn("confirm", targets)
 
+    def test_existing_task_routes_through_status_update_before_planning(self) -> None:
+        graph = build_paper_search_workflow().get_graph()
+        initialize_targets = {
+            edge.target for edge in graph.edges if edge.source == "initialize"
+        }
+        status_targets = {
+            edge.target
+            for edge in graph.edges
+            if edge.source == "update_task_status"
+        }
+
+        self.assertIn("plan_search", initialize_targets)
+        self.assertIn("update_task_status", initialize_targets)
+        self.assertIn("plan_search", status_targets)
+        self.assertIn("finalize_result", status_targets)
+
     def test_review_routes_to_search_or_enrichment(self) -> None:
         graph = build_paper_search_workflow().get_graph()
         review_targets = {
@@ -779,6 +1580,20 @@ class PaperSearchSingleSourceValidationTests(unittest.TestCase):
     def test_delegation_schema_does_not_expose_constraints(self) -> None:
         schema = PaperSearchDelegation.model_json_schema()
         self.assertNotIn("constraints", schema["properties"])
+        self.assertIn("task_id", schema["properties"])
+
+    def test_delegation_accepts_only_positive_integer_task_ids(self) -> None:
+        self.assertEqual(
+            PaperSearchDelegation.model_validate(
+                {"prompt": "检索 RAG 方法论文", "task_id": 24}
+            ).task_id,
+            24,
+        )
+        for value in (True, 0, -1, "24"):
+            with self.assertRaises(ValidationError):
+                PaperSearchDelegation.model_validate(
+                    {"prompt": "检索 RAG 方法论文", "task_id": value}
+                )
 
     def test_state_does_not_include_unused_pdf_download_flag(self) -> None:
         self.assertNotIn("download_pdfs", PaperSearchWorkflowState.__annotations__)

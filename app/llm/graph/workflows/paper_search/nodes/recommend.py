@@ -48,6 +48,9 @@ RECOMMENDATION_SYSTEM_PROMPT = """
 """.strip()
 
 
+RECOMMENDATION_CONCURRENCY = 3
+
+
 class PaperRecommendationResult(BaseModel):
     recommendation_stars: int = Field(ge=1, le=5)
     recommendation_reason: str = Field(
@@ -117,6 +120,34 @@ class RecommendationNode:
             if isinstance(result, PaperRecommendationResult)
             else PaperRecommendationResult.model_validate(result)
         )
+
+    async def _recommend_paper(
+        self,
+        *,
+        query_understanding: PromptUnderstandingArgs,
+        paper: dict[str, Any],
+        semaphore: asyncio.Semaphore,
+    ) -> PaperRecommendationResult | Exception:
+        try:
+            async with semaphore:
+                return await self._recommend_one(
+                    query_understanding=query_understanding,
+                    paper=paper,
+                )
+        except Exception as exc:
+            return exc
+
+    @staticmethod
+    async def _gather_or_cancel(
+        tasks: list[asyncio.Task[PaperRecommendationResult | Exception]],
+    ) -> list[PaperRecommendationResult | Exception]:
+        try:
+            return list(await asyncio.gather(*tasks))
+        except asyncio.CancelledError:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
 
     async def __call__(
         self,
@@ -234,6 +265,9 @@ class RecommendationNode:
                 if not isinstance(paper, dict):
                     continue
 
+                if not isinstance(paper.get("paper_info"), dict):
+                    continue
+
                 paper["paper_id"] = None
                 recommend_input.append(paper)
 
@@ -272,34 +306,37 @@ class RecommendationNode:
 
                 recommend_input.append(paper)
 
-            for paper in recommend_input:
-                paper_info = (
-                    paper.get("paper_info")
-                    if isinstance(paper, dict)
-                    else None
-                )
-
-                if not isinstance(paper_info, dict):
-                    continue
-
-                try:
-                    recommendation = await self._recommend_one(
+            semaphore = asyncio.Semaphore(RECOMMENDATION_CONCURRENCY)
+            tasks = [
+                asyncio.create_task(
+                    self._recommend_paper(
                         query_understanding=query_understanding,
                         paper=paper,
+                        semaphore=semaphore,
                     )
-                except Exception as exc:
+                )
+                for paper in recommend_input
+            ]
+            results = await self._gather_or_cancel(tasks)
+
+            for paper, result in zip(recommend_input, results, strict=True):
+                paper_info = paper["paper_info"]
+
+                if isinstance(result, Exception):
                     title = str(paper_info.get("title") or "")
 
                     removed_recommendation_failed.append(
                         {
                             "title": title,
-                            "reason": f"推荐评分失败：{exc}",
+                            "reason": f"推荐评分失败：{result}",
                         }
                     )
                     warnings.append(
                         f"{title} 的推荐评分失败，已从当前任务结果移除。"
                     )
                     continue
+
+                recommendation = result
 
                 relation_draft = {
                     "search_task_id": state.get(

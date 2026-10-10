@@ -17,6 +17,7 @@ from app.llm.tools.search_tools.crossref.search_crossref import (
 CrossrefSearch = Callable[
     [dict[str, Any], Any], Awaitable[dict[str, Any]]
 ]
+CROSSREF_ENRICHMENT_CONCURRENCY = 4
 
 
 def _text(value: Any) -> str | None:
@@ -235,6 +236,46 @@ class CrossrefMetadataEnrichmentNode:
             ),
         }
 
+    async def _enrich_paper(
+        self,
+        *,
+        paper: dict[str, Any],
+        paper_info: dict[str, Any],
+        semaphore: asyncio.Semaphore,
+    ) -> tuple[bool, bool, str | None]:
+        title = _text(paper_info.get("title")) or ""
+        try:
+            async with semaphore:
+                crossref_paper, match_method = await self._search(paper_info)
+        except Exception as exc:
+            paper["crossref_metadata"] = {
+                "status": "failed",
+                "match_method": None,
+            }
+            return False, False, f"{title} 的 Crossref 补充失败：{exc}"
+
+        if crossref_paper is None:
+            paper["crossref_metadata"] = {
+                "status": "not_matched",
+                "match_method": match_method,
+            }
+            return False, True, None
+
+        self._merge(paper, crossref_paper, match_method)
+        return True, False, None
+
+    @staticmethod
+    async def _gather_or_cancel(
+        tasks: list[asyncio.Task[tuple[bool, bool, str | None]]],
+    ) -> list[tuple[bool, bool, str | None]]:
+        try:
+            return list(await asyncio.gather(*tasks))
+        except asyncio.CancelledError:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+
     async def __call__(
         self,
         state: Mapping[str, Any],
@@ -267,36 +308,28 @@ class CrossrefMetadataEnrichmentNode:
             unmatched_count = 0
             warnings: list[str] = []
 
-            for paper in papers:
-                if not isinstance(paper, dict):
-                    continue
-                paper_info = paper.get("paper_info")
-                if not isinstance(paper_info, dict):
-                    continue
-
-                title = _text(paper_info.get("title")) or ""
-                try:
-                    crossref_paper, match_method = await self._search(
-                        paper_info
+            valid_papers = [
+                (paper, paper["paper_info"])
+                for paper in papers
+                if isinstance(paper, dict)
+                and isinstance(paper.get("paper_info"), dict)
+            ]
+            semaphore = asyncio.Semaphore(CROSSREF_ENRICHMENT_CONCURRENCY)
+            tasks = [
+                asyncio.create_task(
+                    self._enrich_paper(
+                        paper=paper,
+                        paper_info=paper_info,
+                        semaphore=semaphore,
                     )
-                except Exception as exc:
-                    paper["crossref_metadata"] = {
-                        "status": "failed",
-                        "match_method": None,
-                    }
-                    warnings.append(f"{title} 的 Crossref 补充失败：{exc}")
-                    continue
-
-                if crossref_paper is None:
-                    paper["crossref_metadata"] = {
-                        "status": "not_matched",
-                        "match_method": match_method,
-                    }
-                    unmatched_count += 1
-                    continue
-
-                self._merge(paper, crossref_paper, match_method)
-                matched_count += 1
+                )
+                for paper, paper_info in valid_papers
+            ]
+            for matched, unmatched, warning in await self._gather_or_cancel(tasks):
+                matched_count += matched
+                unmatched_count += unmatched
+                if warning:
+                    warnings.append(warning)
 
             manifest["papers"] = papers
             manifest["step_key"] = "crossref_enrichment"

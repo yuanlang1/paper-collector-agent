@@ -40,6 +40,7 @@ PDF_READ_PAGE_COUNT = 4
 MAX_ABSTRACT_CHARS = 8_000
 MAX_KEYWORDS = 12
 MAX_KEYWORD_CHARS = 1_000
+ABSTRACT_ENRICHMENT_CONCURRENCY = 3
 
 
 class PdfFrontPageEnrichmentResult(BaseModel):
@@ -141,6 +142,128 @@ class AbstractEnrichNode:
             else PdfFrontPageEnrichmentResult.model_validate(result)
         )
 
+    async def _enrich_paper(
+        self,
+        paper: Any,
+        semaphore: asyncio.Semaphore,
+    ) -> tuple[dict[str, int], str | None]:
+        counts = {
+            "source_abstract": 0,
+            "extracted_abstract": 0,
+            "missing_abstract": 0,
+            "front_pages_read": 0,
+            "ai_abstract": 0,
+            "source_keyword": 0,
+            "extracted_keyword": 0,
+            "missing_keyword": 0,
+        }
+        if not isinstance(paper, dict):
+            return counts, None
+
+        paper_info = paper.get("paper_info")
+        pdf_download = paper.get("pdf_download") or {}
+        if not isinstance(paper_info, dict):
+            return counts, None
+
+        source_abstract = _text(paper_info.get("paper_abstract"))
+        source_keywords = _normalize_keywords(paper_info.get("keywords"))
+        local_pdf_path = _text(pdf_download.get("local_pdf_path"))
+        page_count = 0
+        content_error: str | None = None
+        extracted_abstract: str | None = None
+        extracted_keywords: list[str] = []
+
+        try:
+            async with semaphore:
+                if not local_pdf_path:
+                    raise ValueError("缺少本地 PDF 路径。")
+
+                initial_pdf_text, page_count = await asyncio.to_thread(
+                    _extract_initial_pdf_text,
+                    Path(local_pdf_path),
+                )
+                counts["front_pages_read"] += 1
+                enrichment = await self._enrich_from_pdf_front_pages(
+                    initial_pdf_text
+                )
+
+            extracted_abstract = _text(enrichment.paper_abstract)
+            extracted_keywords = _normalize_keywords(enrichment.keywords)
+            ai_abstract = _text(enrichment.ai_abstract)
+            if ai_abstract is None:
+                raise ValueError("AI 摘要为空。")
+            paper_info["ai_abstract"] = ai_abstract
+            counts["ai_abstract"] += 1
+        except Exception as exc:
+            content_error = str(exc)
+            paper_info["ai_abstract"] = None
+
+        if extracted_abstract:
+            paper_info["paper_abstract"] = extracted_abstract
+            abstract_source = "pdf_front_pages"
+            extraction_status = "success"
+            counts["extracted_abstract"] += 1
+        elif source_abstract:
+            paper_info["paper_abstract"] = source_abstract
+            abstract_source = "source_metadata"
+            extraction_status = "fallback"
+            counts["source_abstract"] += 1
+        else:
+            paper_info["paper_abstract"] = None
+            abstract_source = "missing"
+            extraction_status = "failed" if content_error else "not_found"
+            counts["missing_abstract"] += 1
+
+        if extracted_keywords:
+            paper_info["keywords"] = _keywords_text(extracted_keywords)
+            keyword_source = "pdf_front_pages"
+            keyword_extraction_status = "success"
+            counts["extracted_keyword"] += 1
+        elif source_keywords:
+            paper_info["keywords"] = _keywords_text(source_keywords)
+            keyword_source = "source_metadata"
+            keyword_extraction_status = "fallback"
+            counts["source_keyword"] += 1
+        else:
+            paper_info["keywords"] = None
+            keyword_source = "missing"
+            keyword_extraction_status = "failed" if content_error else "not_found"
+            counts["missing_keyword"] += 1
+
+        paper["abstract_resolution"] = {
+            "source": abstract_source,
+            "extraction_status": extraction_status,
+            "pdf_pages_read": page_count,
+            "ai_summary_source": (
+                "pdf_front_pages" if content_error is None else "failed"
+            ),
+            "error": content_error,
+        }
+        paper["keyword_resolution"] = {
+            "source": keyword_source,
+            "extraction_status": keyword_extraction_status,
+            "pdf_pages_read": page_count,
+            "error": content_error,
+        }
+        warning = (
+            f"{paper_info.get('title')} 的 PDF 内容补全失败：{content_error}"
+            if content_error
+            else None
+        )
+        return counts, warning
+
+    @staticmethod
+    async def _gather_or_cancel(
+        tasks: list[asyncio.Task[tuple[dict[str, int], str | None]]],
+    ) -> list[tuple[dict[str, int], str | None]]:
+        try:
+            return list(await asyncio.gather(*tasks))
+        except asyncio.CancelledError:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+
     async def __call__(
         self,
         state: Mapping[str, Any],
@@ -181,117 +304,37 @@ class AbstractEnrichNode:
             if not isinstance(papers, list):
                 raise ValueError("manifest papers 格式无效。")
 
-            source_abstract_count = 0
-            extracted_abstract_count = 0
-            missing_abstract_count = 0
-            front_pages_read_count = 0
-            ai_abstract_count = 0
-            source_keyword_count = 0
-            extracted_keyword_count = 0
-            missing_keyword_count = 0
+            counts = {
+                "source_abstract": 0,
+                "extracted_abstract": 0,
+                "missing_abstract": 0,
+                "front_pages_read": 0,
+                "ai_abstract": 0,
+                "source_keyword": 0,
+                "extracted_keyword": 0,
+                "missing_keyword": 0,
+            }
             warnings: list[str] = []
 
-            for paper in papers:
-                if not isinstance(paper, dict):
-                    continue
+            semaphore = asyncio.Semaphore(ABSTRACT_ENRICHMENT_CONCURRENCY)
+            tasks = [
+                asyncio.create_task(self._enrich_paper(paper, semaphore))
+                for paper in papers
+            ]
+            for paper_counts, warning in await self._gather_or_cancel(tasks):
+                for key, value in paper_counts.items():
+                    counts[key] += value
+                if warning:
+                    warnings.append(warning)
 
-                paper_info = paper.get("paper_info")
-                pdf_download = paper.get("pdf_download") or {}
-
-                if not isinstance(paper_info, dict):
-                    continue
-
-                source_abstract = _text(
-                    paper_info.get("paper_abstract")
-                )
-                source_keywords = _normalize_keywords(
-                    paper_info.get("keywords")
-                )
-                local_pdf_path = _text(
-                    pdf_download.get("local_pdf_path")
-                )
-                page_count = 0
-                content_error: str | None = None
-                extracted_abstract: str | None = None
-                extracted_keywords: list[str] = []
-
-                try:
-                    if not local_pdf_path:
-                        raise ValueError("缺少本地 PDF 路径。")
-
-                    initial_pdf_text, page_count = (
-                        await asyncio.to_thread(
-                            _extract_initial_pdf_text,
-                            Path(local_pdf_path),
-                        )
-                    )
-                    front_pages_read_count += 1
-                    enrichment = await self._enrich_from_pdf_front_pages(
-                        initial_pdf_text
-                    )
-                    extracted_abstract = _text(enrichment.paper_abstract)
-                    extracted_keywords = _normalize_keywords(enrichment.keywords)
-                    ai_abstract = _text(enrichment.ai_abstract)
-                    if ai_abstract is None:
-                        raise ValueError("AI 摘要为空。")
-                    paper_info["ai_abstract"] = ai_abstract
-                    ai_abstract_count += 1
-                except Exception as exc:
-                    content_error = str(exc)
-                    paper_info["ai_abstract"] = None
-                    warnings.append(
-                        f"{paper_info.get('title')} 的 PDF 内容补全失败：{exc}"
-                    )
-
-                if extracted_abstract:
-                    paper_info["paper_abstract"] = extracted_abstract
-                    abstract_source = "pdf_front_pages"
-                    extraction_status = "success"
-                    extracted_abstract_count += 1
-                elif source_abstract:
-                    paper_info["paper_abstract"] = source_abstract
-                    abstract_source = "source_metadata"
-                    extraction_status = "fallback"
-                    source_abstract_count += 1
-                else:
-                    paper_info["paper_abstract"] = None
-                    abstract_source = "missing"
-                    extraction_status = "failed" if content_error else "not_found"
-                    missing_abstract_count += 1
-
-                if extracted_keywords:
-                    paper_info["keywords"] = _keywords_text(extracted_keywords)
-                    keyword_source = "pdf_front_pages"
-                    keyword_extraction_status = "success"
-                    extracted_keyword_count += 1
-                elif source_keywords:
-                    paper_info["keywords"] = _keywords_text(source_keywords)
-                    keyword_source = "source_metadata"
-                    keyword_extraction_status = "fallback"
-                    source_keyword_count += 1
-                else:
-                    paper_info["keywords"] = None
-                    keyword_source = "missing"
-                    keyword_extraction_status = (
-                        "failed" if content_error else "not_found"
-                    )
-                    missing_keyword_count += 1
-
-                paper["abstract_resolution"] = {
-                    "source": abstract_source,
-                    "extraction_status": extraction_status,
-                    "pdf_pages_read": page_count,
-                    "ai_summary_source": (
-                        "pdf_front_pages" if content_error is None else "failed"
-                    ),
-                    "error": content_error,
-                }
-                paper["keyword_resolution"] = {
-                    "source": keyword_source,
-                    "extraction_status": keyword_extraction_status,
-                    "pdf_pages_read": page_count,
-                    "error": content_error,
-                }
+            source_abstract_count = counts["source_abstract"]
+            extracted_abstract_count = counts["extracted_abstract"]
+            missing_abstract_count = counts["missing_abstract"]
+            front_pages_read_count = counts["front_pages_read"]
+            ai_abstract_count = counts["ai_abstract"]
+            source_keyword_count = counts["source_keyword"]
+            extracted_keyword_count = counts["extracted_keyword"]
+            missing_keyword_count = counts["missing_keyword"]
 
             manifest["papers"] = papers
             manifest["step_key"] = "abstract_enrichment"

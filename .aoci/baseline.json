@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-22T01:46:30Z",
-  "updated_at": "2026-10-07T02:42:26Z",
+  "updated_at": "2026-10-07T03:52:15Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -18606,9 +18606,9 @@
     },
     "tests/test_abstract_enrich.py": {
       "role": "observe",
-      "sha256": "9cbde1813f38d05450faa89fd077a35032bcdee7e21644fcbd37176ad01c94bf",
-      "size": 5555,
-      "normalized_sha256": "9cbde1813f38d05450faa89fd077a35032bcdee7e21644fcbd37176ad01c94bf"
+      "sha256": "5de6ac3b00c1a3cf6645cc16055b9909e0414ef5af66436c2e18284069006c4f",
+      "size": 10515,
+      "normalized_sha256": "5de6ac3b00c1a3cf6645cc16055b9909e0414ef5af66436c2e18284069006c4f"
     },
     "tests/test_agent_stream_lifecycle.py": {
       "role": "observe",
@@ -18672,9 +18672,9 @@
     },
     "tests/test_paper_search_single_source.py": {
       "role": "observe",
-      "sha256": "682f25a33dfc6807a4c371ebecf004ce227b11cad6a72eb354fe1d099ede23f4",
-      "size": 30426,
-      "normalized_sha256": "682f25a33dfc6807a4c371ebecf004ce227b11cad6a72eb354fe1d099ede23f4"
+      "sha256": "f2bd84fd912758a963be33a4c97374ffa1c226a0e1bb9ca47a7ba435b71bbc56",
+      "size": 38624,
+      "normalized_sha256": "f2bd84fd912758a963be33a4c97374ffa1c226a0e1bb9ca47a7ba435b71bbc56"
     },
     "tests/test_pdf_page_aware_chunking.py": {
       "role": "observe",
@@ -18774,9 +18774,9 @@
     },
     "tests/test_update_paper_search_task_status.py": {
       "role": "observe",
-      "sha256": "abd179358cd44c680b08b759e0bc4edcbcbb3c8d1425c70ce94c14fd49cb6158",
-      "size": 1037,
-      "normalized_sha256": "abd179358cd44c680b08b759e0bc4edcbcbb3c8d1425c70ce94c14fd49cb6158"
+      "sha256": "f965d247efbc2d99e323fed49c27aa9136d73877a051c1a35f43f6b7d800e50b",
+      "size": 1038,
+      "normalized_sha256": "f965d247efbc2d99e323fed49c27aa9136d73877a051c1a35f43f6b7d800e50b"
     }
   },
   "managed_scope": {

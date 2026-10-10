@@ -32,7 +32,10 @@ class UpdatePaperSearchTaskStatusNode:
 
         stage = state.get("stage")
         status = state.get("status")
-        if stage == "failed" or status in {"failed", "blocked"}:
+        if stage == "preparing_search" and status == "running":
+            task_state = TaskState.SEARCH_RUNNING
+            error_message = None
+        elif stage == "failed" or status in {"failed", "blocked"}:
             task_state = TaskState.SEARCH_FAILED
             error_message = str(state.get("error") or "paper search failed")
 

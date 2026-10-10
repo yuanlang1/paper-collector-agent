@@ -71,6 +71,27 @@ def _route_after_review(state: PaperSearchWorkflowState) -> str:
     return _terminal_target(state)
 
 
+def _has_existing_task(state: PaperSearchWorkflowState) -> bool:
+    task_id = state.get("paper_service_task_id")
+    return isinstance(task_id, int) and not isinstance(task_id, bool) and task_id > 0
+
+
+def _route_after_initialize(state: PaperSearchWorkflowState) -> str:
+    if state.get("stage") != "preparing_search":
+        return _terminal_target(state)
+    return "update_task_status" if _has_existing_task(state) else "plan_search"
+
+
+def _route_after_task_status(state: PaperSearchWorkflowState) -> str:
+    if (
+        state.get("stage") == "preparing_search"
+        and state.get("status") == "running"
+        and state.get("remote_task_state") == "SEARCH_RUNNING"
+    ):
+        return "plan_search"
+    return "finalize_result"
+
+
 def build_paper_search_workflow(
     *,
     task_client=None,
@@ -133,8 +154,11 @@ def build_paper_search_workflow(
     builder.add_edge(START, "initialize")
     builder.add_conditional_edges(
         "initialize",
-        _route("preparing_search", "plan_search"),
-        _route_paths("plan_search"),
+        _route_after_initialize,
+        {
+            "update_task_status": "update_task_status",
+            **_route_paths("plan_search"),
+        },
     )
     builder.add_conditional_edges(
         "plan_search",
@@ -198,6 +222,13 @@ def build_paper_search_workflow(
     )
     builder.add_edge("persist", "finalize_pdfs")
     builder.add_edge("finalize_pdfs", "update_task_status")
-    builder.add_edge("update_task_status", "finalize_result")
+    builder.add_conditional_edges(
+        "update_task_status",
+        _route_after_task_status,
+        {
+            "plan_search": "plan_search",
+            "finalize_result": "finalize_result",
+        },
+    )
     builder.add_edge("finalize_result", END)
     return builder.compile(checkpointer=checkpointer)

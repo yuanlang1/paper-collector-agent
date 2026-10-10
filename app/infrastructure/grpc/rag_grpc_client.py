@@ -7,6 +7,7 @@ from app.config import settings
 from app.infrastructure.grpc.grpc_channel_pool import (
     paper_service_grpc_channel_pool,
 )
+from app.infrastructure.grpc.task_service_grpc_client import TaskState
 from app.protos.rag.v1 import rag_pb2, rag_pb2_grpc
 
 
@@ -128,7 +129,7 @@ class RagGrpcClient:
                         for paper in response.papers
                     ],
                     "claimed_count": response.claimed_count,
-                    "task_state": response.task_state,
+                    "task_state": TaskState(response.task_state).name,
                 },
                 "error": None,
                 "metadata": self._metadata(response.code),
@@ -178,7 +179,7 @@ class RagGrpcClient:
                 "result": {
                     "task_id": response.task_id,
                     "batch_id": response.batch_id,
-                    "task_state": response.task_state,
+                    "task_state": TaskState(response.task_state).name,
                     "total_count": response.total_count,
                     "pending_count": response.pending_count,
                     "indexing_count": response.indexing_count,

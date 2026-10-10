@@ -131,6 +131,9 @@ def build_tool_registry(db: Session | None = None) -> ToolRegistry:
         GOOGLE_SCHOLAR_SEARCH_TOOL,
     )
     from app.llm.tools.web_tools.search_web import SEARCH_WEB_TOOL
+    from app.llm.tools.task_tools.search_task.get_task_papers import (
+        GET_TASK_PAPERS_TOOL,
+    )
     from app.llm.tools.task_tools.search_task.rag_status import GET_TASK_RAG_STATUS_TOOL
     from app.llm.tools.task_tools.search_task.search_task_create import ADD_QUERY_TASK_TOOL
     from app.llm.tools.venue_tools.easy_scholar import EASY_SCHOLAR_VENUE_TOOL
@@ -143,6 +146,7 @@ def build_tool_registry(db: Session | None = None) -> ToolRegistry:
         GOOGLE_SCHOLAR_SEARCH_TOOL,
         SEARCH_WEB_TOOL,
         ADD_QUERY_TASK_TOOL,
+        GET_TASK_PAPERS_TOOL,
         GET_TASK_RAG_STATUS_TOOL,
         EASY_SCHOLAR_VENUE_TOOL,
         DOWNLOAD_FILE_TOOL,

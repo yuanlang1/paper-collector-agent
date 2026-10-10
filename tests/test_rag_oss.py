@@ -132,11 +132,21 @@ class PaperRagOssTests(unittest.IsolatedAsyncioTestCase):
 
 
 class _RagStub:
+    def __init__(
+        self,
+        *,
+        claim_task_state: int = TaskState.RAG_RUNNING,
+        complete_task_state: int = TaskState.RAG_COMPLETED,
+    ) -> None:
+        self.claim_task_state = claim_task_state
+        self.complete_task_state = complete_task_state
+
     async def ClaimTaskRagPapers(self, request, *, timeout):
         return rag_pb2.ClaimTaskRagPapersResponse(
             success=True,
             task_id=request.task_id,
             batch_id=request.batch_id,
+            task_state=self.claim_task_state,
             papers=[
                 rag_pb2.PaperRagInput(
                     paper_id=1,
@@ -148,10 +158,28 @@ class _RagStub:
             ],
         )
 
+    async def CompleteTaskRagBatch(self, request, *, timeout):
+        return rag_pb2.CompleteTaskRagBatchResponse(
+            success=True,
+            task_id=request.task_id,
+            batch_id=request.batch_id,
+            task_state=self.complete_task_state,
+            total_count=1,
+            pending_count=0,
+            indexing_count=0,
+            ready_count=1,
+            skipped_count=0,
+            failed_count=0,
+            progress_percent=100,
+        )
+
 
 class _RagClient(RagGrpcClient):
+    def __init__(self, stub: _RagStub | None = None) -> None:
+        self.stub = stub or _RagStub()
+
     async def _get_stub(self):
-        return _RagStub()
+        return self.stub
 
 
 class RagGrpcClientTests(unittest.IsolatedAsyncioTestCase):
@@ -165,6 +193,264 @@ class RagGrpcClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["result"]["papers"][0]["oss_name"], SHA256)
+
+    async def test_returns_task_state_names(self) -> None:
+        claim = await _RagClient(
+            _RagStub(claim_task_state=6),
+        ).claim_task_rag_papers(
+            task_id=1,
+            batch_id=str(uuid4()),
+            limit=1,
+            lease_seconds=60,
+        )
+
+        self.assertEqual(claim["result"]["task_state"], TaskState.RAG_RUNNING.name)
+
+        for task_state in (7, 8):
+            with self.subTest(task_state=task_state):
+                complete = await _RagClient(
+                    _RagStub(complete_task_state=task_state),
+                ).complete_task_rag_batch(
+                    task_id=1,
+                    batch_id=str(uuid4()),
+                    results=[
+                        {
+                            "paper_id": 1,
+                            "status": "ready",
+                            "chunk_count": 3,
+                        }
+                    ],
+                )
+
+                self.assertEqual(
+                    complete["result"]["task_state"],
+                    TaskState(task_state).name,
+                )
+
+    async def test_unknown_task_state_returns_error(self) -> None:
+        claim = await _RagClient(
+            _RagStub(claim_task_state=99),
+        ).claim_task_rag_papers(
+            task_id=1,
+            batch_id=str(uuid4()),
+            limit=1,
+            lease_seconds=60,
+        )
+        complete = await _RagClient(
+            _RagStub(complete_task_state=99),
+        ).complete_task_rag_batch(
+            task_id=1,
+            batch_id=str(uuid4()),
+            results=[
+                {
+                    "paper_id": 1,
+                    "status": "ready",
+                    "chunk_count": 3,
+                }
+            ],
+        )
+
+        self.assertFalse(claim["ok"])
+        self.assertFalse(complete["ok"])
+        self.assertIsNotNone(claim["error"])
+        self.assertIsNotNone(complete["error"])
+
+
+def _rag_paper(paper_id: int) -> dict[str, object]:
+    return {
+        "paper_id": paper_id,
+        "title": f"Paper {paper_id}",
+        "paper_abstract": "Abstract",
+        "url": SOURCE_URL,
+    }
+
+
+def _rag_claim(*papers: dict[str, object]) -> dict[str, object]:
+    return {
+        "ok": True,
+        "result": {
+            "papers": list(papers),
+            "claimed_count": len(papers),
+            "task_state": TaskState.RAG_RUNNING.name,
+        },
+    }
+
+
+def _rag_complete(
+    *,
+    task_state: str,
+    total: int,
+    pending: int,
+    ready: int,
+    failed: int = 0,
+) -> dict[str, object]:
+    return {
+        "ok": True,
+        "result": {
+            "task_id": 1,
+            "batch_id": "batch",
+            "task_state": task_state,
+            "total_count": total,
+            "pending_count": pending,
+            "indexing_count": 0,
+            "ready_count": ready,
+            "skipped_count": 0,
+            "failed_count": failed,
+            "progress_percent": 100,
+        },
+    }
+
+
+class _BatchRunnerClient:
+    def __init__(self, *, claims, completes) -> None:
+        self.claims = list(claims)
+        self.completes = list(completes)
+        self.claim_calls = []
+        self.complete_calls = []
+
+    async def claim_task_rag_papers(self, **kwargs):
+        self.claim_calls.append(kwargs)
+        return self.claims.pop(0)
+
+    async def complete_task_rag_batch(self, **kwargs):
+        self.complete_calls.append(kwargs)
+        return self.completes.pop(0)
+
+
+class _BatchRunnerProcessor:
+    def __init__(self, *, batches=None, error: Exception | None = None) -> None:
+        self.batches = list(batches or [])
+        self.error = error
+
+    async def process_many(self, _papers, *, on_paper_result=None):
+        if self.error is not None:
+            raise self.error
+
+        results = self.batches.pop(0)
+        for item in results:
+            if on_paper_result is not None:
+                await on_paper_result(item)
+        return results
+
+
+class TaskRagBatchRunnerSummaryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_continues_running_state_and_accumulates_ready_chunks(self) -> None:
+        events = []
+        client = _BatchRunnerClient(
+            claims=[_rag_claim(_rag_paper(1)), _rag_claim(_rag_paper(2))],
+            completes=[
+                _rag_complete(
+                    task_state=TaskState.RAG_RUNNING.name,
+                    total=2,
+                    pending=1,
+                    ready=1,
+                ),
+                _rag_complete(
+                    task_state=TaskState.RAG_COMPLETED.name,
+                    total=2,
+                    pending=0,
+                    ready=2,
+                ),
+            ],
+        )
+        runner = TaskRagBatchRunner(
+            processor=_BatchRunnerProcessor(
+                batches=[
+                    [PaperRagResult(paper_id=1, status="ready", chunk_count=4)],
+                    [PaperRagResult(paper_id=2, status="ready", chunk_count=6)],
+                ]
+            ),
+            client=client,
+        )
+
+        handle = await runner.start_or_join(
+            1,
+            initial_summary={"total": 2, "pending": 2, "ready_chunks": 2386},
+            listener=events.append,
+        )
+        result = await handle.result
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.task_state, TaskState.RAG_COMPLETED.name)
+        self.assertEqual(len(client.claim_calls), 2)
+        self.assertEqual(result.summary["ready_chunks"], 2396)
+        self.assertEqual(
+            [
+                event.committed_summary["ready_chunks"]
+                for event in events
+                if event.type == "batch_committed"
+            ],
+            [2390, 2396],
+        )
+
+    async def test_empty_claim_stops_without_completing_batch(self) -> None:
+        client = _BatchRunnerClient(
+            claims=[_rag_claim()],
+            completes=[],
+        )
+        runner = TaskRagBatchRunner(
+            processor=_BatchRunnerProcessor(),
+            client=client,
+        )
+
+        handle = await runner.start_or_join(1)
+        result = await handle.result
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error.code, "RAG_NO_CLAIMED_PAPERS")
+        self.assertEqual(client.complete_calls, [])
+
+    async def test_processing_failure_preserves_committed_ready_chunks(self) -> None:
+        client = _BatchRunnerClient(
+            claims=[_rag_claim(_rag_paper(1))],
+            completes=[
+                _rag_complete(
+                    task_state=TaskState.RAG_FAILED.name,
+                    total=1,
+                    pending=0,
+                    ready=0,
+                    failed=1,
+                )
+            ],
+        )
+        runner = TaskRagBatchRunner(
+            processor=_BatchRunnerProcessor(error=RuntimeError("MinerU unavailable")),
+            client=client,
+        )
+
+        handle = await runner.start_or_join(
+            1,
+            initial_summary={"total": 1, "pending": 1, "ready_chunks": 2386},
+        )
+        result = await handle.result
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error.code, "RAG_PROCESSING_FAILED")
+        self.assertEqual(result.summary["ready_chunks"], 2386)
+
+    async def test_complete_failure_keeps_previous_committed_ready_chunks(self) -> None:
+        events = []
+        client = _BatchRunnerClient(
+            claims=[_rag_claim(_rag_paper(1))],
+            completes=[{"ok": False, "error": "service unavailable"}],
+        )
+        runner = TaskRagBatchRunner(
+            processor=_BatchRunnerProcessor(
+                batches=[[PaperRagResult(paper_id=1, status="ready", chunk_count=4)]]
+            ),
+            client=client,
+        )
+
+        handle = await runner.start_or_join(
+            1,
+            initial_summary={"total": 1, "pending": 1, "ready_chunks": 2386},
+            listener=events.append,
+        )
+        result = await handle.result
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error.code, "RAG_BATCH_COMPLETE_FAILED")
+        self.assertEqual(events[-1].committed_summary["ready_chunks"], 2386)
 
 
 class _MinerU:

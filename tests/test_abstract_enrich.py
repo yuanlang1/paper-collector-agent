@@ -1,3 +1,4 @@
+import asyncio
 import json
 import tempfile
 import unittest
@@ -154,6 +155,171 @@ class AbstractEnrichNodeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(paper["paper_info"]["ai_abstract"])
         self.assertEqual(len(model.calls), 1)
         self.assertEqual(update["status"], "running")
+
+    async def test_empty_pdf_manifest_skips_pdf_and_model_enrichment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = LocalArtifactStore(directory)
+            artifact = await store.write_json(
+                run_id=RUN_ID,
+                step_key="download_pdfs",
+                source="test",
+                kind="paper_info_pdf_manifest_json",
+                payload={"papers": []},
+            )
+            model = RecordingModel(
+                PdfFrontPageEnrichmentResult(
+                    paper_abstract="unused",
+                    keywords=["unused"],
+                    ai_abstract="未使用",
+                )
+            )
+            node = AbstractEnrichNode(artifact_store=store, model=model)
+
+            with patch(
+                "app.llm.graph.workflows.paper_search.nodes.abstract_enrich."
+                "_extract_initial_pdf_text",
+            ) as extract_pdf_text:
+                update = await node(
+                    {
+                        "child_run_id": f"child-{RUN_ID}",
+                        "pdf_manifest_artifact_ref": artifact.artifact_uri,
+                    }
+                )
+
+            extract_pdf_text.assert_not_called()
+            self.assertEqual(model.calls, [])
+            self.assertEqual(update["stage"], "recommending")
+            manifest = await store.read_json_uri(
+                update["abstract_manifest_artifact_ref"]
+            )
+            self.assertEqual(manifest["papers"], [])
+
+    async def test_limits_concurrency_and_keeps_manifest_order(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = LocalArtifactStore(directory)
+            papers = [
+                {
+                    "paper_info": {"title": f"Paper {index}"},
+                    "pdf_download": {
+                        "local_pdf_path": str(
+                            store.base_dir / RUN_ID / f"paper-{index}.pdf"
+                        )
+                    },
+                }
+                for index in range(4)
+            ]
+            artifact = await store.write_json(
+                run_id=RUN_ID,
+                step_key="download_pdfs",
+                source="test",
+                kind="paper_info_pdf_manifest_json",
+                payload={"papers": papers},
+            )
+            started = asyncio.Event()
+            release = asyncio.Event()
+
+            class ConcurrentModel:
+                def __init__(self) -> None:
+                    self.active = 0
+                    self.max_active = 0
+
+                async def ainvoke(self, _messages: list):
+                    self.active += 1
+                    self.max_active = max(self.max_active, self.active)
+                    if self.active == 3:
+                        started.set()
+                    try:
+                        await release.wait()
+                    finally:
+                        self.active -= 1
+                    return PdfFrontPageEnrichmentResult(
+                        paper_abstract="PDF abstract",
+                        keywords=["PDF keyword"],
+                        ai_abstract="中文 AI 摘要",
+                    )
+
+            model = ConcurrentModel()
+            with patch(
+                "app.llm.graph.workflows.paper_search.nodes.abstract_enrich."
+                "_extract_initial_pdf_text",
+                return_value=("PDF front pages", 1),
+            ):
+                task = asyncio.create_task(
+                    AbstractEnrichNode(artifact_store=store, model=model)(
+                        {
+                            "child_run_id": f"child-{RUN_ID}",
+                            "pdf_manifest_artifact_ref": artifact.artifact_uri,
+                        }
+                    )
+                )
+                await asyncio.wait_for(started.wait(), timeout=1)
+                self.assertEqual(model.max_active, 3)
+                release.set()
+                update = await task
+
+            manifest = await store.read_json_uri(
+                update["abstract_manifest_artifact_ref"]
+            )
+            self.assertEqual(
+                [paper["paper_info"]["title"] for paper in manifest["papers"]],
+                [f"Paper {index}" for index in range(4)],
+            )
+
+    async def test_cancellation_waits_for_in_flight_enrichment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = LocalArtifactStore(directory)
+            artifact = await store.write_json(
+                run_id=RUN_ID,
+                step_key="download_pdfs",
+                source="test",
+                kind="paper_info_pdf_manifest_json",
+                payload={
+                    "papers": [
+                        {
+                            "paper_info": {"title": "Paper"},
+                            "pdf_download": {
+                                "local_pdf_path": str(
+                                    store.base_dir / RUN_ID / "paper.pdf"
+                                )
+                            },
+                        }
+                    ]
+                },
+            )
+            started = asyncio.Event()
+
+            class BlockingModel:
+                def __init__(self) -> None:
+                    self.cancelled = False
+
+                async def ainvoke(self, _messages: list):
+                    started.set()
+                    try:
+                        await asyncio.Event().wait()
+                    except asyncio.CancelledError:
+                        self.cancelled = True
+                        raise
+
+            model = BlockingModel()
+            with patch(
+                "app.llm.graph.workflows.paper_search.nodes.abstract_enrich."
+                "_extract_initial_pdf_text",
+                return_value=("PDF front pages", 1),
+            ):
+                task = asyncio.create_task(
+                    AbstractEnrichNode(artifact_store=store, model=model)(
+                        {
+                            "child_run_id": f"child-{RUN_ID}",
+                            "pdf_manifest_artifact_ref": artifact.artifact_uri,
+                        }
+                    )
+                )
+                await asyncio.wait_for(started.wait(), timeout=1)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+
+            self.assertTrue(model.cancelled)
 
 
 if __name__ == "__main__":

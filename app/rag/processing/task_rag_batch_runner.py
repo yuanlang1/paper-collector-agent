@@ -556,7 +556,13 @@ class TaskRagBatchRunner:
             )
 
         complete_result = complete["result"]
-        summary = self._summary_from_complete(complete_result)
+        ready_chunks = run.committed_summary["ready_chunks"] + sum(
+            item.chunk_count for item in processed if item.status == "ready"
+        )
+        summary = self._summary_from_complete(
+            complete_result,
+            ready_chunks=ready_chunks,
+        )
         run.summary = summary
         run.committed_summary = dict(summary)
         task_state = str(complete_result["task_state"])
@@ -649,7 +655,10 @@ class TaskRagBatchRunner:
             )
 
         complete_result = complete["result"]
-        summary = self._summary_from_complete(complete_result)
+        summary = self._summary_from_complete(
+            complete_result,
+            ready_chunks=run.committed_summary["ready_chunks"],
+        )
         run.summary = summary
         run.committed_summary = dict(summary)
         logger.info(
@@ -705,7 +714,11 @@ class TaskRagBatchRunner:
         )
 
     @staticmethod
-    def _summary_from_complete(result: dict[str, Any]) -> dict[str, int]:
+    def _summary_from_complete(
+        result: dict[str, Any],
+        *,
+        ready_chunks: int,
+    ) -> dict[str, int]:
         return normalize_rag_summary({
             "total": int(result["total_count"]),
             "pending": int(result["pending_count"]),
@@ -713,7 +726,7 @@ class TaskRagBatchRunner:
             "ready": int(result["ready_count"]),
             "skipped": int(result["skipped_count"]),
             "failed": int(result["failed_count"]),
-            "ready_chunks": 0,
+            "ready_chunks": ready_chunks,
         })
 
     @staticmethod
