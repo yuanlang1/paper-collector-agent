@@ -176,6 +176,26 @@ def list_after(
     return [from_row(row) for row in rows]
 
 
+def latest(
+    database: HistoryDatabase,
+    *,
+    user_id: str,
+    run_id: str,
+) -> AgentStreamEvent | None:
+    with database.transaction() as connection:
+        row = connection.execute(
+            """
+            SELECT id, sequence, user_id, conversation_id, run_id, event_name, data
+            FROM agent_stream_events
+            WHERE user_id = ? AND run_id = ?
+            ORDER BY sequence DESC
+            LIMIT 1
+            """,
+            (user_id, run_id),
+        ).fetchone()
+    return from_row(row) if row else None
+
+
 def delete_conversation(
     connection: sqlite3.Connection,
     *,

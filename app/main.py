@@ -4,8 +4,8 @@ from fastapi import FastAPI
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError
 from app.config import settings
-from app.api import *
 from app.infrastructure.grpc.grpc_channel_pool import paper_service_grpc_channel_pool
+from app.grpc.server import InternalGrpcServer
 from app.infrastructure.nacos_registry import nacos_registry
 from app.core.exceptions import register_exception_handlers
 from app.rag.index_construction.base import close_index_resources
@@ -76,22 +76,31 @@ async def lifespan(app: FastAPI):
             history_db=history_db,
         )
 
-        await nacos_registry.start()
+        grpc_server = InternalGrpcServer(get_agent_runtime())
+        await grpc_server.start()
+        try:
+            await nacos_registry.start()
+        except Exception:
+            await grpc_server.stop()
+            raise
         try:
             yield
         finally:
+            await grpc_server.stop()
+            await nacos_registry.stop()
             await get_agent_runtime().shutdown()
             await close_task_rag_batch_runner()
             await paper_service_grpc_channel_pool.close()
-            await nacos_registry.stop()
             await close_index_resources()
 
-app = FastAPI(lifespan = lifespan)
+app = FastAPI(
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 
 register_exception_handlers(app)
-
-app.include_router(agent_router)
-app.include_router(settings_router)
 
 # 根路由
 @app.get("/")
@@ -101,7 +110,6 @@ async def root():
         "name": settings.APP_NAME,
         "version": settings.APP_VERSION,
         "status": "running",
-        "docs": "/docs"
     }
 
 @app.get("/health")

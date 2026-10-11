@@ -32,7 +32,6 @@ class Settings(BaseSettings):
     LLM_PROFILE_ENCRYPTION_KEY: str
 
     # Nacos
-    NACOS_ENABLED: bool
     NACOS_SERVER_ADDR: str
     NACOS_NAMESPACE_ID: str
     NACOS_GROUP_NAME: str
@@ -47,6 +46,10 @@ class Settings(BaseSettings):
     SERVICE_NAME: str
     SERVICE_IP: str
     SERVICE_PORT: int
+
+    AGENT_GRPC_HOST: str = "0.0.0.0"
+    AGENT_GRPC_PORT: int = 50052
+    AGENT_GRPC_MAX_MESSAGE_LENGTH: int = 16 * 1024 * 1024
 
     # paper-service-rpc
     PAPER_SERVICE_GRPC_NAME: str

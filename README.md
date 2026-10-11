@@ -40,9 +40,59 @@ python -m pip install -r requirements.venv311.lock.txt
 
 该文件包含 CUDA 12.8 版 PyTorch 的官方 wheel 源；没有 NVIDIA/CUDA 环境时，请按目标环境重新生成锁定文件。
 
+## 内部 gRPC 接口
+
+本服务只暴露根路径 `/` 和健康检查 `/health` 作为 HTTP 接口。主服务完成用户鉴权和权限判断后，通过内网 gRPC 调用本服务；业务 HTTP 接口、Swagger、ReDoc 和 OpenAPI 均已关闭。
+
+默认监听 `0.0.0.0:50052`，可通过 `.env` 配置以下值：
+
+```dotenv
+AGENT_GRPC_HOST=0.0.0.0
+AGENT_GRPC_PORT=50052
+AGENT_GRPC_MAX_MESSAGE_LENGTH=16777216
+```
+
+服务以 `SERVICE_NAME` 注册一次；注册 metadata 中的 `grpc_port` 表示内部 gRPC 端口。主服务发现 `paper-collector-agent` 实例后，使用实例 IP 和该 metadata 端口建立 gRPC 连接。必须通过网络策略限制该端口只允许主服务访问。
+
+协议位于 [`app/protos/agent/v1/agent.proto`](app/protos/agent/v1/agent.proto)，包括：
+
+- `AgentService`：启动、恢复、查询和订阅运行事件；运行与事件请求均要求非空 `user_id`、`conversation_id`、`run_id`。
+- `ConversationService`：会话与消息查询、会话删除。
+- `SettingsService`：检索来源限制和 LLM 配置档案管理。
+
+主服务可使用以下命令生成 Python 客户端：
+
+```powershell
+python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. app/protos/agent/v1/agent.proto
+```
+
+最小调用示例：
+
+```python
+import grpc
+from app.protos.agent.v1 import agent_pb2, agent_pb2_grpc
+
+async with grpc.aio.insecure_channel("agent-service:50052") as channel:
+    agent = agent_pb2_grpc.AgentServiceStub(channel)
+    started = await agent.StartRun(agent_pb2.StartRunRequest(
+        user_id="verified-user-id",
+        conversation_id="conversation-1",
+        run_id="run-1",
+        message="检索多模态大模型视觉 token 压缩论文",
+    ))
+    async for event in agent.SubscribeRunEvents(
+        agent_pb2.SubscribeRunEventsRequest(
+            user_id="verified-user-id",
+            conversation_id=started.conversation_id,
+            run_id=started.run_id,
+        )
+    ):
+        print(event.sequence, event.event_name, event.data_json)
+```
+
 ## LLM 配置档案
 
-前端可通过 `/api/settings/llm-profiles` 管理 OpenAI-compatible 与 DeepSeek 的多个 LLM 配置档案，并在调用 `/api/agent/chat` 或 `/api/agent/chat/stream` 时传入 `llm_profile_id`。未指定时使用默认档案，未创建默认档案时回退到现有 `.env` 配置。
+主服务通过 `SettingsService` 管理 OpenAI-compatible 与 DeepSeek 的多个 LLM 配置档案，并在 `AgentService.StartRun` 中传入可选 `llm_profile_id`。未指定时使用默认档案，未创建默认档案时回退到现有 `.env` 配置。
 
 启用配置档案前，必须在服务端 `.env` 设置用于加密 API Key 的 Fernet 密钥：
 

@@ -1,6 +1,5 @@
 import logging
 import random
-import socket
 from typing import Any
 
 from v2.nacos import (
@@ -17,18 +16,10 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-def get_local_ip() -> str:
-    if settings.SERVICE_IP:
-        return settings.SERVICE_IP
-
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-        sock.connect(("8.8.8.8", 80))
-        return sock.getsockname()[0]
-
 class NacosRegistry:
     def __init__(self) -> None:
         self.client = None
-        self.service_ip = get_local_ip()
+        self.service_ip = settings.SERVICE_IP
         self.service_port = settings.SERVICE_PORT
     
     def _build_client_config(self):
@@ -50,10 +41,6 @@ class NacosRegistry:
         return builder.build()
 
     async def start(self) -> None:
-        if not settings.NACOS_ENABLED:
-            logger.info("Nacos registration disabled")
-            return
-
         self.client = await NacosNamingService.create_naming_service(
             self._build_client_config()
         )
@@ -70,6 +57,7 @@ class NacosRegistry:
                     "framework": "fastapi",
                     "version": settings.APP_VERSION,
                     "health": "/health",
+                    "grpc_port": str(settings.AGENT_GRPC_PORT),
                 },
                 enabled=True,
                 healthy=True,
@@ -87,9 +75,6 @@ class NacosRegistry:
         )
 
     async def stop(self) -> None:
-        if not self.client:
-            return
-
         await self.client.deregister_instance(
             request=DeregisterInstanceParam(
                 service_name=settings.SERVICE_NAME,

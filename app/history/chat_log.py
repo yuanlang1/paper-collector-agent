@@ -552,6 +552,25 @@ def list_messages(
     return items, items[0]["id"] if has_more and items else None
 
 
+def conversation_exists(
+    database: HistoryDatabase,
+    *,
+    user_id: str,
+    conversation_id: str,
+) -> bool:
+    with database.transaction() as connection:
+        row = connection.execute(
+            """
+            SELECT 1
+            FROM chat_log
+            WHERE user_id = ? AND conversation_id = ?
+            LIMIT 1
+            """,
+            (user_id, conversation_id),
+        ).fetchone()
+    return row is not None
+
+
 def get_run_scope(database: HistoryDatabase, run_id: str) -> RunScope | None:
     with database.transaction() as connection:
         rows = connection.execute(
