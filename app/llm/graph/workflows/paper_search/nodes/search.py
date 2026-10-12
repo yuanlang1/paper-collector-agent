@@ -4,16 +4,16 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
-from sqlalchemy.orm import Session
 
 from app.llm.artifacts.paper_artifacts import save_paper_search_artifact
+from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.google_scholar.search_google_scholar import (
     google_scholar_search_service,
 )
 
 
 SearchHandler = Callable[
-    [dict[str, Any], Session | None],
+    [dict[str, Any], ToolExecutionContext | None],
     Awaitable[dict[str, Any]],
 ]
 
@@ -88,11 +88,11 @@ class SearchNode:
             (
                 item
                 for item in state.get("active_source_query_plans", [])
-                if isinstance(item, dict) and item.get("source") == self.source
+                if item["source"] == self.source
             ),
             None,
         )
-        if not isinstance(plan, dict):
+        if plan is None:
             return {}
 
         arguments = dict(plan["arguments"])
@@ -100,11 +100,7 @@ class SearchNode:
         result = await SEARCH_HANDLERS[self.source](arguments, None)
         metadata = result.get("metadata") or {}
         pagination = dict(metadata.get("pagination") or {})
-        papers = [
-            item
-            for item in result.get("papers") or []
-            if isinstance(item, dict)
-        ]
+        papers = result.get("papers") or []
         page_errors = list(result.get("warnings") or [])
         if result.get("ok") is not True:
             page_errors.append(_error_message(result.get("error")) or "search failed")
@@ -191,12 +187,6 @@ class SearchNode:
             for source in active_sources
             if not isinstance(summaries.get(source), dict)
             or summaries[source].get("status") == "failed"
-        ]
-        partial_sources = [
-            source
-            for source in active_sources
-            if isinstance(summaries.get(source), dict)
-            and summaries[source].get("status") == "partial"
         ]
         effective_count = (
             _positive_int(progress.get("new_candidates"))

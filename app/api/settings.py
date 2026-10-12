@@ -1,4 +1,5 @@
 from datetime import datetime
+import logging
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -22,6 +23,7 @@ from app.services.setting_service import (
 )
 
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
@@ -162,6 +164,7 @@ def _source_limits_view(limits: dict[str, int]) -> SourceLimitsView:
 def get_paper_search_source_limits(
     db: Session = Depends(get_db),
 ) -> ServiceResponse[SourceLimitsView]:
+    logger.info("Get source limits input: params={}")
     return ServiceResponse[SourceLimitsView].build_success_response(
         data=_source_limits_view(get_source_limits(db)),
         message="OK",
@@ -177,6 +180,7 @@ def update_paper_search_source_limits(
     db: Session = Depends(get_db),
 ) -> ServiceResponse[SourceLimitsView]:
     try:
+        logger.info("Update source limits input: params=%s", payload.model_dump())
         limits = save_source_limits(db, payload.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -188,6 +192,7 @@ def update_paper_search_source_limits(
 
 @router.get("/llm-profiles", response_model=ServiceResponse[LlmProfileListResponse])
 def list_llm_profiles(db: Session = Depends(get_db)) -> ServiceResponse[LlmProfileListResponse]:
+    logger.info("List LLM profiles input: params={}")
     return ServiceResponse[LlmProfileListResponse].build_success_response(
         data=LlmProfileListResponse(
             items=[_view(profile) for profile in db.query(LlmProfile).order_by(LlmProfile.id).all()]
@@ -198,6 +203,7 @@ def list_llm_profiles(db: Session = Depends(get_db)) -> ServiceResponse[LlmProfi
 
 @router.post("/llm-profiles", response_model=ServiceResponse[LlmProfileView], status_code=status.HTTP_201_CREATED)
 def create_llm_profile(payload: LlmProfileInput, db: Session = Depends(get_db)) -> ServiceResponse[LlmProfileView]:
+    logger.info("Create LLM profile input: params=%s", payload.model_dump(exclude={"api_key"}))
     if payload.is_default and not payload.enabled:
         raise HTTPException(status_code=400, detail="Disabled profile cannot be the default")
     if payload.is_small_model and not payload.enabled:
@@ -227,6 +233,7 @@ def create_llm_profile(payload: LlmProfileInput, db: Session = Depends(get_db)) 
 
 @router.patch("/llm-profiles/{profile_id}", response_model=ServiceResponse[LlmProfileView])
 def update_llm_profile(profile_id: int, payload: LlmProfileUpdate, db: Session = Depends(get_db)) -> ServiceResponse[LlmProfileView]:
+    logger.info("Update LLM profile input: profile_id=%s params=%s", profile_id, payload.model_dump(exclude={"api_key"}, exclude_unset=True))
     try:
         profile = get_profile_or_raise(db, profile_id)
     except LookupError as exc:
@@ -263,6 +270,7 @@ def update_llm_profile(profile_id: int, payload: LlmProfileUpdate, db: Session =
 
 @router.post("/llm-profiles/{profile_id}/set-default", response_model=ServiceResponse[LlmProfileView])
 def set_default_llm_profile(profile_id: int, db: Session = Depends(get_db)) -> ServiceResponse[LlmProfileView]:
+    logger.info("Set default LLM profile input: profile_id=%s", profile_id)
     try:
         profile = get_profile_or_raise(db, profile_id)
     except LookupError as exc:
@@ -278,6 +286,7 @@ def set_default_llm_profile(profile_id: int, db: Session = Depends(get_db)) -> S
 
 @router.delete("/llm-profiles/{profile_id}", response_model=ServiceResponse[DeleteLlmProfileResponse])
 def delete_llm_profile(profile_id: int, db: Session = Depends(get_db)) -> ServiceResponse[DeleteLlmProfileResponse]:
+    logger.info("Delete LLM profile input: profile_id=%s", profile_id)
     try:
         profile = get_profile_or_raise(db, profile_id)
     except LookupError as exc:
@@ -302,6 +311,7 @@ async def test_llm_profile(
     profile_id: int,
     db: Session = Depends(get_db),
 ) -> ServiceResponse[LlmProfileConnectionTestResponse]:
+    logger.info("Test LLM profile input: profile_id=%s", profile_id)
     try:
         profile = get_profile_or_raise(db, profile_id)
     except LookupError as exc:

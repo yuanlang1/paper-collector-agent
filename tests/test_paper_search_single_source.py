@@ -59,6 +59,20 @@ from app.llm.subagents.paper_search import PaperSearchDelegation
 from app.llm.tools.registry import build_tool_registry
 
 
+import httpx
+
+from app.infrastructure.grpc.paper_service_grpc_client import PaperServiceGrpcClient
+from app.llm.graph.workflows.paper_search.nodes.filter import (
+    NormalizeDeduplicateFilterNode, _merge_envelope, _to_paper_info_draft,
+)
+from app.llm.graph.workflows.paper_search.nodes.persist import PersistRecommendedPapersNode
+from app.llm.graph.workflows.paper_search.paper_cache import PaperCacheStore
+from app.llm.tools.search_tools.crossref.search_crossref import _published_date
+from app.llm.tools.search_tools.google_scholar.search_google_scholar import (
+    _parse_google_scholar_item, google_scholar_search_service, SerpApiSearchError,
+)
+
+
 class _PlanningModel:
     def __init__(self) -> None:
         self.calls = 0
@@ -1604,6 +1618,217 @@ class PaperSearchSingleSourceValidationTests(unittest.TestCase):
         self.assertIn("arxiv_search", names)
         self.assertIn("dblp_search", names)
         self.assertEqual(set(SEARCH_HANDLERS), {"Google Scholar"})
+
+
+SEARCH_MODULE = "app.llm.tools.search_tools.google_scholar.search_google_scholar"
+
+
+class SearchMetadataTests(unittest.TestCase):
+    def test_crossref_zero_year_uses_next_valid_publication_date(self):
+        self.assertEqual(_published_date({
+            "published-print": {"date-parts": [[0]]},
+            "issued": {"date-parts": [[2023, 5, 2]]},
+        }), "2023-05-02")
+        self.assertIsNone(_published_date({"issued": {"date-parts": [[0]]}}))
+
+    def test_scholar_year_and_snippet_survive_normalization(self):
+        paper = _parse_google_scholar_item({
+            "title": "A paper",
+            "publication_info": {"summary": "A Author - Journal, 2023 - publisher.org"},
+            "snippet": "A source abstract fragment …",
+        })
+        info = _to_paper_info_draft(paper, "Google Scholar")
+        self.assertEqual(paper["year"], 2023)
+        self.assertEqual(info["publish_date"], "2023-01-01")
+        self.assertEqual(info["publish_date_precision"], "year")
+        self.assertEqual(info["paper_abstract"], paper["snippet"])
+        self.assertEqual(info["abstract_source"], "search_snippet")
+
+    def test_experiment_year_in_snippet_is_not_publication_year(self):
+        paper = _parse_google_scholar_item({
+            "title": "A paper", "snippet": "Evaluated on the 2020 dataset",
+        })
+        self.assertIsNone(paper["year"])
+        self.assertIsNone(_to_paper_info_draft(paper, "Google Scholar")["publish_date"])
+
+    def test_zero_and_missing_year_remain_unknown(self):
+        for year in (0, "0", None):
+            with self.subTest(year=year):
+                info = _to_paper_info_draft({"title": "A paper", "year": year}, "Google Scholar")
+                self.assertIsNone(info["publish_date"])
+
+    def test_full_date_wins_over_year(self):
+        info = _to_paper_info_draft({
+            "title": "A paper", "published": "2024-03-02", "year": 2023,
+        }, "Google Scholar")
+        self.assertEqual(info["publish_date"], "2024-03-02")
+
+    def test_crossref_replaces_year_precision_and_snippet(self):
+        paper = {"paper_info": _to_paper_info_draft({
+            "title": "A paper", "year": 2023, "abstract": "Fragment",
+            "abstract_source": "search_snippet",
+        }, "Google Scholar")}
+        CrossrefMetadataEnrichmentNode()._merge(paper, {
+            "published": "2023-07-12", "abstract": "Complete abstract",
+        }, "title")
+        self.assertEqual(paper["paper_info"]["publish_date"], "2023-07-12")
+        self.assertEqual(paper["paper_info"]["paper_abstract"], "Complete abstract")
+        self.assertEqual(paper["paper_info"]["abstract_source"], "crossref")
+
+    def test_dedup_keeps_complete_abstract_over_longer_snippet(self):
+        current = {"paper_info": _to_paper_info_draft({
+            "title": "A paper", "abstract": "Full abstract", "published": "2024-03-02",
+        }, "Crossref")}
+        incoming = {"paper_info": _to_paper_info_draft({
+            "title": "A paper", "abstract": "Much longer search fragment …",
+            "abstract_source": "search_snippet", "year": 2024,
+        }, "Google Scholar")}
+        merged = _merge_envelope(current, incoming)
+        self.assertEqual(merged["paper_info"]["paper_abstract"], "Full abstract")
+        self.assertEqual(merged["paper_info"]["publish_date"], "2024-03-02")
+
+
+class SearchMetadataFlowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_search_filter_and_persist_keep_year_and_abstract(self):
+        with TemporaryDirectory() as directory:
+            store = LocalArtifactStore(str(Path(directory) / "artifacts"))
+            cache = PaperCacheStore(Path(directory) / "cache.json")
+            raw_item = {
+                "title": "A paper", "result_id": "result-1",
+                "publication_info": {
+                    "summary": "A Author - Journal, 2023 - publisher.org",
+                    "authors": [{"name": "A Author"}],
+                },
+                "snippet": "A source abstract fragment …",
+            }
+            with patch(f"{SEARCH_MODULE}._build_serpapi_params", return_value={}), patch(
+                f"{SEARCH_MODULE}._request_serpapi",
+                new=AsyncMock(return_value={"organic_results": [raw_item, raw_item]}),
+            ):
+                search = await google_scholar_search_service({"query": "test"}, None)
+            self.assertEqual(search["returned_count"], 1)
+            raw = await store.write_json(
+                run_id="metadata-test", step_key="search", source="Google Scholar",
+                kind="raw", payload=search,
+            )
+            filtered = await NormalizeDeduplicateFilterNode(
+                artifact_store=store, paper_cache_store=cache,
+                paper_lookup=AsyncMock(return_value={"ok": True, "result": {"matches": []}}),
+            )({
+                "child_run_id": "metadata-test", "raw_result_artifact_refs": [raw.artifact_uri],
+                "query_understanding": {"topic": "test", "intent": "method", "reasoning": "test"},
+                "search_tag": {},
+            })
+            self.assertEqual(filtered["stage"], "reviewing_search", filtered)
+            manifest = await store.read_json_uri(filtered["normalized_manifest_artifact_ref"])
+            paper = manifest["papers"][0]
+            paper["task_paper_relation_draft"] = {
+                "search_task_id": 7, "paper_id": None,
+                "recommendation_stars": 4, "recommendation_reason": "Matches topic",
+            }
+            recommended = await store.write_json(
+                run_id="metadata-test", step_key="recommend", source="test",
+                kind="recommended", payload={"papers": [paper]},
+            )
+            captured = []
+
+            async def save_papers(items):
+                captured.extend(items)
+                return {"ok": True, "result": {"papers": [
+                    {"client_key": items[0]["client_key"], "paper_id": 11},
+                ]}}
+
+            persisted = await PersistRecommendedPapersNode(
+                artifact_store=store, paper_cache_store=cache,
+                save_papers=save_papers,
+                save_task_papers=AsyncMock(return_value={"ok": True, "result": {"saved_count": 1}}),
+            )({
+                "child_run_id": "metadata-test", "paper_service_task_id": 7,
+                "recommendation_manifest_artifact_ref": recommended.artifact_uri,
+            })
+            self.assertEqual(persisted["stage"], "completed", persisted)
+            request = PaperServiceGrpcClient._build_request(captured[0])
+            self.assertTrue(request.HasField("published_date"))
+            self.assertEqual(request.published_date.ToDatetime().year, 2023)
+            self.assertEqual(request.paper_abstract, raw_item["snippet"])
+
+    async def test_later_page_failure_retains_results(self):
+        first_page = {
+            "organic_results": [{"title": "A paper", "result_id": "1"}],
+            "serpapi_pagination": {"next": "next-page"},
+        }
+        with patch(f"{SEARCH_MODULE}._build_serpapi_params", return_value={}), patch(
+            f"{SEARCH_MODULE}._request_serpapi",
+            new=AsyncMock(side_effect=[first_page, SerpApiSearchError("page failed")]),
+        ):
+            result = await google_scholar_search_service(
+                {"query": "test", "num": 1, "total_limit": 2, "max_pages": 2}, None,
+            )
+        self.assertEqual(result["returned_count"], 1)
+        self.assertEqual(result["status"], "partial_failed")
+        self.assertFalse(result["metadata"]["pagination"]["has_next"])
+
+    async def test_first_page_failure_is_not_an_empty_success(self):
+        with patch(f"{SEARCH_MODULE}._build_serpapi_params", return_value={}), patch(
+            f"{SEARCH_MODULE}._request_serpapi",
+            new=AsyncMock(side_effect=SerpApiSearchError("page failed")),
+        ):
+            with self.assertRaisesRegex(SerpApiSearchError, "page failed"):
+                await google_scholar_search_service({"query": "test"}, None)
+
+    async def test_http_error_does_not_expose_request_api_key(self):
+        request = httpx.Request("GET", "https://example.org/search?api_key=test-secret")
+        response = httpx.Response(403, request=request, text="Forbidden")
+        error = httpx.HTTPStatusError("HTTP failure at " + str(request.url), request=request, response=response)
+        with patch(f"{SEARCH_MODULE}._build_serpapi_params", return_value={}), patch(
+            f"{SEARCH_MODULE}._request_serpapi", new=AsyncMock(side_effect=error),
+        ):
+            with self.assertRaises(SerpApiSearchError) as caught:
+                await google_scholar_search_service({"query": "test"}, None)
+        self.assertEqual(str(caught.exception), "Forbidden")
+
+    async def test_filter_deduplicates_and_preserves_date_precision(self):
+        from app.llm.graph.workflows.paper_search_schemas import PromptUnderstandingArgs
+
+        papers, conflicts, rejected, filtered = NormalizeDeduplicateFilterNode._normalize_payloads([
+            {"source": "google_scholar", "papers": [
+                {"title": "A paper", "authors": ["A Author"], "year": 2023,
+                 "abstract": "Snippet …", "abstract_source": "search_snippet"},
+                {"title": "A paper", "authors": ["A Author"], "published": "2023-05-02",
+                 "abstract": "Full abstract"},
+                {"title": "Old paper", "authors": ["A Author"], "year": 2010},
+            ]},
+        ], PromptUnderstandingArgs(
+            topic="test", intent="method", reasoning="test", yearFrom=2020, yearTo=2025,
+        ))
+        self.assertEqual(len(papers), 1)
+        self.assertEqual((conflicts, rejected, filtered), ([], [], 1))
+        self.assertEqual(papers[0]["paper_info"]["publish_date"], "2023-05-02")
+        self.assertEqual(papers[0]["paper_info"]["paper_abstract"], "Full abstract")
+
+    async def test_new_task_creation_binds_recommendation_and_marks_running(self):
+        with TemporaryDirectory() as directory:
+            store = LocalArtifactStore(directory)
+            artifact = await store.write_json(
+                run_id="create-task-test", step_key="recommend", source="test", kind="recommended",
+                payload={"papers": [{"task_paper_relation_draft": {"search_task_id": None}}]},
+            )
+            client = AsyncMock()
+            client.add_query_task.return_value = {"ok": True, "result": {"task_id": 42}}
+            client.update_task_status.return_value = {"ok": True}
+            update = await CreatePaperSearchTaskNode(client=client, artifact_store=store)({
+                "child_run_id": "create-task-test", "original_prompt": "Find papers",
+                "query_understanding": {"topic": "test", "intent": "method", "reasoning": "test"},
+                "search_tag": {}, "recommendation_manifest_artifact_ref": artifact.artifact_uri,
+                "progress": {"recommendation_kept": 1},
+            })
+            self.assertEqual(update["stage"], "persisting_papers", update)
+            self.assertEqual(update["paper_service_task_id"], 42)
+            self.assertEqual(update["remote_task_state"], "SEARCH_RUNNING")
+            self.assertEqual(update["progress"]["recommendation_kept"], 1)
+            bound = await store.read_json_uri(update["task_bound_recommendation_manifest_artifact_ref"])
+            self.assertEqual(bound["papers"][0]["task_paper_relation_draft"]["search_task_id"], 42)
+            client.add_query_task.assert_awaited_once()
 
 
 if __name__ == "__main__":

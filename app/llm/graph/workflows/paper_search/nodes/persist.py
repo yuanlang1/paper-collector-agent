@@ -241,6 +241,168 @@ class PersistRecommendedPapersNode:
 
         return normalize_pdf_sha256(pdf_download.get("sha256"))
 
+    def _prepare_entries(
+        self, papers: list[dict[str, Any]], child_run_id: str, task_id: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+        outcomes: list[dict[str, Any]] = []
+        entries: list[dict[str, Any]] = []
+        invalid_count = 0
+        for index, candidate in enumerate(papers):
+            client_key = f"{child_run_id}:{index}"
+            validated = self._validate_entry(candidate, task_id)
+            title = (
+                str((candidate.get("paper_info") or {}).get("title") or "")
+                if isinstance(candidate, dict)
+                else ""
+            )
+            paper_id = candidate.get("paper_id") if isinstance(candidate, dict) else None
+            outcome = self._outcome(client_key, title, paper_id)
+            outcomes.append(outcome)
+            if validated is None:
+                _add_error(outcome, "invalid recommended paper input")
+                outcome["paper_save_status"] = "not_started"
+                outcome["task_paper_save_status"] = "not_started"
+                invalid_count += 1
+                continue
+
+            paper, paper_info, paper_id = validated
+            entries.append(
+                {
+                    "client_key": client_key,
+                    "paper": paper,
+                    "paper_info": paper_info,
+                    "paper_id": paper_id,
+                    "relation": {
+                        "task_id": task_id,
+                        "paper_id": paper_id,
+                        "recommendation_stars": paper[
+                            "task_paper_relation_draft"
+                        ]["recommendation_stars"],
+                        "recommendation_reason": paper[
+                            "task_paper_relation_draft"
+                        ]["recommendation_reason"].strip(),
+                    },
+                    "outcome": outcome,
+                }
+            )
+        return entries, outcomes, invalid_count
+
+    async def _save_new_papers(self, entries: list[dict[str, Any]]) -> None:
+        new_requests = []
+        for entry in entries:
+            if entry["paper_id"] is not None:
+                continue
+            if not _is_persistable_venue_id(
+                entry["paper_info"].get("venue_id")
+            ):
+                entry["outcome"]["paper_save_status"] = "not_started"
+                entry["outcome"]["task_paper_save_status"] = "not_started"
+                continue
+            info = entry["paper_info"]
+            info["published_date"] = info.get("published_date") or info.get(
+                "publish_date"
+            )
+            pdf_sha256 = self._planned_pdf_sha256(entry["paper"])
+            if pdf_sha256:
+                info["oss_name"] = pdf_sha256
+                entry["outcome"]["oss_name"] = pdf_sha256
+            new_requests.append(
+                {"client_key": entry["client_key"], "paper_info": info}
+            )
+
+        paper_response = await self.save_papers(new_requests) if new_requests else {"ok": True, "result": {"papers": []}}
+        saved_papers = (
+            (paper_response.get("result") or {}).get("papers", [])
+            if paper_response.get("ok") is True
+            else []
+        )
+        paper_ids = {
+            item.get("client_key"): item.get("paper_id")
+            for item in saved_papers
+            if isinstance(item, dict) and _is_valid_id(item.get("paper_id"))
+        }
+        paper_error = str(paper_response.get("error") or "batch paper save failed")
+        for entry in entries:
+            if entry["paper_id"] is None:
+                paper_id = paper_ids.get(entry["client_key"])
+                if not _is_valid_id(paper_id):
+                    if entry["outcome"]["paper_save_status"] != "not_started":
+                        entry["outcome"]["paper_save_status"] = "failed"
+                        _add_error(entry["outcome"], paper_error)
+                    continue
+                entry["paper_id"] = paper_id
+                entry["paper"]["paper_id"] = paper_id
+                entry["relation"]["paper_id"] = paper_id
+                entry["outcome"]["paper_id"] = paper_id
+                entry["outcome"]["paper_save_status"] = "saved"
+
+    async def _update_paper_cache(self, entries: list[dict[str, Any]]) -> tuple[int, int]:
+        cache_updated = 0
+        cache_failed = 0
+        for entry in entries:
+            if not _is_valid_id(entry["paper_id"]):
+                continue
+            try:
+                paper_for_cache = dict(entry["paper"])
+                paper_for_cache["paper_id"] = entry["paper_id"]
+                pdf_download = paper_for_cache.get("pdf_download")
+                if isinstance(pdf_download, dict):
+                    paper_for_cache["pdf_download"] = {
+                        key: value
+                        for key, value in pdf_download.items()
+                        if key not in {"local_pdf_path", "artifact_uri"}
+                    }
+                await self.paper_cache_store.upsert_saved_paper(
+                    paper_for_cache
+                )
+                entry["outcome"]["paper_cache_status"] = "saved"
+                cache_updated += 1
+            except Exception as exc:
+                entry["outcome"]["paper_cache_status"] = "failed"
+                _add_error(entry["outcome"], f"paper cache failed: {exc}")
+                cache_failed += 1
+        return cache_updated, cache_failed
+
+    async def _save_relations(self, entries: list[dict[str, Any]]) -> None:
+        relation_requests_by_key: dict[
+            tuple[int, int],
+            dict[str, Any],
+        ] = {}
+        for entry in entries:
+            paper_id = entry["paper_id"]
+            if not _is_valid_id(paper_id):
+                continue
+
+            relation = entry["relation"]
+            relation_requests_by_key.setdefault(
+                (relation["task_id"], paper_id),
+                relation,
+            )
+        relation_requests = list(relation_requests_by_key.values())
+        relation_response = (
+            await self.save_task_papers(relation_requests)
+            if relation_requests
+            else {"ok": True, "result": {"saved_count": 0}}
+        )
+        saved_count = int(
+            (relation_response.get("result") or {}).get("saved_count") or 0
+        ) if relation_response.get("ok") is True else 0
+        relation_error = str(
+            relation_response.get("error") or "batch task-paper save failed"
+        )
+        relation_status = (
+            "saved"
+            if saved_count == len(relation_requests)
+            else "partial_unknown"
+            if relation_response.get("ok") is True
+            else "failed"
+        )
+        for entry in entries:
+            if _is_valid_id(entry["paper_id"]):
+                entry["outcome"]["task_paper_save_status"] = relation_status
+                if relation_status != "saved":
+                    _add_error(entry["outcome"], relation_error)
+
     async def __call__(self, state: Mapping[str, Any]) -> dict[str, Any]:
         try:
             child_run_id = state["child_run_id"]
@@ -260,162 +422,16 @@ class PersistRecommendedPapersNode:
             if not isinstance(papers, list):
                 raise ValueError("recommendation manifest papers must be a list")
 
-            outcomes: list[dict[str, Any]] = []
-            entries: list[dict[str, Any]] = []
-            invalid_count = 0
-            for index, candidate in enumerate(papers):
-                client_key = f"{child_run_id}:{index}"
-                validated = self._validate_entry(candidate, task_id)
-                title = (
-                    str((candidate.get("paper_info") or {}).get("title") or "")
-                    if isinstance(candidate, dict)
-                    else ""
-                )
-                paper_id = candidate.get("paper_id") if isinstance(candidate, dict) else None
-                outcome = self._outcome(client_key, title, paper_id)
-                outcomes.append(outcome)
-                if validated is None:
-                    _add_error(outcome, "invalid recommended paper input")
-                    outcome["paper_save_status"] = "not_started"
-                    outcome["task_paper_save_status"] = "not_started"
-                    invalid_count += 1
-                    continue
-
-                paper, paper_info, paper_id = validated
-                entries.append(
-                    {
-                        "client_key": client_key,
-                        "paper": paper,
-                        "paper_info": paper_info,
-                        "paper_id": paper_id,
-                        "relation": {
-                            "task_id": task_id,
-                            "paper_id": paper_id,
-                            "recommendation_stars": paper[
-                                "task_paper_relation_draft"
-                            ]["recommendation_stars"],
-                            "recommendation_reason": paper[
-                                "task_paper_relation_draft"
-                            ]["recommendation_reason"].strip(),
-                        },
-                        "outcome": outcome,
-                    }
-                )
+            entries, outcomes, invalid_count = self._prepare_entries(papers, child_run_id, task_id)
 
             venue_cache_hits, venue_saved, venue_failed = await self._resolve_venues(
                 entries
             )
-            new_requests = []
-            for entry in entries:
-                if entry["paper_id"] is not None:
-                    continue
-                if not _is_persistable_venue_id(
-                    entry["paper_info"].get("venue_id")
-                ):
-                    entry["outcome"]["paper_save_status"] = "not_started"
-                    entry["outcome"]["task_paper_save_status"] = "not_started"
-                    continue
-                info = entry["paper_info"]
-                info["published_date"] = info.get("published_date") or info.get(
-                    "publish_date"
-                )
-                pdf_sha256 = self._planned_pdf_sha256(entry["paper"])
-                if pdf_sha256:
-                    info["oss_name"] = pdf_sha256
-                    entry["outcome"]["oss_name"] = pdf_sha256
-                new_requests.append(
-                    {"client_key": entry["client_key"], "paper_info": info}
-                )
+            await self._save_new_papers(entries)
 
-            paper_response = await self.save_papers(new_requests) if new_requests else {"ok": True, "result": {"papers": []}}
-            saved_papers = (
-                (paper_response.get("result") or {}).get("papers", [])
-                if paper_response.get("ok") is True
-                else []
-            )
-            paper_ids = {
-                item.get("client_key"): item.get("paper_id")
-                for item in saved_papers
-                if isinstance(item, dict) and _is_valid_id(item.get("paper_id"))
-            }
-            paper_error = str(paper_response.get("error") or "batch paper save failed")
-            cache_updated = 0
-            cache_failed = 0
-            for entry in entries:
-                if entry["paper_id"] is None:
-                    paper_id = paper_ids.get(entry["client_key"])
-                    if not _is_valid_id(paper_id):
-                        if entry["outcome"]["paper_save_status"] != "not_started":
-                            entry["outcome"]["paper_save_status"] = "failed"
-                            _add_error(entry["outcome"], paper_error)
-                        continue
-                    entry["paper_id"] = paper_id
-                    entry["paper"]["paper_id"] = paper_id
-                    entry["relation"]["paper_id"] = paper_id
-                    entry["outcome"]["paper_id"] = paper_id
-                    entry["outcome"]["paper_save_status"] = "saved"
+            cache_updated, cache_failed = await self._update_paper_cache(entries)
 
-            for entry in entries:
-                if not _is_valid_id(entry["paper_id"]):
-                    continue
-                try:
-                    paper_for_cache = dict(entry["paper"])
-                    paper_for_cache["paper_id"] = entry["paper_id"]
-                    pdf_download = paper_for_cache.get("pdf_download")
-                    if isinstance(pdf_download, dict):
-                        paper_for_cache["pdf_download"] = {
-                            key: value
-                            for key, value in pdf_download.items()
-                            if key not in {"local_pdf_path", "artifact_uri"}
-                        }
-                    await self.paper_cache_store.upsert_saved_paper(
-                        paper_for_cache
-                    )
-                    entry["outcome"]["paper_cache_status"] = "saved"
-                    cache_updated += 1
-                except Exception as exc:
-                    entry["outcome"]["paper_cache_status"] = "failed"
-                    _add_error(entry["outcome"], f"paper cache failed: {exc}")
-                    cache_failed += 1
-
-            relation_requests_by_key: dict[
-                tuple[int, int],
-                dict[str, Any],
-            ] = {}
-            for entry in entries:
-                paper_id = entry["paper_id"]
-                if not _is_valid_id(paper_id):
-                    continue
-
-                relation = entry["relation"]
-                relation_requests_by_key.setdefault(
-                    (relation["task_id"], paper_id),
-                    relation,
-                )
-            relation_requests = list(relation_requests_by_key.values())
-            relation_response = (
-                await self.save_task_papers(relation_requests)
-                if relation_requests
-                else {"ok": True, "result": {"saved_count": 0}}
-            )
-            saved_count = int(
-                (relation_response.get("result") or {}).get("saved_count") or 0
-            ) if relation_response.get("ok") is True else 0
-            relation_error = str(
-                relation_response.get("error") or "batch task-paper save failed"
-            )
-            relation_status = (
-                "saved"
-                if saved_count == len(relation_requests)
-                else "partial_unknown"
-                if relation_response.get("ok") is True
-                else "failed"
-            )
-            for entry in entries:
-                if _is_valid_id(entry["paper_id"]):
-                    entry["outcome"]["task_paper_save_status"] = relation_status
-                    if relation_status != "saved":
-                        _add_error(entry["outcome"], relation_error)
+            await self._save_relations(entries)
 
             persisted_count = sum(
                 outcome["task_paper_save_status"] == "saved"

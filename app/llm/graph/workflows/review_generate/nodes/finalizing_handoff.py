@@ -38,7 +38,6 @@ class FinalizingHandoffNode:
 
         if (
             reflection_report["effective_decision"] != "pass"
-            or reflection_report["hard_issues"]
             or reflection_report["review_draft_artifact_ref"]
             != state["review_draft_artifact_ref"]
         ):

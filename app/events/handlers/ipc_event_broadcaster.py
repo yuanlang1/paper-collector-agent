@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+from time import monotonic
 from collections.abc import AsyncIterator
 
 from app.events.delivery import EventDelivery
 from app.history import chat_log, stream_events
+from app.history.chat_log import AgentHistoryStore
 from app.history.sqlite import HistoryDatabase
 from app.history.stream_events import AgentStreamEvent
 
 class IpcEventBroadcaster:
-    def __init__(self, history_db: HistoryDatabase) -> None:
-        self._history_db = history_db
+    def __init__(self, event_db: HistoryDatabase, history_store: AgentHistoryStore) -> None:
+        self._event_db = event_db
+        self._history_store = history_store
         self._subscribers: dict[tuple[str, str], set[asyncio.Event]] = {}
 
     async def __call__(self, delivery: EventDelivery) -> None:
@@ -31,15 +34,16 @@ class IpcEventBroadcaster:
         notification = asyncio.Event()
         self._subscribers.setdefault(key, set()).add(notification)
         cursor = after_sequence
+        terminal_wait_started_at: float | None = None
         try:
             while True:
                 notification.clear()
-                status = await self._history_db.run(
-                    chat_log.get_run_status,
+                run_state = await self._history_store.run(
+                    chat_log.get_run_event_state,
                     user_id=user_id,
                     run_id=root_run_id,
                 )
-                events = await self._history_db.run(
+                events = await self._event_db.run(
                     stream_events.list_after,
                     user_id=user_id,
                     run_id=root_run_id,
@@ -51,14 +55,19 @@ class IpcEventBroadcaster:
                     yield event
                 if events:
                     continue
-                if status in {
+                if run_state is not None and run_state.status in {
                     "completed",
                     "confirmation_required",
                     "failed",
                     "blocked",
                     "interrupted",
                 }:
-                    return
+                    expected = run_state.terminal_event_sequence
+                    if expected is not None and cursor is not None and cursor >= expected:
+                        return
+                    terminal_wait_started_at = terminal_wait_started_at or monotonic()
+                    if monotonic() - terminal_wait_started_at >= 10:
+                        raise RuntimeError("terminal event was not persisted")
                 try:
                     await asyncio.wait_for(notification.wait(), timeout=2)
                 except TimeoutError:

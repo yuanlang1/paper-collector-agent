@@ -135,7 +135,7 @@ def _published_date(item: Mapping[str, Any]) -> str | None:
             year = int(values[0])
             month = int(values[1]) if len(values) > 1 else 1
             day = int(values[2]) if len(values) > 2 else 1
-            return f"{year:04d}-{month:02d}-{day:02d}"
+            return date(year, month, day).isoformat()
         except (TypeError, ValueError):
             continue
 

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 from collections.abc import Awaitable, Callable, Mapping
-from pathlib import Path
 from typing import Any
 
 from app.llm.artifacts.store import LocalArtifactStore
@@ -137,10 +135,6 @@ def _append_venue_candidate(
         return
 
     candidates = paper.setdefault("venue_candidates", [])
-    if not isinstance(candidates, list):
-        candidates = []
-        paper["venue_candidates"] = candidates
-
     if venue not in candidates:
         candidates.append(venue)
 
@@ -210,12 +204,19 @@ class CrossrefMetadataEnrichmentNode:
 
         if not paper_info.get("doi") and doi:
             paper_info["doi"] = doi
-        if not paper_info.get("publish_date") and published_date:
+        if published_date and (
+            not paper_info.get("publish_date")
+            or paper_info.get("publish_date_precision") == "year"
+        ):
             paper_info["publish_date"] = published_date
-        if not paper_info.get("paper_abstract"):
-            paper_info["paper_abstract"] = _text(
-                crossref_paper.get("abstract")
-            )
+            paper_info["publish_date_precision"] = "day"
+        abstract = _text(crossref_paper.get("abstract"))
+        if abstract and (
+            not paper_info.get("paper_abstract")
+            or paper_info.get("abstract_source") == "search_snippet"
+        ):
+            paper_info["paper_abstract"] = abstract
+            paper_info["abstract_source"] = "crossref"
         if not paper_info.get("abstract_url"):
             paper_info["abstract_url"] = _text(
                 crossref_paper.get("abstract_url")
@@ -283,47 +284,22 @@ class CrossrefMetadataEnrichmentNode:
         try:
             child_run_id = state["child_run_id"]
             artifact_uri = state.get("enrichment_manifest_artifact_ref")
-            if (
-                not isinstance(artifact_uri, str)
-                or not artifact_uri.startswith("artifact://")
-            ):
-                raise ValueError("Missing enrichment manifest artifact.")
-
-            base_dir = self.artifact_store.base_dir.resolve()
-            manifest_path = (
-                base_dir / artifact_uri.removeprefix("artifact://")
-            ).resolve()
-            manifest_path.relative_to(base_dir)
-
-            def read_manifest() -> dict[str, Any]:
-                with manifest_path.open("r", encoding="utf-8") as file:
-                    return json.load(file)
-
-            manifest = await asyncio.to_thread(read_manifest)
+            manifest = await self.artifact_store.read_json_uri(artifact_uri)
             papers = manifest.get("papers", [])
-            if not isinstance(papers, list):
-                raise ValueError("Manifest papers must be a list.")
-
             matched_count = 0
             unmatched_count = 0
             warnings: list[str] = []
 
-            valid_papers = [
-                (paper, paper["paper_info"])
-                for paper in papers
-                if isinstance(paper, dict)
-                and isinstance(paper.get("paper_info"), dict)
-            ]
             semaphore = asyncio.Semaphore(CROSSREF_ENRICHMENT_CONCURRENCY)
             tasks = [
                 asyncio.create_task(
                     self._enrich_paper(
                         paper=paper,
-                        paper_info=paper_info,
+                        paper_info=paper["paper_info"],
                         semaphore=semaphore,
                     )
                 )
-                for paper, paper_info in valid_papers
+                for paper in papers
             ]
             for matched, unmatched, warning in await self._gather_or_cancel(tasks):
                 matched_count += matched

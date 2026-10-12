@@ -16,7 +16,8 @@ from app.rag.processing.task_rag_batch_runner import close_task_rag_batch_runner
 from app.runtime.agent_runtime import get_agent_runtime, initialize_agent_runtime
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from app.history.sqlite import initialize_history_database
-from app.database import engine
+from app.history.chat_log import AgentHistoryStore
+from app.database import engine, SessionLocal
 from app.models.llm_profile import LlmProfile
 from app.models.memory import MemoryConsolidationCursor, MemoryEpisode, MemoryFact
 from app.models.system_setting import SystemSetting
@@ -74,6 +75,7 @@ async def lifespan(app: FastAPI):
         initialize_agent_runtime(
             checkpointer=checkpointer,
             history_db=history_db,
+            history_store=AgentHistoryStore(SessionLocal),
         )
 
         grpc_server = InternalGrpcServer(get_agent_runtime())

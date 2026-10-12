@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -14,12 +15,18 @@ from app.protos.agent.v1 import agent_pb2, agent_pb2_grpc
 from app.runtime.agent_runtime import AgentRuntime
 from app.services import internal_settings_service as settings_service
 
+logger = logging.getLogger(__name__)
+
 
 def _require_text(value: str, name: str) -> str:
     value = value.strip()
     if not value:
         raise ValueError(f"{name} is required")
     return value
+
+
+def _require_user_id(value: str) -> str:
+    return chat_log.normalize_user_id(_require_text(value, "user_id"))[0]
 
 
 def _positive(value: int, name: str) -> int:
@@ -81,7 +88,7 @@ class AgentGrpcService(agent_pb2_grpc.AgentServiceServicer):
 
     async def StartRun(self, request, context):
         try:
-            user_id = _require_text(request.user_id, "user_id")
+            user_id = _require_user_id(request.user_id)
             conversation_id = _require_text(request.conversation_id, "conversation_id")
             run_id = _require_text(request.run_id, "run_id")
             message = _require_text(request.message, "message")
@@ -102,9 +109,14 @@ class AgentGrpcService(agent_pb2_grpc.AgentServiceServicer):
             )
         except chat_log.RunAlreadyExistsError as exc:
             await context.abort(grpc.StatusCode.ALREADY_EXISTS, str(exc))
+        except chat_log.ConversationNotFoundError:
+            await context.abort(grpc.StatusCode.NOT_FOUND, "conversation not found")
+        except (chat_log.ActiveRunConflictError, chat_log.ConversationStateError, chat_log.ConversationThreadError) as exc:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(exc))
         except (LookupError, ValueError) as exc:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
         except Exception:
+            logger.exception("Unable to start run: user_id=%s conversation_id=%s run_id=%s", user_id, conversation_id, run_id)
             await context.abort(grpc.StatusCode.INTERNAL, "Unable to start run")
         finally:
             db.close()
@@ -112,7 +124,7 @@ class AgentGrpcService(agent_pb2_grpc.AgentServiceServicer):
 
     async def ResumeRun(self, request, context):
         try:
-            user_id = _require_text(request.user_id, "user_id")
+            user_id = _require_user_id(request.user_id)
             conversation_id = _require_text(request.conversation_id, "conversation_id")
             run_id = _require_text(request.run_id, "run_id")
             action_id = _require_text(request.action_id, "action_id")
@@ -128,7 +140,7 @@ class AgentGrpcService(agent_pb2_grpc.AgentServiceServicer):
                 payload["comment"] = request.comment
         except ValueError as exc:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-        scope = await self.runtime.history_db.run(chat_log.get_run_scope, run_id)
+        scope = await self.runtime.history_store.run(chat_log.get_run_scope, run_id)
         if scope is None or scope.user_id != user_id or scope.conversation_id != conversation_id:
             await context.abort(grpc.StatusCode.NOT_FOUND, "run not found")
         db = SessionLocal()
@@ -148,6 +160,7 @@ class AgentGrpcService(agent_pb2_grpc.AgentServiceServicer):
         except ValueError as exc:
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(exc))
         except Exception:
+            logger.exception("Unable to resume run: user_id=%s conversation_id=%s run_id=%s", user_id, conversation_id, run_id)
             await context.abort(grpc.StatusCode.INTERNAL, "Unable to resume run")
         finally:
             db.close()
@@ -155,38 +168,37 @@ class AgentGrpcService(agent_pb2_grpc.AgentServiceServicer):
 
     async def GetRun(self, request, context):
         try:
-            user_id = _require_text(request.user_id, "user_id")
+            user_id = _require_user_id(request.user_id)
             conversation_id = _require_text(request.conversation_id, "conversation_id")
             run_id = _require_text(request.run_id, "run_id")
         except ValueError as exc:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-        scope = await self.runtime.history_db.run(chat_log.get_run_scope, run_id)
-        if scope is None or scope.user_id != user_id or scope.conversation_id != conversation_id:
+        try:
+            run_view = await self.runtime.history_store.run(
+                chat_log.get_run_view,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                run_id=run_id,
+            )
+        except chat_log.ConversationNotFoundError:
             await context.abort(grpc.StatusCode.NOT_FOUND, "run not found")
-        status = await self.runtime.history_db.run(chat_log.get_run_status, user_id=user_id, run_id=run_id) or "running"
         latest_event = await self.runtime.history_db.run(
             stream_events.latest,
             user_id=user_id,
             run_id=run_id,
         )
-        terminal = (
-            latest_event.data
-            if latest_event and latest_event.event_name in {"run_completed", "run_failed", "confirmation_required"}
-            else {}
-        )
-        reply = str(terminal.get("reply") or "")
         return agent_pb2.RunView(
             conversation_id=conversation_id,
             run_id=run_id,
-            status=status,
+            status=run_view.status,
             latest_sequence=latest_event.sequence if latest_event else 0,
-            reply=reply,
-            result_json=json.dumps(to_jsonable(terminal), ensure_ascii=False),
+            reply=run_view.reply,
+            result_json=json.dumps(to_jsonable(run_view.result), ensure_ascii=False),
         )
 
     async def SubscribeRunEvents(self, request, context) -> AsyncIterator[agent_pb2.RunEvent]:
         try:
-            user_id = _require_text(request.user_id, "user_id")
+            user_id = _require_user_id(request.user_id)
             conversation_id = _require_text(request.conversation_id, "conversation_id")
             run_id = _require_text(request.run_id, "run_id")
             after_sequence = request.after_sequence.value if request.HasField("after_sequence") else None
@@ -216,18 +228,18 @@ class ConversationGrpcService(agent_pb2_grpc.ConversationServiceServicer):
 
     async def ListConversations(self, request, context):
         try:
-            user_id = _require_text(request.user_id, "user_id")
+            user_id = _require_user_id(request.user_id)
             limit = request.limit or 30
             if not 1 <= limit <= 100:
                 raise ValueError("limit must be between 1 and 100")
         except ValueError as exc:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-        items = await self.runtime.history_db.run(chat_log.list_conversations, user_id=user_id, limit=limit)
+        items = await self.runtime.history_store.run(chat_log.list_conversations, user_id=user_id, limit=limit)
         return agent_pb2.ListConversationsResponse(items=[agent_pb2.ConversationView(**item) for item in items])
 
     async def ListMessages(self, request, context):
         try:
-            user_id = _require_text(request.user_id, "user_id")
+            user_id = _require_user_id(request.user_id)
             conversation_id = _require_text(request.conversation_id, "conversation_id")
             limit = request.limit or 100
             if not 1 <= limit <= 100:
@@ -237,14 +249,16 @@ class ConversationGrpcService(agent_pb2_grpc.ConversationServiceServicer):
                 _positive(before_id, "before_id")
         except ValueError as exc:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-        exists = await self.runtime.history_db.run(
-            chat_log.conversation_exists,
-            user_id=user_id,
-            conversation_id=conversation_id,
-        )
-        if not exists:
+        try:
+            items, next_before = await self.runtime.history_store.run(
+                chat_log.list_messages,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                limit=limit,
+                before_id=before_id,
+            )
+        except chat_log.ConversationNotFoundError:
             await context.abort(grpc.StatusCode.NOT_FOUND, "conversation not found")
-        items, next_before = await self.runtime.history_db.run(chat_log.list_messages, user_id=user_id, conversation_id=conversation_id, limit=limit, before_id=before_id)
         response = agent_pb2.ListMessagesResponse(conversation_id=conversation_id)
         for item in items:
             response.items.append(agent_pb2.ChatMessageView(
@@ -258,21 +272,17 @@ class ConversationGrpcService(agent_pb2_grpc.ConversationServiceServicer):
 
     async def DeleteConversation(self, request, context):
         try:
-            user_id = _require_text(request.user_id, "user_id")
+            user_id = _require_user_id(request.user_id)
             conversation_id = _require_text(request.conversation_id, "conversation_id")
         except ValueError as exc:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-        exists = await self.runtime.history_db.run(
-            chat_log.conversation_exists,
-            user_id=user_id,
-            conversation_id=conversation_id,
-        )
-        if not exists:
-            await context.abort(grpc.StatusCode.NOT_FOUND, "conversation not found")
         db = SessionLocal()
         try:
             await self.runtime.delete_conversation(user_id=user_id, conversation_id=conversation_id, db=db)
+        except chat_log.ConversationNotFoundError:
+            await context.abort(grpc.StatusCode.NOT_FOUND, "conversation not found")
         except Exception:
+            logger.exception("Unable to delete conversation: user_id=%s conversation_id=%s", user_id, conversation_id)
             await context.abort(grpc.StatusCode.INTERNAL, "Unable to delete conversation")
         finally:
             db.close()

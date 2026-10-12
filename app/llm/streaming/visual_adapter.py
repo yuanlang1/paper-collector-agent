@@ -53,6 +53,10 @@ class AgentStreamAdapter:
                                     "requires_confirmation"
                                 )
                             ),
+                            "batch_id": active_call.get("batch_id"),
+                            "batch_calls": to_jsonable(
+                                active_call.get("batch_calls") or [active_call]
+                            ),
                             "workflow": self._workflow_for(action_name),
                         },
                     )
@@ -130,6 +134,8 @@ class AgentStreamAdapter:
             "retryable": bool(result.get("retryable")),
             "error_code": result.get("error_code"),
             "error_message": result.get("error_message"),
+            "batch_id": result.get("batch_id"),
+            "batch_calls": result.get("batch_calls") or [],
         }
 
     @staticmethod

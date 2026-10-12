@@ -102,28 +102,40 @@ class SolveNode:
                 "error": None,
             }
 
+        batch_id = f"{state['run_id']}:{iteration}"
+        batch_calls = [
+            {
+                "id": call["id"],
+                "name": call["name"],
+                "args": call["args"],
+                "kind": get_tool_kind(
+                    call["name"],
+                    self.tool_registry,
+                    self.subagent_registry,
+                ),
+                "requires_confirmation": requires_confirmation(
+                    call["name"],
+                    call["args"],
+                    self.tool_registry,
+                    self.subagent_registry,
+                ),
+            }
+            for call in assistant.tool_calls
+        ]
+        batch_calls = [
+            {
+                **call,
+                "batch_id": batch_id,
+                "batch_calls": batch_calls,
+            }
+            for call in batch_calls
+        ]
         return {
             "messages": [assistant],
-            "pending_tool_calls": [
-                {
-                    "id": call["id"],
-                    "name": call["name"],
-                    "args": call["args"],
-                    "kind": get_tool_kind(
-                        call["name"],
-                        self.tool_registry,
-                        self.subagent_registry,
-                    ),
-                    "requires_confirmation": requires_confirmation(
-                        call["name"],
-                        call["args"],
-                        self.tool_registry,
-                        self.subagent_registry,
-                    ),
-                }
-                for call in assistant.tool_calls
-            ],
+            "pending_tool_calls": batch_calls,
             "active_tool_call": None,
+            "tool_batch_id": batch_id,
+            "tool_batch_calls": batch_calls,
             "iteration_count": iteration,
             "reasoning_content": reasoning_content,
             "run_status": "running",

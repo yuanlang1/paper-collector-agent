@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -48,43 +46,12 @@ class CreatePaperSearchTaskNode:
         artifact_uri = state.get("recommendation_manifest_artifact_ref")
         if artifact_uri is None:
             return None
-        if (
-            not isinstance(artifact_uri, str)
-            or not artifact_uri.startswith("artifact://")
-        ):
-            raise ValueError("missing recommendation manifest artifact")
-
         child_run_id = state["child_run_id"]
-
-        base_dir = self.artifact_store.base_dir.resolve()
-        manifest_path = (
-            base_dir / artifact_uri.removeprefix("artifact://")
-        ).resolve()
-        try:
-            manifest_path.relative_to(base_dir)
-        except ValueError as exc:
-            raise ValueError(
-                "recommendation manifest is outside artifact storage"
-            ) from exc
-
-        def read_manifest() -> dict[str, Any]:
-            with manifest_path.open("r", encoding="utf-8") as file:
-                payload = json.load(file)
-            if not isinstance(payload, dict):
-                raise ValueError("recommendation manifest must be an object")
-            return payload
-
-        manifest = await asyncio.to_thread(read_manifest)
-        papers = manifest.get("papers")
-        if not isinstance(papers, list):
-            raise ValueError("recommendation manifest papers must be a list")
+        manifest = await self.artifact_store.read_json_uri(artifact_uri)
+        papers = manifest["papers"]
 
         for paper in papers:
-            if not isinstance(paper, dict):
-                raise ValueError("recommended paper must be an object")
-            relation_draft = paper.get("task_paper_relation_draft")
-            if not isinstance(relation_draft, dict):
-                raise ValueError("recommended paper is missing relation draft")
+            relation_draft = paper["task_paper_relation_draft"]
             previous_task_id = relation_draft.get("search_task_id")
             if previous_task_id is not None and previous_task_id != task_id:
                 raise ValueError("recommendation manifest is bound to another task")
@@ -107,34 +74,7 @@ class CreatePaperSearchTaskNode:
         )
         return artifact.artifact_uri
 
-    async def __call__(
-        self,
-        state: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        existing_task_id = state.get("paper_service_task_id")
-
-        if _is_valid_task_id(existing_task_id):
-            try:
-                bound_artifact_uri = await self._bind_recommendation_manifest(
-                    state,
-                    existing_task_id,
-                )
-            except Exception as exc:
-                return {
-                    "stage": "failed",
-                    "status": "failed",
-                    "paper_service_task_id": existing_task_id,
-                    "error": f"绑定推荐论文与检索任务失败：{exc}",
-                }
-            return {
-                "stage": "persisting_papers",
-                "status": "running",
-                "task_bound_recommendation_manifest_artifact_ref": (
-                    bound_artifact_uri
-                ),
-                "error": None,
-            }
-
+    async def _create_remote_task(self, state: Mapping[str, Any]) -> dict[str, Any]:
         try:
             request = AddQueryTaskArgs.model_validate(
                 {
@@ -193,20 +133,9 @@ class CreatePaperSearchTaskNode:
                 "error": "task-service gRPC 创建搜索任务失败",
             }
 
-        try:
-            bound_artifact_uri = await self._bind_recommendation_manifest(
-                state,
-                task_id,
-            )
-        except Exception as exc:
-            return {
-                "stage": "failed",
-                "status": "failed",
-                "create_task_payload": payload,
-                "paper_service_task_id": task_id,
-                "error": f"绑定推荐论文与检索任务失败：{exc}",
-            }
+        return {"create_task_payload": payload, "paper_service_task_id": task_id}
 
+    async def _mark_running(self, task_id: int, warnings: list[str]) -> dict[str, Any]:
         try:
             status_result = await self.client.update_task_status(
                 task_id=task_id,
@@ -217,7 +146,6 @@ class CreatePaperSearchTaskNode:
                 "ok": False,
                 "error": str(exc),
             }
-        warnings = list(state.get("warnings", []))
         task_status_update_error = None
         if status_result.get("ok") is not True:
             task_status_update_error = str(
@@ -231,13 +159,8 @@ class CreatePaperSearchTaskNode:
         return {
             "stage": "persisting_papers",
             "status": "running",
-            "create_task_payload": payload,
             "paper_service_task_id": task_id,
-            "task_bound_recommendation_manifest_artifact_ref": (
-                bound_artifact_uri
-            ),
             "progress": {
-                **state.get("progress", {}),
                 "task_created": 1,
                 "task_running_status_updated": (
                     1 if task_status_update_error is None else 0
@@ -250,5 +173,33 @@ class CreatePaperSearchTaskNode:
                 if task_status_update_error is None
                 else None
             ),
+            "error": None,
+        }
+
+    async def __call__(self, state: Mapping[str, Any]) -> dict[str, Any]:
+        task_id = state.get("paper_service_task_id")
+        created = not _is_valid_task_id(task_id)
+        update = {}
+        if created:
+            update = await self._create_remote_task(state)
+            if update.get("status") in {"failed", "blocked"}:
+                return update
+            task_id = update["paper_service_task_id"]
+        try:
+            bound_artifact_uri = await self._bind_recommendation_manifest(state, task_id)
+        except Exception as exc:
+            return {
+                **update,
+                "stage": "failed", "status": "failed",
+                "paper_service_task_id": task_id,
+                "error": f"绑定推荐论文与检索任务失败：{exc}",
+            }
+        if created:
+            update.update(await self._mark_running(task_id, list(state.get("warnings", []))))
+            update["progress"] = {**state.get("progress", {}), **update["progress"]}
+        return {
+            **update,
+            "stage": "persisting_papers", "status": "running",
+            "task_bound_recommendation_manifest_artifact_ref": bound_artifact_uri,
             "error": None,
         }

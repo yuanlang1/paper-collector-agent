@@ -15,6 +15,8 @@ from fastapi import FastAPI
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from pydantic import BaseModel
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 
 from app.api import agent as agent_api
 from app.events.adapter import now
@@ -28,6 +30,7 @@ from app.events.models import (
     RunTerminalEvent,
 )
 from app.history import chat_log, stream_events, transactions
+from app.history.chat_log import AgentHistoryStore
 from app.history.sqlite import HistoryDatabase
 from app.llm.agent import AgentService
 from app.llm.graph.main.nodes.subgraph import SubAgentNode
@@ -42,10 +45,28 @@ from app.llm.tools.base import BaseTool, ToolResult
 from app.llm.tools.registry import ToolRegistry
 from app.runtime.agent_runtime import AgentRuntime
 from app.runtime.session import Session
+from app.database import Base
+from app.models.agent_history import AgentConversation, AgentMessage, AgentRun
 
 
 async def _append(events: list, event) -> None:
     events.append(event)
+
+
+def _seed_conversation(db, *, user_id: str, conversation_id: str, thread_id: str | None = None) -> None:
+    _, user_number = chat_log.normalize_user_id(user_id)
+    existing = db.scalar(select(AgentConversation).where(
+        AgentConversation.creator_id == user_number,
+        AgentConversation.conversation_id == conversation_id,
+    ))
+    if existing is None:
+        db.add(AgentConversation(
+            creator_id=user_number,
+            modifier_id=user_number,
+            conversation_id=conversation_id,
+            thread_id=thread_id or f"thread-{conversation_id}",
+            status="ACTIVE",
+        ))
 
 
 class _TrackingDb:
@@ -315,10 +336,24 @@ class AgentStreamLifecycleTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.history_db = HistoryDatabase(Path(self.temp_dir.name) / "history.db")
         self.history_db.initialize()
+        self.history_engine = create_engine(
+            f"sqlite:///{Path(self.temp_dir.name) / 'agent-history.db'}"
+        )
+        Base.metadata.create_all(
+            self.history_engine,
+            tables=[
+                AgentConversation.__table__,
+                AgentRun.__table__,
+                AgentMessage.__table__,
+            ],
+        )
+        self.history_sessions = sessionmaker(bind=self.history_engine)
+        self.history_store = AgentHistoryStore(self.history_sessions)
         self.db_sessions: list[_TrackingDb] = []
         self._run_number = 0
 
     def tearDown(self) -> None:
+        self.history_engine.dispose()
         self.temp_dir.cleanup()
 
     def _runtime(self, service: _StreamingService) -> AgentRuntime:
@@ -329,7 +364,8 @@ class AgentStreamLifecycleTests(unittest.TestCase):
 
         runtime = AgentRuntime(
             agent_service=service,
-            history_db=self.history_db,
+            event_db=self.history_db,
+            history_store=self.history_store,
             db_factory=create_db,
         )
         runtime._schedule_consolidation = Mock()
@@ -346,6 +382,11 @@ class AgentStreamLifecycleTests(unittest.TestCase):
     ):
         self._run_number += 1
         run_id = run_id or f"run_{conversation_id}_{self._run_number}"
+        await self.history_store.run(
+            _seed_conversation,
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
         with (
             patch(
                 "app.runtime.agent_runtime.resolve_runtime_config",
@@ -369,7 +410,7 @@ class AgentStreamLifecycleTests(unittest.TestCase):
         return [event async for event in events]
 
     async def _assistant_status(self, conversation_id: str) -> str:
-        messages, _ = await self.history_db.run(
+        messages, _ = await self.history_store.run(
             chat_log.list_messages,
             user_id="0",
             conversation_id=conversation_id,
@@ -430,7 +471,7 @@ class AgentStreamLifecycleTests(unittest.TestCase):
             await runtime.shutdown()
 
             self.assertTrue(service.closed.is_set())
-            self.assertEqual(await self._assistant_status("conv-shutdown"), "interrupted")
+            self.assertEqual(await self._assistant_status("conv-shutdown"), "failed")
             self.assertTrue(self.db_sessions[0].closed)
             await subscription.events.aclose()
 
@@ -478,9 +519,14 @@ class AgentStreamLifecycleTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
-    def test_terminal_update_and_event_insert_rollback_together(self) -> None:
+    def test_terminal_message_commits_before_independent_event_write(self) -> None:
         async def scenario() -> None:
-            await self.history_db.run(
+            await self.history_store.run(
+                _seed_conversation,
+                user_id="0",
+                conversation_id="conv-atomic",
+            )
+            await self.history_store.run(
                 chat_log.start_turn,
                 user_id="0",
                 conversation_id="conv-atomic",
@@ -495,31 +541,24 @@ class AgentStreamLifecycleTests(unittest.TestCase):
                 "last_action_result": None,
                 "error": None,
             }
-            with patch(
-                "app.history.stream_events.insert",
-                side_effect=RuntimeError("event write failed"),
-            ):
-                with self.assertRaisesRegex(RuntimeError, "event write failed"):
-                    await self.history_db.run(
-                        transactions.complete_assistant_message_with_event,
-                        user_id="0",
-                        conversation_id="conv-atomic",
-                        run_id="run_atomic",
-                        response=response,
-                        latency_ms=1,
-                        extra_meta=None,
-                        event_name="run_completed",
-                        event_data={"status": "completed"},
-                    )
+            await self.history_store.run(
+                transactions.complete_assistant_message,
+                user_id="0",
+                conversation_id="conv-atomic",
+                run_id="run_atomic",
+                response=response,
+                latency_ms=1,
+                extra_meta=None,
+            )
 
-            messages, _ = await self.history_db.run(
+            messages, _ = await self.history_store.run(
                 chat_log.list_messages,
                 user_id="0",
                 conversation_id="conv-atomic",
                 limit=10,
                 before_id=None,
             )
-            self.assertEqual([message["role"] for message in messages], ["user"])
+            self.assertEqual([message["role"] for message in messages], ["user", "assistant"])
             self.assertEqual(
                 await self.history_db.run(
                     stream_events.list_after,
@@ -535,16 +574,21 @@ class AgentStreamLifecycleTests(unittest.TestCase):
 
     def test_user_isolation_covers_events_and_cursor_validation(self) -> None:
         async def scenario() -> None:
-            await self.history_db.run(
+            await self.history_store.run(
+                _seed_conversation,
+                user_id="1",
+                conversation_id="same-conversation",
+            )
+            await self.history_store.run(
                 chat_log.start_turn,
-                user_id="user-a",
+                user_id="1",
                 conversation_id="same-conversation",
                 run_id="run-a",
                 user_content="a",
             )
             event = await self.history_db.run(
                 stream_events.append,
-                user_id="user-a",
+                user_id="1",
                 conversation_id="same-conversation",
                 run_id="run-a",
                 event_name="run_started",
@@ -554,14 +598,14 @@ class AgentStreamLifecycleTests(unittest.TestCase):
 
             with self.assertRaises(LookupError):
                 await runtime.subscribe_stream(
-                    user_id="user-b",
+                    user_id="2",
                     conversation_id="same-conversation",
                     run_id="run-a",
                     last_event_sequence=None,
                 )
             with self.assertRaises(ValueError):
                 await runtime.subscribe_stream(
-                    user_id="user-a",
+                    user_id="1",
                     conversation_id="same-conversation",
                     run_id="run-a",
                     last_event_sequence=event.sequence + 1,
@@ -569,7 +613,7 @@ class AgentStreamLifecycleTests(unittest.TestCase):
             self.assertEqual(
                 await self.history_db.run(
                     stream_events.list_after,
-                    user_id="user-b",
+                    user_id="2",
                     run_id="run-a",
                     after_sequence=None,
                     limit=100,
@@ -628,9 +672,14 @@ class AgentStreamLifecycleTests(unittest.TestCase):
 
     def test_concurrent_writes_allocate_distinct_run_sequences(self) -> None:
         async def scenario() -> None:
-            await self.history_db.run(
+            await self.history_store.run(
+                _seed_conversation,
+                user_id="1",
+                conversation_id="conv-concurrent",
+            )
+            await self.history_store.run(
                 chat_log.start_turn,
-                user_id="user-1",
+                user_id="1",
                 conversation_id="conv-concurrent",
                 run_id="run-concurrent",
                 user_content="hello",
@@ -639,7 +688,7 @@ class AgentStreamLifecycleTests(unittest.TestCase):
                 *(
                     self.history_db.run(
                         stream_events.append,
-                        user_id="user-1",
+                        user_id="1",
                         conversation_id="conv-concurrent",
                         run_id="run-concurrent",
                         event_name="content_delta",
@@ -652,19 +701,18 @@ class AgentStreamLifecycleTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
-    def test_concurrent_conversation_runs_are_allowed(self) -> None:
+    def test_concurrent_conversation_runs_are_rejected(self) -> None:
         async def scenario() -> None:
             service = _StreamingService(block=True)
             runtime = self._runtime(service)
             first = await self._start_chat(runtime, conversation_id="conv-lock")
             await asyncio.wait_for(service.started.wait(), timeout=1)
-            second = await self._start_chat(runtime, conversation_id="conv-lock")
-
-            self.assertNotEqual(first.run_id, second.run_id)
+            with self.assertRaises(chat_log.ActiveRunConflictError):
+                await self._start_chat(runtime, conversation_id="conv-lock")
             service.release.set()
             await asyncio.gather(*runtime._active_stream_tasks.values())
 
-            messages, _ = await self.history_db.run(
+            messages, _ = await self.history_store.run(
                 chat_log.list_messages,
                 user_id="0",
                 conversation_id="conv-lock",
@@ -673,7 +721,7 @@ class AgentStreamLifecycleTests(unittest.TestCase):
             )
             self.assertEqual(
                 [message["status"] for message in messages if message["role"] == "assistant"],
-                ["completed", "completed"],
+                ["completed"],
             )
             first_events = await self.history_db.run(
                 stream_events.list_after,
@@ -682,16 +730,7 @@ class AgentStreamLifecycleTests(unittest.TestCase):
                 after_sequence=None,
                 limit=100,
             )
-            second_events = await self.history_db.run(
-                stream_events.list_after,
-                user_id="0",
-                run_id=second.run_id,
-                after_sequence=None,
-                limit=100,
-            )
             self.assertEqual([event.sequence for event in first_events], [1, 2])
-            self.assertEqual([event.sequence for event in second_events], [1, 2])
-            await second.events.aclose()
             await first.events.aclose()
             await runtime.shutdown()
 
@@ -705,8 +744,14 @@ class AgentStreamLifecycleTests(unittest.TestCase):
             events = await self._collect(subscription.events)
 
             self.assertEqual(events[-1].event_name, "confirmation_required")
-            self.assertEqual(await self._assistant_status("conv-confirm"), "confirmation_required")
-            claim = await self.history_db.run(
+            run_state = await self.history_store.run(
+                chat_log.get_run_event_state,
+                user_id="0",
+                run_id=subscription.run_id,
+            )
+            self.assertIsNotNone(run_state)
+            self.assertEqual(run_state.status, "confirmation_required")
+            claim = await self.history_store.run(
                 chat_log.claim_pending_action,
                 user_id="0",
                 conversation_id="conv-confirm",
@@ -715,7 +760,7 @@ class AgentStreamLifecycleTests(unittest.TestCase):
                 decision="approved",
                 comment=None,
             )
-            duplicate = await self.history_db.run(
+            duplicate = await self.history_store.run(
                 chat_log.claim_pending_action,
                 user_id="0",
                 conversation_id="conv-confirm",
@@ -724,8 +769,8 @@ class AgentStreamLifecycleTests(unittest.TestCase):
                 decision="approved",
                 comment=None,
             )
-            self.assertTrue(claim.claimed)
-            self.assertFalse(duplicate.claimed)
+            self.assertTrue(claim)
+            self.assertFalse(duplicate)
             await runtime.shutdown()
 
         asyncio.run(scenario())
@@ -739,7 +784,7 @@ class AgentStreamLifecycleTests(unittest.TestCase):
                 message="读取 README.md",
             )
             await self._collect(subscription.events)
-            messages, _ = await self.history_db.run(
+            messages, _ = await self.history_store.run(
                 chat_log.list_messages,
                 user_id="0",
                 conversation_id="conv-tool-history",
@@ -757,7 +802,7 @@ class AgentStreamLifecycleTests(unittest.TestCase):
                     ("assistant", "completed"),
                 ],
             )
-            self.assertEqual(messages[0]["content"], "读取 README.md")
+            self.assertEqual(messages[0]["content"], [{"type": "text", "text": "读取 README.md"}])
             self.assertEqual(messages[1]["content"], [{"type": "text", "text": "我先读取 README。"}])
             self.assertEqual(messages[2]["content"][0]["type"], "tool_use")
             self.assertEqual(messages[2]["content"][0]["id"], "toolu_01")
@@ -775,7 +820,7 @@ class AgentStreamLifecycleTests(unittest.TestCase):
                 not message["meta"] or "card" not in message["meta"]
                 for message in messages
             ))
-            turns = await self.history_db.run(
+            turns = await self.history_store.run(
                 chat_log.list_completed_turns_after,
                 user_id="0",
                 conversation_id="conv-tool-history",
@@ -790,14 +835,41 @@ class AgentStreamLifecycleTests(unittest.TestCase):
 
     def test_chat_log_preserves_subagent_result_details(self) -> None:
         async def scenario() -> None:
-            await self.history_db.run(
-                transactions.persist_stream_event,
+            await self.history_store.run(
+                _seed_conversation,
+                user_id="0",
+                conversation_id="conv-subagent-history",
+            )
+            await self.history_store.run(
+                chat_log.start_turn,
+                user_id="0",
+                conversation_id="conv-subagent-history",
+                run_id="run-subagent-history",
+                user_content="generate review",
+            )
+            action = {
+                "action_id": "delegation-1",
+                "action_type": "subagent",
+                "name": "task_review_agent",
+                "input": {},
+                "requires_confirmation": False,
+            }
+            await self.history_store.run(
+                transactions.persist_message_event,
+                user_id="0",
+                conversation_id="conv-subagent-history",
+                run_id="run-subagent-history",
+                event_name="action_started",
+                event_data=action,
+            )
+            await self.history_store.run(
+                transactions.persist_message_event,
                 user_id="0",
                 conversation_id="conv-subagent-history",
                 run_id="run-subagent-history",
                 event_name="action_result",
                 event_data={
-                    "action_id": "delegation-1",
+                    **action,
                     "action_type": "subagent",
                     "name": "task_review_agent",
                     "status": "error",
@@ -809,7 +881,7 @@ class AgentStreamLifecycleTests(unittest.TestCase):
                 },
             )
 
-            messages, _ = await self.history_db.run(
+            messages, _ = await self.history_store.run(
                 chat_log.list_messages,
                 user_id="0",
                 conversation_id="conv-subagent-history",
@@ -817,7 +889,7 @@ class AgentStreamLifecycleTests(unittest.TestCase):
                 before_id=None,
             )
 
-            self.assertEqual(messages[0]["content"], [{
+            self.assertEqual(messages[2]["content"], [{
                 "type": "tool_result",
                 "tool_use_id": "delegation-1",
                 "content": {
@@ -897,10 +969,26 @@ class NativeSseResponseTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory:
                 history_db = HistoryDatabase(Path(directory) / "history.db")
                 history_db.initialize()
+                history_engine = create_engine(f"sqlite:///{Path(directory) / 'agent-history.db'}")
+                Base.metadata.create_all(
+                    history_engine,
+                    tables=[
+                        AgentConversation.__table__,
+                        AgentRun.__table__,
+                        AgentMessage.__table__,
+                    ],
+                )
+                history_store = AgentHistoryStore(sessionmaker(bind=history_engine))
+                await history_store.run(
+                    _seed_conversation,
+                    user_id="0",
+                    conversation_id="conv-api",
+                )
                 service = _StreamingService()
                 runtime = AgentRuntime(
                     agent_service=service,
-                    history_db=history_db,
+                    event_db=history_db,
+                    history_store=history_store,
                     db_factory=_TrackingDb,
                 )
                 runtime._schedule_consolidation = Mock()
@@ -965,6 +1053,7 @@ class NativeSseResponseTests(unittest.TestCase):
                 self.assertIn("event: run_completed", replay.text)
                 self.assertNotIn("event: run_started", replay.text)
                 await runtime.shutdown()
+                history_engine.dispose()
 
         asyncio.run(scenario())
 

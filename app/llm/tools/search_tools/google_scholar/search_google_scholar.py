@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import time
 from typing import Any
 
@@ -11,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.config import settings
 from app.llm.tools.base import BaseTool, ToolResult
 from app.llm.tools.registry import ToolExecutionContext
-from app.llm.tools.search_tools.common import RETRYABLE_STATUS_CODES, clean_text, elapsed_ms
+from app.llm.tools.search_tools.common import RETRYABLE_STATUS_CODES, clean_text, elapsed_ms, parse_year
 
 SERPAPI_SEARCH_URL = settings.SERPAPI_SEARCH_URL
 
@@ -49,14 +48,6 @@ class SerpApiSearchError(Exception):
 
 class SerpApiConfigurationError(Exception):
     """SerpApi 配置缺失或无效。"""
-
-
-def _extract_year(value: str | None) -> int | None:
-    if not value:
-        return None
-
-    match = re.search(r"\b(19|20)\d{2}\b", value)
-    return int(match.group(0)) if match else None
 
 
 def _extract_authors(
@@ -171,10 +162,11 @@ def _parse_google_scholar_item(
         ),
         "title": title,
         "authors": _extract_authors(publication_info),
-        "abstract": None,
+        "abstract": snippet,
+        "abstract_source": "search_snippet" if snippet else None,
         "snippet": snippet,
         "published": None,
-        "year": _extract_year(publication_summary) or _extract_year(snippet),
+        "year": parse_year(publication_summary),
         "updated": None,
         "venue": None,
         "publication_summary": publication_summary or None,
@@ -200,7 +192,6 @@ async def _request_serpapi(
     retry_delay_seconds: float = 2.0,
 ) -> dict[str, Any]:
     retryable_status_codes = RETRYABLE_STATUS_CODES
-    last_error: Exception | None = None
 
     for attempt in range(retries + 1):
         try:
@@ -225,19 +216,12 @@ async def _request_serpapi(
                     "SerpApi returned invalid JSON"
                 ) from exc
 
-        except httpx.RequestError as exc:
-            last_error = exc
-
+        except httpx.RequestError:
             if attempt < retries:
                 await asyncio.sleep(retry_delay_seconds)
                 continue
 
             raise
-
-    if last_error:
-        raise last_error
-
-    raise RuntimeError("SerpApi request failed")
 
 
 def _build_serpapi_params(
@@ -298,211 +282,157 @@ async def google_scholar_search_service(
     context: ToolExecutionContext,
 ) -> dict[str, Any]:
     del context
-
     args = GoogleScholarSearchArgs.model_validate(params)
     query = clean_text(args.query)
-    started_at = time.perf_counter()
-
-    def failure(
-        *,
-        code: str,
-        message: str,
-        retryable: bool,
-        status_code: int | None = None,
-    ) -> None:
-        raise RuntimeError(message)
-
+    if not query:
+        raise ValueError("query cannot be empty")
     try:
-        if not query:
-            raise ValueError("query cannot be empty")
-
-        papers: list[dict[str, Any]] = []
-        seen_ids: set[str] = set()
-        current_start = args.start
-        pages_fetched = 0
-        raw_fetched_count = 0
-        total_results: Any = None
-        search_id: Any = None
-        stop_reason = "upstream_exhausted"
-        page_warning: str | None = None
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            while (
-                len(papers) < args.total_limit
-                and pages_fetched < args.max_pages
-            ):
-                page_size = min(
-                    args.num,
-                    args.total_limit - len(papers),
-                )
-                page_args = args.model_copy(
-                    update={"start": current_start, "num": page_size}
-                )
-                request_params = _build_serpapi_params(page_args)
-
-                try:
-                    raw_result = await _request_serpapi(
-                        client=client,
-                        request_params=request_params,
-                    )
-                    _validate_serpapi_result(raw_result)
-                except (
-                    httpx.HTTPStatusError,
-                    httpx.RequestError,
-                    SerpApiResponseParseError,
-                    SerpApiSearchError,
-                ) as exc:
-                    if not papers:
-                        raise
-                    page_warning = f"第 {pages_fetched + 1} 页请求失败：{exc}"
-                    stop_reason = "upstream_error"
-                    break
-
-                page_papers = [
-                    paper
-                    for paper in (
-                        _parse_google_scholar_item(item)
-                        for item in (
-                            raw_result.get("organic_results") or []
-                        )
-                        if isinstance(item, dict)
-                    )
-                    if paper is not None
-                ]
-                raw_page_count = len(page_papers)
-                pages_fetched += 1
-                raw_fetched_count += raw_page_count
-                search_information = raw_result.get("search_information") or {}
-                search_metadata = raw_result.get("search_metadata") or {}
-                serpapi_pagination = raw_result.get("serpapi_pagination") or {}
-                total_results = search_information.get("total_results")
-                search_id = search_metadata.get("id")
-                has_upstream_next = bool(
-                    isinstance(serpapi_pagination, dict)
-                    and (
-                        serpapi_pagination.get("next")
-                        or serpapi_pagination.get("next_link")
-                    )
-                )
-                new_paper_count = 0
-
-                for paper in page_papers:
-                    source_id = str(paper.get("source_id") or "")
-                    if not source_id or source_id in seen_ids:
-                        continue
-                    seen_ids.add(source_id)
-                    papers.append(paper)
-                    new_paper_count += 1
-                    if len(papers) >= args.total_limit:
-                        break
-
-                next_start = current_start + page_size
-                if len(papers) >= args.total_limit:
-                    stop_reason = "total_limit_reached"
-                    break
-                if pages_fetched >= args.max_pages:
-                    stop_reason = "max_pages_reached"
-                    break
-                if not has_upstream_next or not raw_page_count:
-                    stop_reason = "upstream_exhausted"
-                    break
-                if not new_paper_count:
-                    stop_reason = "no_new_results"
-                    break
-
-                current_start = next_start
-
-        next_offset = current_start + page_size if pages_fetched else None
-        has_next = (
-            stop_reason in {"total_limit_reached", "max_pages_reached"}
-            and next_offset is not None
-            and has_upstream_next
-        )
-
-        return {
-            "ok": True,
-            "source": "google_scholar",
-            "query": query,
-            "returned_count": len(papers),
-            "papers": papers,
-            "error": None,
-            "status": "partial_failed" if page_warning else "success",
-            "warnings": [page_warning] if page_warning else [],
-            "metadata": {
-                "total_results": total_results,
-                "serpapi_search_id": search_id,
-                "pagination": {
-                    "initial_offset": args.start,
-                    "page_size": args.num,
-                    "total_limit": args.total_limit,
-                    "max_pages": args.max_pages,
-                    "pages_fetched": pages_fetched,
-                    "raw_fetched_count": raw_fetched_count,
-                    "returned_count": len(papers),
-                    "has_next": has_next,
-                    "next_offset": next_offset if has_next else None,
-                    "stop_reason": stop_reason,
-                },
-                "filters": {
-                    "year_from": args.year_from,
-                    "year_to": args.year_to,
-                    "review_only": args.review_only,
-                    "exclude_patents": True,
-                    "exclude_citations": True,
-                },
-                "duration_ms": elapsed_ms(started_at),
-            },
-        }
-
+        return await _fetch_scholar_pages(args.model_copy(update={"query": query}))
     except httpx.HTTPStatusError as exc:
-        return failure(
-            code="SERPAPI_HTTP_ERROR",
-            message=exc.response.text[:500],
-            retryable=exc.response.status_code in RETRYABLE_STATUS_CODES,
-            status_code=exc.response.status_code,
-        )
+        # HTTPStatusError 包含带 API key 的请求 URL，不进入下游的用户可见错误。
+        raise SerpApiSearchError(exc.response.text[:500]) from exc
 
-    except httpx.RequestError as exc:
-        return failure(
-            code="SERPAPI_REQUEST_ERROR",
-            message=str(exc),
-            retryable=True,
-        )
 
-    except SerpApiConfigurationError as exc:
-        return failure(
-            code="SERPAPI_CONFIGURATION_ERROR",
-            message=str(exc),
-            retryable=False,
-        )
+async def _fetch_scholar_pages(args: GoogleScholarSearchArgs) -> dict[str, Any]:
+    started_at = time.perf_counter()
+    papers: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    current_start = args.start
+    pages_fetched = 0
+    raw_fetched_count = 0
+    total_results: Any = None
+    search_id: Any = None
+    stop_reason = "upstream_exhausted"
+    page_warning: str | None = None
 
-    except SerpApiResponseParseError as exc:
-        return failure(
-            code="SERPAPI_RESPONSE_INVALID",
-            message=str(exc),
-            retryable=False,
-        )
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        while (
+            len(papers) < args.total_limit
+            and pages_fetched < args.max_pages
+        ):
+            page_size = min(
+                args.num,
+                args.total_limit - len(papers),
+            )
+            page_args = args.model_copy(
+                update={"start": current_start, "num": page_size}
+            )
+            request_params = _build_serpapi_params(page_args)
 
-    except SerpApiSearchError as exc:
-        return failure(
-            code="SERPAPI_SEARCH_ERROR",
-            message=str(exc),
-            retryable=False,
-        )
+            try:
+                raw_result = await _request_serpapi(
+                    client=client,
+                    request_params=request_params,
+                )
+                _validate_serpapi_result(raw_result)
+            except (
+                httpx.HTTPStatusError,
+                httpx.RequestError,
+                SerpApiResponseParseError,
+                SerpApiSearchError,
+            ) as exc:
+                if not papers:
+                    raise
+                message = exc.response.text[:500] if isinstance(exc, httpx.HTTPStatusError) else str(exc)
+                page_warning = f"第 {pages_fetched + 1} 页请求失败：{message}"
+                stop_reason = "upstream_error"
+                break
 
-    except ValueError as exc:
-        return failure(
-            code="INVALID_ARGUMENT",
-            message=str(exc),
-            retryable=False,
-        )
+            page_papers = [
+                paper
+                for paper in (
+                    _parse_google_scholar_item(item)
+                    for item in (
+                        raw_result.get("organic_results") or []
+                    )
+                    if isinstance(item, dict)
+                )
+                if paper is not None
+            ]
+            raw_page_count = len(page_papers)
+            pages_fetched += 1
+            raw_fetched_count += raw_page_count
+            search_information = raw_result.get("search_information") or {}
+            search_metadata = raw_result.get("search_metadata") or {}
+            serpapi_pagination = raw_result.get("serpapi_pagination") or {}
+            total_results = search_information.get("total_results")
+            search_id = search_metadata.get("id")
+            has_upstream_next = bool(
+                isinstance(serpapi_pagination, dict)
+                and (
+                    serpapi_pagination.get("next")
+                    or serpapi_pagination.get("next_link")
+                )
+            )
+            new_paper_count = 0
 
-    except Exception as exc:
-        return failure(
-            code="INTERNAL_ERROR",
-            message=str(exc),
-            retryable=False,
-        )
+            for paper in page_papers:
+                source_id = str(paper.get("source_id") or "")
+                if not source_id or source_id in seen_ids:
+                    continue
+                seen_ids.add(source_id)
+                papers.append(paper)
+                new_paper_count += 1
+                if len(papers) >= args.total_limit:
+                    break
+
+            next_start = current_start + page_size
+            if len(papers) >= args.total_limit:
+                stop_reason = "total_limit_reached"
+                break
+            if pages_fetched >= args.max_pages:
+                stop_reason = "max_pages_reached"
+                break
+            if not has_upstream_next or not raw_page_count:
+                stop_reason = "upstream_exhausted"
+                break
+            if not new_paper_count:
+                stop_reason = "no_new_results"
+                break
+
+            current_start = next_start
+
+    next_offset = current_start + page_size if pages_fetched else None
+    has_next = (
+        stop_reason in {"total_limit_reached", "max_pages_reached"}
+        and next_offset is not None
+        and has_upstream_next
+    )
+
+    return {
+        "ok": True,
+        "source": "google_scholar",
+        "query": args.query,
+        "returned_count": len(papers),
+        "papers": papers,
+        "error": None,
+        "status": "partial_failed" if page_warning else "success",
+        "warnings": [page_warning] if page_warning else [],
+        "metadata": {
+            "total_results": total_results,
+            "serpapi_search_id": search_id,
+            "pagination": {
+                "initial_offset": args.start,
+                "page_size": args.num,
+                "total_limit": args.total_limit,
+                "max_pages": args.max_pages,
+                "pages_fetched": pages_fetched,
+                "raw_fetched_count": raw_fetched_count,
+                "returned_count": len(papers),
+                "has_next": has_next,
+                "next_offset": next_offset if has_next else None,
+                "stop_reason": stop_reason,
+            },
+            "filters": {
+                "year_from": args.year_from,
+                "year_to": args.year_to,
+                "review_only": args.review_only,
+                "exclude_patents": True,
+                "exclude_citations": True,
+            },
+            "duration_ms": elapsed_ms(started_at),
+        },
+    }
 
 
 async def google_scholar_search_handler(

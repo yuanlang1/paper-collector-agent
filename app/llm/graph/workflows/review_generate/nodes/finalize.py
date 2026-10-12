@@ -23,9 +23,7 @@ def failed(error: str, **details: Any) -> dict[str, Any]:
 
 
 async def finalize_task_review_node(state: Mapping[str, Any],) -> dict[str, Any]:
-    call = state.get("active_tool_call")
-    if not isinstance(call, Mapping):
-        raise RuntimeError("task review finalized without an active tool call")
+    call = state["active_tool_call"]
 
     stage = state["stage"]
     success = stage == "completed"

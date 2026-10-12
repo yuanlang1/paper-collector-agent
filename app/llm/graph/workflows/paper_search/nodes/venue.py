@@ -410,6 +410,33 @@ class VenueResolutionNode:
 
         return venue, "model_fallback"
 
+    async def _resolve_paper(self, paper: dict[str, Any]) -> tuple[str, str | None]:
+        paper_info = paper["paper_info"]
+        paper_info["venue_id"] = None
+        title = paper_info["title"]
+        try:
+            venue, source = await self.resolve_venue(
+                title=title, venue_candidates=paper.get("venue_candidates", []),
+            )
+            if venue is None:
+                paper["venue_resolution"] = {
+                    "status": "missing", "source": source, "venue_id": None,
+                }
+                return "missing", None
+            paper_type_code = _crossref_paper_type_code(paper)
+            if paper_type_code:
+                venue = venue.model_copy(update={"type": paper_type_code})
+            paper["venue_resolution"] = {
+                "status": "resolved", "source": source, "venue_id": None,
+                "venue_draft": venue.model_dump(mode="json"),
+            }
+            return "resolved", None
+        except Exception as exc:
+            paper["venue_resolution"] = {
+                "status": "failed", "source": None, "venue_id": None,
+            }
+            return "failed", f"{title} 的 venue 解析失败：{exc}"
+
     async def __call__(
         self,
         state: Mapping[str, Any],
@@ -420,107 +447,23 @@ class VenueResolutionNode:
                 "crossref_enrichment_manifest_artifact_ref"
             ) or state.get("enrichment_manifest_artifact_ref")
 
-            if (
-                not isinstance(artifact_uri, str)
-                or not artifact_uri.startswith("artifact://")
-            ):
-                raise ValueError("缺少 enrichment manifest artifact。")
-
-            base_dir = self.artifact_store.base_dir.resolve()
-            manifest_path = (
-                base_dir
-                / artifact_uri.removeprefix("artifact://")
-            ).resolve()
-
-            try:
-                manifest_path.relative_to(base_dir)
-            except ValueError as exc:
-                raise ValueError("venue manifest 超出 artifact 存储目录。") from exc
-
-            def read_manifest() -> dict[str, Any]:
-                with manifest_path.open(
-                    "r",
-                    encoding="utf-8",
-                ) as file:
-                    return json.load(file)
-
-            manifest = await asyncio.to_thread(read_manifest)
+            manifest = await self.artifact_store.read_json_uri(artifact_uri)
             papers = manifest.get("papers", [])
-
-            if not isinstance(papers, list):
-                raise ValueError("manifest papers 格式无效。")
 
             resolved_count = 0
             missing_count = 0
             failed_count = 0
             warnings: list[str] = []
-            retained_papers: list[dict[str, Any]] = []
 
             for paper in papers:
-                if not isinstance(paper, dict):
-                    continue
+                status, warning = await self._resolve_paper(paper)
+                resolved_count += status == "resolved"
+                missing_count += status == "missing"
+                failed_count += status == "failed"
+                if warning:
+                    warnings.append(warning)
 
-                paper_info = paper.get("paper_info")
-
-                if not isinstance(paper_info, dict):
-                    failed_count += 1
-                    warnings.append("存在缺少 paper_info 的论文条目。")
-                    continue
-
-                title = str(paper_info.get("title") or "")
-                venue_candidates = paper.get(
-                    "venue_candidates",
-                    [],
-                )
-
-                if not isinstance(venue_candidates, list):
-                    venue_candidates = []
-
-                try:
-                    venue, source = await self.resolve_venue(
-                        title=title,
-                        venue_candidates=venue_candidates,
-                    )
-
-                    paper_info["venue_id"] = None
-
-                    if venue is None:
-                        paper["venue_resolution"] = {
-                            "status": "missing",
-                            "source": source,
-                            "venue_id": None,
-                        }
-                        missing_count += 1
-                        retained_papers.append(paper)
-                        continue
-
-                    paper_type_code = _crossref_paper_type_code(paper)
-                    if paper_type_code:
-                        venue = venue.model_copy(
-                            update={"type": paper_type_code}
-                        )
-
-                    paper["venue_resolution"] = {
-                        "status": "resolved",
-                        "source": source,
-                        "venue_id": None,
-                        "venue_draft": venue.model_dump(mode="json"),
-                    }
-                    resolved_count += 1
-                    retained_papers.append(paper)
-
-                except Exception as exc:
-                    paper_info["venue_id"] = None
-                    paper["venue_resolution"] = {
-                        "status": "failed",
-                        "source": None,
-                        "venue_id": None,
-                    }
-                    failed_count += 1
-                    retained_papers.append(paper)
-                    warnings.append(f"{title} 的 venue 解析失败：{exc}")
-
-            manifest["papers"] = retained_papers
+            manifest["papers"] = papers
             manifest["step_key"] = "resolve_venues"
 
             artifact = await self.artifact_store.write_json(
@@ -529,7 +472,7 @@ class VenueResolutionNode:
                 source="venue",
                 kind="paper_info_venue_manifest_json",
                 payload=manifest,
-                count=len(retained_papers),
+                count=len(papers),
                 metadata={
                     "input_manifest": artifact_uri,
                     "resolved_count": resolved_count,

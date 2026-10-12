@@ -3,7 +3,6 @@ import hashlib
 import json
 from typing import Literal
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -14,16 +13,6 @@ def content_hash(value):
     return hashlib.sha256(
         json.dumps(value, ensure_ascii=False, sort_keys=True).encode()
     ).hexdigest()
-
-
-async def invoke(model, schema, prompt, payload):
-    result = await model.ainvoke(
-        [
-            SystemMessage(content=prompt + UNTRUSTED_INPUT_GUARD),
-            HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-        ]
-    )
-    return schema.model_validate(result).model_dump(mode="json")
 
 
 async def save(store, state, name, payload):
@@ -129,21 +118,6 @@ def framework_input_hash(topic, language, review_type, studies):
             "studies": studies,
         }
     )
-
-
-def validate_claims(claims, framework, paper_ids):
-    ids = [claim["claim_id"] for claim in claims]
-    if len(ids) != len(set(ids)):
-        raise ValueError("duplicate Claim IDs")
-    sections = {section["section_id"] for section in framework["sections"]}
-    for claim in claims:
-        CandidateClaim.model_validate(claim)
-        if claim["section_id"] not in sections:
-            raise ValueError("unknown framework section")
-        if not set(claim["candidate_paper_ids"]) <= set(paper_ids):
-            raise ValueError("claim references papers outside task")
-        if claim["claim_hash"] != claim_hash(claim):
-            raise ValueError("stale Claim hash")
 
 
 def required_source_count(claim):

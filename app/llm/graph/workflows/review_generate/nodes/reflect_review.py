@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Literal
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, model_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
@@ -10,7 +12,7 @@ from app.llm.graph.workflows.review_generate.citations import (
     citation_paper_ids,
     unsupported_synthesis_citation_ids,
 )
-from app.llm.graph.workflows.review_generate.contracts import invoke, save
+from app.llm.graph.workflows.review_generate.contracts import UNTRUSTED_INPUT_GUARD, save
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
 
@@ -152,11 +154,9 @@ class ReflectReviewNode:
                 framework=framework,
                 require_citations=bool(supported_claims),
             )
-            result = await invoke(
-                self.model,
-                WritingReviewResult,
-                WRITING_REVIEW_PROMPT,
-                {
+            result = (await self.model.ainvoke([
+                SystemMessage(content=WRITING_REVIEW_PROMPT + UNTRUSTED_INPUT_GUARD),
+                HumanMessage(content=json.dumps({
                     "review_mode": "acceptance" if previous_plan else "initial",
                     "framework": {
                         "title": framework["title"],
@@ -180,8 +180,8 @@ class ReflectReviewNode:
                     "supported_claims": supported_claims,
                     "previous_plan": previous_plan,
                     "hard_issues": hard_issues,
-                },
-            )
+                }, ensure_ascii=False)),
+            ])).model_dump(mode="json")
             self._validate_targets(result["revisions"], framework)
             return await self._complete_reflection(state, result, hard_issues)
         except Exception as exc:

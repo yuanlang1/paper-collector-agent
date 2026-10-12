@@ -10,10 +10,7 @@ from app.llm.subagents.task_review import TaskReviewDelegation
 
 
 async def initialize_review_node(state: Mapping[str, Any],) -> dict[str, Any]:
-    call = state.get("active_tool_call")
-    raw_request = call.get("args") if isinstance(call, Mapping) else None
-    if not isinstance(raw_request, Mapping):
-        return failed("missing active task review delegation", warnings=[])
+    raw_request = state["active_tool_call"]["args"]
 
     try:
         request = TaskReviewDelegation.model_validate(raw_request)

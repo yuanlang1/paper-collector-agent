@@ -13,6 +13,7 @@ from app.history.chat_log import validate_run_id
 class Session:
     conversation_id: str
     db: DbSession
+    thread_id: str = ""
     user_id: str = "0"
     run_id: str | None = None
     message: str | None = None
@@ -28,6 +29,7 @@ class Session:
         message: str,
         conversation_id: str,
         db: DbSession,
+        thread_id: str | None = None,
         user_id: str = "0",
         run_id: str | None = None,
         llm_profile: dict[str, Any] | None = None,
@@ -37,6 +39,7 @@ class Session:
         run_id = validate_run_id(run_id or f"run_{uuid4().hex}")
         return cls(
             conversation_id=conversation_id,
+            thread_id=thread_id or conversation_id,
             run_id=run_id,
             message=message,
             db=db,
@@ -52,10 +55,12 @@ class Session:
         *,
         conversation_id: str,
         db: DbSession,
+        thread_id: str | None = None,
         user_id: str = "0",
     ) -> "Session":
         return cls(
             conversation_id=conversation_id,
+            thread_id=thread_id or conversation_id,
             db=db,
             user_id=user_id,
         )
@@ -68,6 +73,7 @@ class Session:
         run_id: str,
         resume_payload: dict[str, Any],
         db: DbSession,
+        thread_id: str | None = None,
         user_id: str = "0",
         llm_profile: dict[str, Any] | None = None,
         memory_llm_profile: dict[str, Any] | None = None,
@@ -75,6 +81,7 @@ class Session:
         run_id = validate_run_id(run_id)
         return cls(
             conversation_id=conversation_id,
+            thread_id=thread_id or conversation_id,
             run_id=run_id,
             resume_payload=resume_payload,
             db=db,
@@ -86,7 +93,7 @@ class Session:
     @property
     def graph_config(self) -> dict[str, Any]:
         configurable: dict[str, Any] = {
-            "thread_id": self.conversation_id,
+            "thread_id": self.thread_id,
         }
         metadata: dict[str, Any] = {
             "conversation_id": self.conversation_id,
@@ -121,6 +128,8 @@ class Session:
             "memory_usage": None,
             "pending_tool_calls": [],
             "active_tool_call": None,
+            "tool_batch_id": None,
+            "tool_batch_calls": [],
             "iteration_count": 0,
             "reasoning_content": "",
             "last_action_result": None,

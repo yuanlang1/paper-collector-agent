@@ -65,7 +65,11 @@ def extract_interrupt_payload(
         else interrupts
     )
 
-    return getattr(interrupt, "value", interrupt,)
+    value = getattr(interrupt, "value", interrupt)
+    interrupt_id = getattr(interrupt, "id", None)
+    if interrupt_id and isinstance(value, dict):
+        return {"interrupt_id": str(interrupt_id), **value}
+    return value
 
 
 def is_user_visible_message(

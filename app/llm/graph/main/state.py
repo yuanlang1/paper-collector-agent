@@ -11,6 +11,8 @@ class PendingToolCallState(TypedDict):
     args: dict[str, Any]
     kind: Literal["tool", "subagent"] | None
     requires_confirmation: bool
+    batch_id: str
+    batch_calls: list["PendingToolCallState"]
 
 
 class MainAgentState(TypedDict):
@@ -29,6 +31,8 @@ class MainAgentState(TypedDict):
 
     pending_tool_calls: list[PendingToolCallState]
     active_tool_call: PendingToolCallState | None
+    tool_batch_id: str | None
+    tool_batch_calls: list[PendingToolCallState]
     iteration_count: int
     reasoning_content: str
 

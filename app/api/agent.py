@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
@@ -12,7 +13,6 @@ from app.api.schemas.chat_history import (
     DeleteConversationResponse,
 )
 from app.history import chat_log
-from app.history.sqlite import get_history_database
 
 from app.api.schemas.agent import (
     ChatRequest,
@@ -26,6 +26,8 @@ from app.runtime import get_agent_runtime
 from app.runtime.agent_runtime import AgentStreamSubscription
 
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(
     prefix="/api/agent",
     tags=["agent"],
@@ -36,6 +38,7 @@ async def _start_chat(
     payload: ChatRequest,
     db: Session,
 ) -> AgentStreamSubscription:
+    logger.info("Chat input: params=%s", payload.model_dump(exclude={"message"}))
     try:
         subscription = await get_agent_runtime().chat_stream(
             message=payload.message,
@@ -47,6 +50,16 @@ async def _start_chat(
         )
     except chat_log.RunAlreadyExistsError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except chat_log.ConversationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="conversation not found") from exc
+    except (
+        chat_log.ActiveRunConflictError,
+        chat_log.ConversationStateError,
+        chat_log.ConversationThreadError,
+    ) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return subscription
 
 
@@ -65,18 +78,29 @@ async def _start_resume(
     payload: ChatResumeRequest,
     db: Session,
 ) -> AgentStreamSubscription:
-    subscription = await get_agent_runtime().resume_chat_stream(
-        user_id=payload.user_id,
-        conversation_id=payload.conversation_id,
-        resume_payload=payload.model_dump(
-            exclude={"user_id", "conversation_id", "run_id", "action_id"},
-            exclude_none=True,
-        ),
-        requested_run_id=payload.run_id,
-        requested_action_id=payload.action_id,
-        db=db,
-    )
-    return subscription
+    logger.info("Resume input: user_id=%s conversation_id=%s run_id=%s action_id=%s decision=%s", payload.user_id, payload.conversation_id, payload.run_id, payload.action_id, payload.decision)
+    try:
+        return await get_agent_runtime().resume_chat_stream(
+            user_id=payload.user_id,
+            conversation_id=payload.conversation_id,
+            resume_payload=payload.model_dump(
+                exclude={"user_id", "conversation_id", "run_id", "action_id"},
+                exclude_none=True,
+            ),
+            requested_run_id=payload.run_id,
+            requested_action_id=payload.action_id,
+            db=db,
+        )
+    except chat_log.ConversationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="conversation not found") from exc
+    except (
+        chat_log.PendingActionConflictError,
+        chat_log.ConversationStateError,
+        chat_log.ConversationThreadError,
+    ) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 async def _start_resume_stream(
@@ -98,6 +122,7 @@ async def _subscribe_to_run(
     after_sequence: Annotated[int | None, Query(ge=1)] = None,
 ) -> AgentStreamSubscription:
     cursor = after_sequence
+    logger.info("Event subscription input: user_id=%s conversation_id=%s run_id=%s last_event_id=%s after_sequence=%s", user_id, conversation_id, run_id, last_event_id, after_sequence)
     if last_event_id is not None:
         if not last_event_id.isdecimal() or int(last_event_id) < 1:
             raise HTTPException(status_code=400, detail="Invalid Last-Event-ID")
@@ -213,8 +238,9 @@ async def list_conversations(
     user_id: str = Query(default="0", min_length=1),
     limit: int = Query(default=30, ge=1, le=100),
 ) -> ServiceResponse[ConversationListResponse]:
-    history_db = get_history_database()
-    items = await history_db.run(
+    logger.info("List conversations input: user_id=%s limit=%s", user_id, limit)
+    history_store = get_agent_runtime().history_store
+    items = await history_store.run(
         chat_log.list_conversations,
         user_id=user_id,
         limit=limit,
@@ -241,14 +267,18 @@ async def list_conversation_messages(
     limit: int = Query(default=100, ge=1, le=100),
     before_id: int | None = Query(default=None, ge=1),
 ) -> ServiceResponse[ChatMessageListResponse]:
-    history_db = get_history_database()
-    items, next_before_id = await history_db.run(
-        chat_log.list_messages,
-        user_id=user_id,
-        conversation_id=conversation_id,
-        limit=limit,
-        before_id=before_id,
-    )
+    logger.info("List messages input: user_id=%s conversation_id=%s limit=%s before_id=%s", user_id, conversation_id, limit, before_id)
+    history_store = get_agent_runtime().history_store
+    try:
+        items, next_before_id = await history_store.run(
+            chat_log.list_messages,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            limit=limit,
+            before_id=before_id,
+        )
+    except chat_log.ConversationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="conversation not found") from exc
 
     return ServiceResponse[ChatMessageListResponse].build_success_response(
         data=ChatMessageListResponse(
@@ -272,12 +302,16 @@ async def delete_conversation(
     user_id: str = Query(default="0", min_length=1),
     db: Session = Depends(get_db),
 ) -> ServiceResponse[DeleteConversationResponse]:
+    logger.info("Delete conversation input: user_id=%s conversation_id=%s", user_id, conversation_id)
     runtime = get_agent_runtime()
-    result = await runtime.delete_conversation(
-        user_id=user_id,
-        conversation_id=conversation_id,
-        db=db,
-    )
+    try:
+        result = await runtime.delete_conversation(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            db=db,
+        )
+    except chat_log.ConversationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="conversation not found") from exc
 
     return ServiceResponse[DeleteConversationResponse].build_success_response(
         data=DeleteConversationResponse.model_validate(result),

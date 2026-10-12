@@ -116,9 +116,6 @@ class PlanSearchNode:
     def _derive_year_tag(understanding: PromptUnderstandingArgs) -> int:
         if understanding.yearFrom is None and understanding.yearTo is None:
             return 0
-        if understanding.yearFrom is None or understanding.yearTo is None:
-            raise ValueError("yearFrom 和 yearTo 必须同时提供或同时为空。")
-
         current_year = date.today().year
         if understanding.yearTo != current_year:
             return 0

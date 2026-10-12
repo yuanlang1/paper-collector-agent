@@ -16,12 +16,16 @@ from pypdf import PdfReader
 
 
 PDF_FRONT_PAGE_ENRICHMENT_SYSTEM_PROMPT = """
-你是学术论文信息提取员，只能依据输入的 PDF 前几页文本生成结果。
+你是学术论文摘要整理员，依据 source_abstract、abstract_source 和 pdf_front_pages 输出原文摘要与整理后摘要。
 
 规则：
-- paper_abstract 提取页面中的原始 Abstract 段落，保留原文语言和含义；未找到时为 null，不得改写或编造。
+- source_abstract 非空且 abstract_source 不是 search_snippet 时，paper_abstract 原样保留来源摘要。
+- source_abstract 为空或仅为 search_snippet（检索片段）时，优先从 PDF 提取完整 Abstract，保留原文语言。
+- 若来源摘要为空且 PDF 没有独立 Abstract 段落，必须依据可用正文用论文原文语言生成 paper_abstract，并将 paper_abstract_generated 设为 true；不得虚构事实或冒充作者原文。
+- 若只有检索片段且无法提取完整摘要，保留片段，不得把片段扩写成虚构的完整原文。
+- ai_abstract 是整理后摘要，使用中文概括研究问题、核心方法、主要结果和贡献；原文摘要缺失时，在同一次调用中同时生成 paper_abstract 和 ai_abstract。
 - keywords 优先提取 Keywords、Index Terms 或“关键词”段落；未找到时可依据页面文本归纳关键词。
-- ai_abstract 使用中文概括研究问题、核心方法、实验设置、主要结果和贡献；不得补充页面文本中不存在的事实。
+- PDF 文本为空时，仅依据来源摘要整理。没有证据的实验设置、数值和结论不要补写，不能仅凭标题生成摘要。
 
 输出规范：
 - 只输出合法 JSON 对象，不要输出 Markdown、代码块或额外说明。
@@ -29,7 +33,8 @@ PDF_FRONT_PAGE_ENRICHMENT_SYSTEM_PROMPT = """
 
 输出样例：
 {
-  "paper_abstract": null,
+  "paper_abstract": "This paper studies retrieval augmented generation.",
+  "paper_abstract_generated": false,
   "keywords": ["retrieval augmented generation", "large language models"],
   "ai_abstract": "论文研究检索增强生成方法，并在给定实验设置下报告其效果。"
 }
@@ -47,6 +52,9 @@ class PdfFrontPageEnrichmentResult(BaseModel):
     paper_abstract: str | None = Field(
         default=None,
         max_length=MAX_ABSTRACT_CHARS,
+    )
+    paper_abstract_generated: bool = Field(
+        default=False, description="原文摘要是否由正文归纳生成；直接提取或保留来源摘要时为 false。"
     )
     keywords: list[str] = Field(default_factory=list, max_length=MAX_KEYWORDS)
     ai_abstract: str = Field(min_length=1, max_length=3_000)
@@ -124,13 +132,19 @@ class AbstractEnrichNode:
     async def _enrich_from_pdf_front_pages(
         self,
         initial_pdf_text: str,
+        source_abstract: str | None,
+        abstract_source: str | None,
     ) -> PdfFrontPageEnrichmentResult:
         result = await self.model.ainvoke(
             [
                 SystemMessage(content=PDF_FRONT_PAGE_ENRICHMENT_SYSTEM_PROMPT),
                 HumanMessage(
                     content=json.dumps(
-                        {"pdf_front_pages": initial_pdf_text},
+                        {
+                            "pdf_front_pages": initial_pdf_text,
+                            "source_abstract": source_abstract,
+                            "abstract_source": abstract_source,
+                        },
                         ensure_ascii=False,
                     )
                 ),
@@ -144,7 +158,7 @@ class AbstractEnrichNode:
 
     async def _enrich_paper(
         self,
-        paper: Any,
+        paper: dict[str, Any],
         semaphore: asyncio.Semaphore,
     ) -> tuple[dict[str, int], str | None]:
         counts = {
@@ -157,13 +171,8 @@ class AbstractEnrichNode:
             "extracted_keyword": 0,
             "missing_keyword": 0,
         }
-        if not isinstance(paper, dict):
-            return counts, None
-
-        paper_info = paper.get("paper_info")
+        paper_info = paper["paper_info"]
         pdf_download = paper.get("pdf_download") or {}
-        if not isinstance(paper_info, dict):
-            return counts, None
 
         source_abstract = _text(paper_info.get("paper_abstract"))
         source_keywords = _normalize_keywords(paper_info.get("keywords"))
@@ -172,49 +181,70 @@ class AbstractEnrichNode:
         content_error: str | None = None
         extracted_abstract: str | None = None
         extracted_keywords: list[str] = []
+        generated = False
+        pdf_error = None
+        initial_pdf_text = ""
 
         try:
             async with semaphore:
-                if not local_pdf_path:
-                    raise ValueError("缺少本地 PDF 路径。")
-
-                initial_pdf_text, page_count = await asyncio.to_thread(
-                    _extract_initial_pdf_text,
-                    Path(local_pdf_path),
-                )
-                counts["front_pages_read"] += 1
+                try:
+                    if not local_pdf_path:
+                        raise ValueError("缺少本地 PDF 路径。")
+                    initial_pdf_text, page_count = await asyncio.to_thread(
+                        _extract_initial_pdf_text, Path(local_pdf_path),
+                    )
+                    counts["front_pages_read"] += 1
+                except Exception as exc:
+                    pdf_error = str(exc)
+                    if not source_abstract:
+                        raise
                 enrichment = await self._enrich_from_pdf_front_pages(
-                    initial_pdf_text
+                    initial_pdf_text, source_abstract, paper_info.get("abstract_source"),
                 )
 
             extracted_abstract = _text(enrichment.paper_abstract)
+            generated = enrichment.paper_abstract_generated
             extracted_keywords = _normalize_keywords(enrichment.keywords)
             ai_abstract = _text(enrichment.ai_abstract)
             if ai_abstract is None:
                 raise ValueError("AI 摘要为空。")
+            if not source_abstract and not extracted_abstract:
+                raise ValueError("缺少来源摘要时，必须同时生成原文摘要。")
             paper_info["ai_abstract"] = ai_abstract
             counts["ai_abstract"] += 1
         except Exception as exc:
             content_error = str(exc)
             paper_info["ai_abstract"] = None
 
-        if extracted_abstract:
+        if source_abstract and (
+            paper_info.get("abstract_source") != "search_snippet"
+            or not initial_pdf_text
+            or not extracted_abstract
+            or extracted_abstract == source_abstract
+            or generated
+        ):
+            paper_info["paper_abstract"] = source_abstract
+            abstract_source = paper_info.get("abstract_source") or "source_metadata"
+            extraction_status = "success"
+            counts["source_abstract"] += 1
+        elif extracted_abstract:
             paper_info["paper_abstract"] = extracted_abstract
-            abstract_source = "pdf_front_pages"
+            abstract_source = "generated_from_pdf" if generated else "pdf_front_pages"
             extraction_status = "success"
             counts["extracted_abstract"] += 1
-        elif source_abstract:
-            paper_info["paper_abstract"] = source_abstract
-            abstract_source = "source_metadata"
-            extraction_status = "fallback"
-            counts["source_abstract"] += 1
         else:
             paper_info["paper_abstract"] = None
             abstract_source = "missing"
             extraction_status = "failed" if content_error else "not_found"
             counts["missing_abstract"] += 1
+        paper_info["abstract_source"] = abstract_source
 
-        if extracted_keywords:
+        if source_keywords and not initial_pdf_text:
+            paper_info["keywords"] = _keywords_text(source_keywords)
+            keyword_source = "source_metadata"
+            keyword_extraction_status = "fallback"
+            counts["source_keyword"] += 1
+        elif extracted_keywords:
             paper_info["keywords"] = _keywords_text(extracted_keywords)
             keyword_source = "pdf_front_pages"
             keyword_extraction_status = "success"
@@ -235,9 +265,11 @@ class AbstractEnrichNode:
             "extraction_status": extraction_status,
             "pdf_pages_read": page_count,
             "ai_summary_source": (
-                "pdf_front_pages" if content_error is None else "failed"
+                ("pdf_front_pages" if initial_pdf_text else "source_metadata")
+                if content_error is None else "failed"
             ),
             "error": content_error,
+            "pdf_error": pdf_error,
         }
         paper["keyword_resolution"] = {
             "source": keyword_source,
@@ -246,8 +278,8 @@ class AbstractEnrichNode:
             "error": content_error,
         }
         warning = (
-            f"{paper_info.get('title')} 的 PDF 内容补全失败：{content_error}"
-            if content_error
+            f"{paper_info.get('title')} 的摘要补全警告：{content_error or pdf_error}"
+            if content_error or pdf_error
             else None
         )
         return counts, warning
@@ -272,37 +304,8 @@ class AbstractEnrichNode:
             child_run_id = state["child_run_id"]
             artifact_uri = state.get("pdf_manifest_artifact_ref")
 
-            if (
-                not isinstance(artifact_uri, str)
-                or not artifact_uri.startswith("artifact://")
-            ):
-                raise ValueError("缺少 PDF manifest artifact。")
-
-            base_dir = self.artifact_store.base_dir.resolve()
-            manifest_path = (
-                base_dir
-                / artifact_uri.removeprefix("artifact://")
-            ).resolve()
-
-            try:
-                manifest_path.relative_to(base_dir)
-            except ValueError as exc:
-                raise ValueError(
-                    "abstract manifest 超出 artifact 存储目录。"
-                ) from exc
-
-            def read_manifest() -> dict[str, Any]:
-                with manifest_path.open(
-                    "r",
-                    encoding = "utf-8",
-                ) as file:
-                    return json.load(file)
-
-            manifest = await asyncio.to_thread(read_manifest)
+            manifest = await self.artifact_store.read_json_uri(artifact_uri)
             papers = manifest.get("papers", [])
-
-            if not isinstance(papers, list):
-                raise ValueError("manifest papers 格式无效。")
 
             counts = {
                 "source_abstract": 0,
@@ -327,15 +330,6 @@ class AbstractEnrichNode:
                 if warning:
                     warnings.append(warning)
 
-            source_abstract_count = counts["source_abstract"]
-            extracted_abstract_count = counts["extracted_abstract"]
-            missing_abstract_count = counts["missing_abstract"]
-            front_pages_read_count = counts["front_pages_read"]
-            ai_abstract_count = counts["ai_abstract"]
-            source_keyword_count = counts["source_keyword"]
-            extracted_keyword_count = counts["extracted_keyword"]
-            missing_keyword_count = counts["missing_keyword"]
-
             manifest["papers"] = papers
             manifest["step_key"] = "abstract_enrichment"
 
@@ -348,16 +342,7 @@ class AbstractEnrichNode:
                 count = len(papers),
                 metadata = {
                     "input_manifest": artifact_uri,
-                    "source_abstract_count": source_abstract_count,
-                    "extracted_abstract_count": (
-                        extracted_abstract_count
-                    ),
-                    "missing_abstract_count": missing_abstract_count,
-                    "front_pages_read_count": front_pages_read_count,
-                    "ai_abstract_count": ai_abstract_count,
-                    "source_keyword_count": source_keyword_count,
-                    "extracted_keyword_count": extracted_keyword_count,
-                    "missing_keyword_count": missing_keyword_count,
+                    **{f"{key}_count": value for key, value in counts.items()},
                 },
             )
 
@@ -374,16 +359,16 @@ class AbstractEnrichNode:
             "abstract_manifest_artifact_ref": artifact.artifact_uri,
             "progress": {
                 **state.get("progress", {}),
-                "abstract_from_source": source_abstract_count,
+                "abstract_from_source": counts["source_abstract"],
                 "abstract_extracted_from_pdf": (
-                    extracted_abstract_count
+                    counts["extracted_abstract"]
                 ),
-                "abstract_missing": missing_abstract_count,
-                "pdf_front_pages_read": front_pages_read_count,
-                "ai_abstract_generated": ai_abstract_count,
-                "keywords_from_source": source_keyword_count,
-                "keywords_extracted_from_pdf": extracted_keyword_count,
-                "keywords_missing": missing_keyword_count,
+                "abstract_missing": counts["missing_abstract"],
+                "pdf_front_pages_read": counts["front_pages_read"],
+                "ai_abstract_generated": counts["ai_abstract"],
+                "keywords_from_source": counts["source_keyword"],
+                "keywords_extracted_from_pdf": counts["extracted_keyword"],
+                "keywords_missing": counts["missing_keyword"],
             },
             "warnings": [
                 *state.get("warnings", []),

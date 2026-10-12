@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -96,34 +95,11 @@ class PdfDownloadNode:
 
     async def _download_paper(
         self,
-        paper: Any,
+        paper: dict[str, Any],
         child_run_id: str,
         semaphore: asyncio.Semaphore,
     ) -> dict[str, Any]:
-        if not isinstance(paper, dict):
-            return {
-                "paper": None,
-                "removed": {"title": "", "reason": "论文记录格式无效。"},
-                "warning": None,
-                "saved_path": None,
-            }
-
-        paper_info = paper.get("paper_info")
-        if not isinstance(paper_info, dict) or not paper_info.get("pdf_url"):
-            return {
-                "paper": None,
-                "removed": {
-                    "title": str(
-                        paper_info.get("title")
-                        if isinstance(paper_info, dict)
-                        else ""
-                    ),
-                    "reason": "缺少 PDF 下载地址。",
-                },
-                "warning": None,
-                "saved_path": None,
-            }
-
+        paper_info = paper["paper_info"]
         title = str(paper_info.get("title") or "")
         try:
             file_name = self._pdf_file_name(paper_info)
@@ -177,34 +153,8 @@ class PdfDownloadNode:
             child_run_id = state["child_run_id"]
             artifact_uri = state.get("venue_manifest_artifact_ref")
 
-            if (
-                not isinstance(artifact_uri, str)
-                or not artifact_uri.startswith("artifact://")
-            ):
-                raise ValueError("缺少 venue manifest artifact。")
-
-            artifact_base_dir = self.artifact_store.base_dir.resolve()
-            manifest_path = (
-                artifact_base_dir
-                / artifact_uri.removeprefix("artifact://")
-            ).resolve()
-
-            try:
-                manifest_path.relative_to(artifact_base_dir)
-            except ValueError as exc:
-                raise ValueError(
-                    "PDF manifest 超出 artifact 存储目录。"
-                ) from exc
-
-            def read_manifest() -> dict[str, Any]:
-                with manifest_path.open("r", encoding="utf-8") as file:
-                    return json.load(file)
-
-            manifest = await asyncio.to_thread(read_manifest)
+            manifest = await self.artifact_store.read_json_uri(artifact_uri)
             papers = manifest.get("papers", [])
-
-            if not isinstance(papers, list):
-                raise ValueError("manifest papers 格式无效。")
 
             downloaded_papers: list[dict[str, Any]] = []
             removed_papers: list[dict[str, str]] = []
@@ -222,13 +172,13 @@ class PdfDownloadNode:
                 removed = result["removed"]
                 warning = result["warning"]
                 saved_path = result["saved_path"]
-                if isinstance(paper, dict):
+                if paper is not None:
                     downloaded_papers.append(paper)
-                if isinstance(removed, dict):
+                if removed is not None:
                     removed_papers.append(removed)
-                if isinstance(warning, str):
+                if warning is not None:
                     warnings.append(warning)
-                if isinstance(saved_path, str):
+                if saved_path is not None:
                     downloaded_pdf_paths.append(saved_path)
 
             manifest["papers"] = downloaded_papers
@@ -249,32 +199,14 @@ class PdfDownloadNode:
                 },
             )
 
-            if not downloaded_papers:
-                existing_artifact_uri = state.get(
-                    "existing_papers_manifest_artifact_ref"
+            has_existing = False
+            if not downloaded_papers and state.get("existing_papers_manifest_artifact_ref"):
+                existing_manifest = await self.artifact_store.read_json_uri(
+                    state["existing_papers_manifest_artifact_ref"]
                 )
-                if existing_artifact_uri is not None:
-                    existing_manifest = await self.artifact_store.read_json_uri(
-                        existing_artifact_uri
-                    )
-                    if existing_manifest.get("papers"):
-                        return {
-                            "stage": "enriching_abstract",
-                            "status": "running",
-                            "pdf_manifest_artifact_ref": artifact.artifact_uri,
-                            "downloaded_pdf_paths": downloaded_pdf_paths,
-                            "progress": {
-                                **state.get("progress", {}),
-                                "pdf_downloaded": 0,
-                                "pdf_download_failed": len(removed_papers),
-                            },
-                            "warnings": [
-                                *state.get("warnings", []),
-                                *warnings,
-                                "无新增 PDF 可用，继续处理已有论文。",
-                            ],
-                            "error": None,
-                        }
+                has_existing = bool(existing_manifest.get("papers"))
+                if has_existing:
+                    warnings.append("无新增 PDF 可用，继续处理已有论文。")
 
         except Exception as exc:
             return {
@@ -284,28 +216,12 @@ class PdfDownloadNode:
                 "error": f"PDF 下载失败：{exc}",
             }
 
-        if not downloaded_papers:
-            warning = (
-                "没有可继续处理的论文。"
-                if not papers
-                else "所有论文的 PDF 下载均失败。"
-            )
-            return {
-                "stage": "failed",
-                "status": "failed",
-                "pdf_manifest_artifact_ref": artifact.artifact_uri,
-                "downloaded_pdf_paths": downloaded_pdf_paths,
-                "warnings": [
-                    *state.get("warnings", []),
-                    *warnings,
-                    warning,
-                ],
-                "error": "没有可继续处理的论文。",
-            }
-
+        can_continue = bool(downloaded_papers) or has_existing
+        if not can_continue:
+            warnings.append("所有论文的 PDF 下载均失败。" if papers else "没有可继续处理的论文。")
         return {
-            "stage": "enriching_abstract",
-            "status": "running",
+            "stage": "enriching_abstract" if can_continue else "failed",
+            "status": "running" if can_continue else "failed",
             "pdf_manifest_artifact_ref": artifact.artifact_uri,
             "downloaded_pdf_paths": downloaded_pdf_paths,
             "progress": {
@@ -313,9 +229,6 @@ class PdfDownloadNode:
                 "pdf_downloaded": len(downloaded_papers),
                 "pdf_download_failed": len(removed_papers),
             },
-            "warnings": [
-                *state.get("warnings", []),
-                *warnings,
-            ],
-            "error": None,
+            "warnings": [*state.get("warnings", []), *warnings],
+            "error": None if can_continue else "没有可继续处理的论文。",
         }

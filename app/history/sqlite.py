@@ -16,11 +16,10 @@ class HistoryDatabase:
         self.path = Path(db_path)
 
     def initialize(self) -> None:
-        from app.history import chat_log, stream_events
+        from app.history import stream_events
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.transaction() as connection:
-            chat_log.create_schema(connection)
             stream_events.create_schema(connection)
             connection.execute("DROP TABLE IF EXISTS conversation_deletion_jobs")
 

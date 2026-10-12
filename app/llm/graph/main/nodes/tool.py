@@ -41,6 +41,8 @@ def build_action_result_update(
         "action_id": action_id,
         "action_type": str(call.get("kind") or "tool"),
         "name": action_name,
+        "batch_id": call.get("batch_id"),
+        "batch_calls": call.get("batch_calls") or [dict(call)],
         **result,
     }
     return {

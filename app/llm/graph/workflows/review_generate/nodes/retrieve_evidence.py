@@ -133,11 +133,6 @@ class RetrieveEvidenceNode:
                             paper_ids=claim["candidate_paper_ids"],
                         ))
                 snippets = select_evidence_snippets(query_results)
-                if any(
-                    item["paper_id"] not in state["paper_ids_snapshot"]
-                    for item in snippets
-                ):
-                    raise ValueError("retrieval returned a paper outside task")
                 return {
                     "claim_id": claim["claim_id"],
                     "claim_hash": claim["claim_hash"],

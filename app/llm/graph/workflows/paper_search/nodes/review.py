@@ -181,28 +181,20 @@ class ReviewNode:
     ) -> dict[str, Any]:
         cursors = state.get("source_search_cursors") or {}
         plans_by_source = {
-            plan.get("source"): plan
+            plan["source"]: plan
             for plan in state.get("source_query_plans", [])
-            if isinstance(plan, dict)
         }
-        action = next(
-            (
-                item
-                for item in sorted(
-                    decision.model_dump(mode="json").get("source_actions", []),
-                    key=lambda value: value.get("priority", 10),
-                )
-                if item.get("source") == "Google Scholar"
-            ),
-            None,
+        action = min(
+            decision.source_actions,
+            key=lambda item: item.priority,
+            default=None,
         )
         cursor = cursors.get("Google Scholar", {})
         plan_template = plans_by_source.get("Google Scholar")
         if (
-            not isinstance(action, dict)
-            or action.get("strategy") != "next_page"
+            action is None
             or not cursor.get("has_next")
-            or not isinstance(plan_template, dict)
+            or plan_template is None
         ):
             return {
                 **update,
@@ -220,7 +212,7 @@ class ReviewNode:
         }
         plan["arguments"]["start"] = cursor["next_offset"]
         requested_pages = min(
-            int(action.get("requested_pages", 1)),
+            action.requested_pages,
             settings.PAPER_SEARCH_MAX_EXTRA_PAGES_PER_SOURCE,
         )
         plan["arguments"]["total_limit"] = (

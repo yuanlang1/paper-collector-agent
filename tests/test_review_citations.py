@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.nodes.assemble_review import (
     AssembleReviewNode,
+    ReviewSynthesis,
 )
 from app.llm.graph.workflows.review_generate.nodes.finalizing_handoff import (
     FinalizingHandoffNode,
@@ -26,7 +27,7 @@ class _Model:
 
     async def ainvoke(self, messages):
         self.messages.append(messages)
-        return self.responses.pop(0)
+        return ReviewSynthesis.model_validate(self.responses.pop(0))
 
 
 FRAMEWORK = {

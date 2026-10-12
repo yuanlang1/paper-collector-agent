@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.history import chat_log, stream_events
-from app.history.sqlite import HistoryDatabase
-from app.history.stream_events import AgentStreamEvent
+from sqlalchemy.orm import Session
+
+from app.history import chat_log
 
 
-def persist_stream_event(
-    database: HistoryDatabase,
+def persist_message_event(
+    db: Session,
     *,
     user_id: str,
     conversation_id: str,
@@ -16,46 +16,40 @@ def persist_stream_event(
     event_name: str,
     event_data: dict[str, Any],
     content: str | None = None,
-) -> AgentStreamEvent:
-    with database.transaction() as connection:
-        if content:
-            chat_log.append_message_in_transaction(
-                connection,
-                user_id=user_id,
-                conversation_id=conversation_id,
-                run_id=run_id,
-                role="assistant",
-                content=[{"type": "text", "text": content}],
-                status="completed",
-            )
-        if event_name == "action_started":
-            chat_log.append_action_started_in_transaction(
-                connection,
-                user_id=user_id,
-                conversation_id=conversation_id,
-                run_id=run_id,
-                action=event_data,
-            )
-        elif event_name == "action_result":
-            chat_log.append_action_result_in_transaction(
-                connection,
-                user_id=user_id,
-                conversation_id=conversation_id,
-                run_id=run_id,
-                result=event_data,
-            )
-        return stream_events.insert(
-            connection,
+) -> None:
+    if content:
+        chat_log.append_text_message(
+            db,
             user_id=user_id,
             conversation_id=conversation_id,
             run_id=run_id,
-            event_name=event_name,
-            data=event_data,
+            content=content,
+        )
+    if event_name == "action_started":
+        batch_id, batch_calls = _batch(event_data, run_id=run_id)
+        chat_log.append_tool_batch(
+            db,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            run_id=run_id,
+            batch_id=batch_id,
+            batch_calls=batch_calls,
+        )
+    elif event_name == "action_result":
+        batch_id, batch_calls = _batch(event_data, run_id=run_id)
+        chat_log.append_tool_result(
+            db,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            run_id=run_id,
+            batch_id=batch_id,
+            batch_calls=batch_calls,
+            result=event_data,
         )
 
 
-def complete_assistant_message_with_event(
-    database: HistoryDatabase,
+def complete_assistant_message(
+    db: Session,
     *,
     user_id: str,
     conversation_id: str,
@@ -63,45 +57,35 @@ def complete_assistant_message_with_event(
     response: dict[str, Any],
     latency_ms: int,
     extra_meta: dict[str, Any] | None,
-    event_name: str,
-    event_data: dict[str, Any],
     content: str | None = None,
-) -> AgentStreamEvent:
-    with database.transaction() as connection:
-        chat_log.append_terminal_assistant_message_in_transaction(
-            connection,
-            user_id=user_id,
-            conversation_id=conversation_id,
-            run_id=run_id,
-            response=response,
-            latency_ms=latency_ms,
-            extra_meta=extra_meta,
-            content=content,
-        )
-        return stream_events.insert(
-            connection,
-            user_id=user_id,
-            conversation_id=conversation_id,
-            run_id=run_id,
-            event_name=event_name,
-            data=event_data,
-        )
+) -> int | None:
+    return chat_log.complete_run(
+        db,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        run_id=run_id,
+        response=response,
+        latency_ms=latency_ms,
+        extra_meta=extra_meta,
+        content=content,
+    )
 
 
-def delete_conversation(
-    database: HistoryDatabase,
-    *,
-    user_id: str,
-    conversation_id: str,
-) -> int:
-    with database.transaction() as connection:
-        stream_events.delete_conversation(
-            connection,
-            user_id=user_id,
-            conversation_id=conversation_id,
-        )
-        return chat_log.delete_conversation(
-            connection,
-            user_id=user_id,
-            conversation_id=conversation_id,
-        )
+def _batch(event_data: dict[str, Any], *, run_id: str) -> tuple[str, list[dict[str, Any]]]:
+    action_id = str(event_data.get("action_id") or "")
+    calls = event_data.get("batch_calls")
+    if isinstance(calls, list) and all(isinstance(item, dict) for item in calls):
+        normalized = [dict(item) for item in calls]
+    else:
+        normalized = [{
+            "id": action_id,
+            "name": str(event_data.get("name") or ""),
+            "args": event_data.get("input") or {},
+            "kind": event_data.get("action_type") or "tool",
+            "requires_confirmation": bool(event_data.get("requires_confirmation")),
+        }]
+    if not action_id:
+        raise ValueError("action event must include action_id")
+    if not any(str(item.get("id") or "") == action_id for item in normalized):
+        raise ValueError("action event is absent from its tool batch")
+    return str(event_data.get("batch_id") or f"{run_id}:legacy:{action_id}"), normalized

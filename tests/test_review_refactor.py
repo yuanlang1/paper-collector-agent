@@ -17,7 +17,6 @@ from app.llm.graph.workflows.review_generate.contracts import (
     claim_hash,
     content_hash,
     save,
-    validate_claims,
 )
 from app.llm.graph.workflows.review_generate.nodes.assemble_review import (
     ASSEMBLE_REVIEW_PROMPT,
@@ -26,7 +25,6 @@ from app.llm.graph.workflows.review_generate.nodes.assemble_review import (
 )
 from app.llm.graph.workflows.review_generate.nodes.extract_studies import (
     ARTICLE_PROFILE_PROMPT,
-    ProfileField,
     SubmittedArticleProfile,
 )
 from app.llm.tools.search_tools.search_paper_index import (
@@ -91,6 +89,21 @@ from app.llm.subagents.task_review import (
 )
 
 
+def structured_response(messages, response):
+    for prompt, schema in (
+        (FRAMEWORK_PROMPT, ReviewFramework),
+        (CLAIM_GENERATION_PROMPT, ClaimsPlan),
+        (CLAIM_REVISION_PROMPT, ClaimRevisionPlan),
+        (CLAIM_VERIFICATION_PROMPT, Verdict),
+        (SECTION_DRAFT_PROMPT, SectionDraft),
+        (WRITING_REVIEW_PROMPT, WritingReviewResult),
+        (ASSEMBLE_REVIEW_PROMPT, ReviewSynthesis),
+    ):
+        if messages[0].content.startswith(prompt):
+            return schema.model_validate(copy.deepcopy(response))
+    raise AssertionError("unexpected structured model prompt")
+
+
 class Model:
     def __init__(self, *responses):
         self.responses = list(responses)
@@ -101,7 +114,7 @@ class Model:
         response = self.responses.pop(0)
         if isinstance(response, Exception):
             raise response
-        return copy.deepcopy(response)
+        return structured_response(messages, response)
 
 
 class CountingArtifactStore(LocalArtifactStore):
@@ -141,7 +154,7 @@ class ConcurrentModel:
             response = self.responses[claim_id].pop(0)
             if isinstance(response, Exception):
                 raise response
-            return copy.deepcopy(response)
+            return structured_response(messages, response)
         except asyncio.CancelledError:
             self.cancelled.append(claim_id)
             raise
@@ -571,16 +584,6 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(update["stage"], "generating_claims")
         self.assertEqual(cached.inputs, [])
 
-    async def test_claim_invariants_use_sections(self):
-        await self.seed_framework()
-        for claims in (
-            [CLAIM, CLAIM],
-            [dict(CLAIM, candidate_paper_ids=["99"])],
-            [dict(CLAIM, section_id="missing")],
-        ):
-            with self.assertRaises(ValueError):
-                validate_claims(claims, FRAMEWORK, ["1", "2"])
-
     async def test_claim_revision_keeps_the_claim_id_and_reenters_verification(self):
         await self.seed_claim()
         await self.retrieve()
@@ -661,6 +664,28 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
         payload = await self.store.read_json_uri(update["claims_artifact_ref"])
         self.assertEqual([claim["claim_id"] for claim in payload["claims"]], ["claim_001", "claim_002"])
         self.assertEqual(payload["claims"][1]["section_id"], "results")
+
+    async def test_add_claim_continues_after_existing_ids_with_gaps(self):
+        await self.seed_claim()
+        self.state["claims_artifact_ref"] = await save(
+            self.store, self.state, "claims",
+            {"claims": [dict(CLAIM, claim_id="claim_003")], "unanswered": []},
+        )
+        self.state["revision_items"] = [revision("add_claim", "results")]
+        update = await GenerateClaimsNode(
+            artifact_store=self.store, model=Model({"claims": [CANDIDATE]}),
+        )(self.state)
+        payload = await self.store.read_json_uri(update["claims_artifact_ref"])
+        self.assertEqual([claim["claim_id"] for claim in payload["claims"]], ["claim_003", "claim_004"])
+
+    async def test_claim_generation_rejects_model_papers_outside_task(self):
+        await self.seed_framework()
+        update = await GenerateClaimsNode(
+            artifact_store=self.store,
+            model=Model({"claims": [dict(CANDIDATE, candidate_paper_ids=["99"])]}),
+        )(self.state)
+        self.assertEqual(update["error_code"], "CLAIMS_FAILED")
+        self.assertIn("papers outside task", update["error"])
 
     async def test_supported_comparison_with_one_source_revises_the_claim(self):
         await self.seed_claim()
@@ -2017,7 +2042,6 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
 class ReviewPromptSchemaTests(unittest.TestCase):
     schemas = (
         SearchPaperIndexArgs,
-        ProfileField,
         SubmittedArticleProfile,
         ExcludedPaper,
         FrameworkSection,

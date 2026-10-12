@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Mapping
-from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -149,6 +148,160 @@ class RecommendationNode:
             await asyncio.gather(*tasks, return_exceptions=True)
             raise
 
+    @staticmethod
+    def _prepare_papers(
+        new_papers: list[dict[str, Any]], existing_papers: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+        skipped_invalid_existing: list[dict[str, str]] = []
+        recommend_input: list[dict[str, Any]] = []
+
+        for paper in new_papers:
+            paper["paper_id"] = None
+            recommend_input.append(paper)
+
+        for paper in existing_papers:
+            if not isinstance(paper, dict):
+                skipped_invalid_existing.append(
+                    {
+                        "title": "",
+                        "reason": "已有论文记录不是对象。",
+                    }
+                )
+                continue
+
+            paper_info = paper.get("paper_info")
+            paper_id = paper.get("paper_id")
+
+            if (
+                not isinstance(paper_info, dict)
+                or not isinstance(paper_id, int)
+                or isinstance(paper_id, bool)
+                or paper_id <= 0
+            ):
+                skipped_invalid_existing.append(
+                    {
+                        "title": (
+                            str(paper_info.get("title") or "")
+                            if isinstance(paper_info, dict)
+                            else ""
+                        ),
+                        "reason": (
+                            "已有论文缺少合法 paper_id 或 paper_info。"
+                        ),
+                    }
+                )
+                continue
+
+            recommend_input.append(paper)
+        return recommend_input, skipped_invalid_existing
+
+    async def _score_papers(
+        self, recommend_input: list[dict[str, Any]],
+        query_understanding: PromptUnderstandingArgs, task_id: int | None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, str]], list[str]]:
+        kept_papers = []
+        removed_low_recommendation = []
+        removed_recommendation_failed = []
+        warnings = []
+        semaphore = asyncio.Semaphore(RECOMMENDATION_CONCURRENCY)
+        tasks = [
+            asyncio.create_task(
+                self._recommend_paper(
+                    query_understanding=query_understanding,
+                    paper=paper,
+                    semaphore=semaphore,
+                )
+            )
+            for paper in recommend_input
+        ]
+        results = await self._gather_or_cancel(tasks)
+
+        for paper, result in zip(recommend_input, results, strict=True):
+            paper_info = paper["paper_info"]
+
+            if isinstance(result, Exception):
+                title = str(paper_info.get("title") or "")
+
+                removed_recommendation_failed.append(
+                    {
+                        "title": title,
+                        "reason": f"推荐评分失败：{result}",
+                    }
+                )
+                warnings.append(
+                    f"{title} 的推荐评分失败，已从当前任务结果移除。"
+                )
+                continue
+
+            recommendation = result
+
+            relation_draft = {
+                "search_task_id": task_id,
+                "paper_id": paper.get("paper_id"),
+                "recommendation_stars": (
+                    recommendation.recommendation_stars
+                ),
+                "recommendation_reason": (
+                    recommendation.recommendation_reason
+                ),
+            }
+
+            if recommendation.recommendation_stars < 3:
+                removed_low_recommendation.append(
+                    {
+                        "title": paper_info.get("title"),
+                        **relation_draft,
+                    }
+                )
+                continue
+
+            paper["task_paper_relation_draft"] = relation_draft
+            kept_papers.append(paper)
+        return kept_papers, removed_low_recommendation, removed_recommendation_failed, warnings
+
+    async def _load_papers(
+        self, abstract_artifact_uri: str | None, existing_artifact_uri: str | None,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+        artifact_inputs = [
+            ("abstract", abstract_artifact_uri),
+            ("existing", existing_artifact_uri),
+        ]
+        valid_artifact_inputs = [
+            (name, uri)
+            for name, uri in artifact_inputs
+            if uri is not None
+        ]
+
+        if not valid_artifact_inputs:
+            raise ValueError(
+                "缺少 abstract 或 existing papers manifest artifact。"
+            )
+
+        manifests = await asyncio.gather(
+            *(self.artifact_store.read_json_uri(uri) for _, uri in valid_artifact_inputs)
+        )
+        manifests_by_name = dict(
+            zip(
+                [name for name, _ in valid_artifact_inputs],
+                manifests,
+                strict=True,
+            )
+        )
+        abstract_manifest = manifests_by_name.get("abstract")
+        existing_manifest = manifests_by_name.get("existing")
+        new_papers = (
+            abstract_manifest.get("papers", [])
+            if abstract_manifest
+            else []
+        )
+        existing_papers = (
+            existing_manifest.get("papers", [])
+            if existing_manifest
+            else []
+        )
+        manifest = dict(abstract_manifest or existing_manifest or {})
+        return manifest, new_papers, existing_papers
+
     async def __call__(
         self,
         state: Mapping[str, Any],
@@ -162,206 +315,20 @@ class RecommendationNode:
                 "existing_papers_manifest_artifact_ref"
             )
 
-            artifact_inputs = [
-                ("abstract", abstract_artifact_uri),
-                ("existing", existing_artifact_uri),
-            ]
-            valid_artifact_inputs = [
-                (name, uri)
-                for name, uri in artifact_inputs
-                if uri is not None
-            ]
-
-            if not valid_artifact_inputs:
-                raise ValueError(
-                    "缺少 abstract 或 existing papers manifest artifact。"
-                )
-
-            for name, uri in valid_artifact_inputs:
-                if (
-                    not isinstance(uri, str)
-                    or not uri.startswith("artifact://")
-                ):
-                    raise ValueError(
-                        f"{name} manifest artifact 格式无效。"
-                    )
-
-            query_understanding = PromptUnderstandingArgs.model_validate(
-                state.get("query_understanding")
+            query_understanding = PromptUnderstandingArgs.model_validate(state.get("query_understanding"))
+            manifest, new_papers, existing_papers = await self._load_papers(
+                abstract_artifact_uri, existing_artifact_uri,
             )
 
-            base_dir = self.artifact_store.base_dir.resolve()
-
-            def read_manifest(
-                name: str,
-                artifact_uri: str,
-            ) -> dict[str, Any]:
-                manifest_path = (
-                    base_dir
-                    / artifact_uri.removeprefix("artifact://")
-                ).resolve()
-
-                try:
-                    manifest_path.relative_to(base_dir)
-                except ValueError as exc:
-                    raise ValueError(
-                        f"{name} manifest 超出 artifact 存储目录。"
-                    ) from exc
-
-                with manifest_path.open(
-                    "r",
-                    encoding="utf-8",
-                ) as file:
-                    manifest = json.load(file)
-
-                if not isinstance(manifest, dict):
-                    raise ValueError(
-                        f"{name} manifest 内容格式无效。"
-                    )
-
-                if not isinstance(manifest.get("papers", []), list):
-                    raise ValueError(
-                        f"{name} manifest papers 格式无效。"
-                    )
-
-                return manifest
-
-            manifests = await asyncio.gather(
-                *[
-                    asyncio.to_thread(read_manifest, name, uri)
-                    for name, uri in valid_artifact_inputs
-                ]
+            recommend_input, skipped_invalid_existing = self._prepare_papers(
+                new_papers, existing_papers
             )
-            manifests_by_name = dict(
-                zip(
-                    [name for name, _ in valid_artifact_inputs],
-                    manifests,
-                    strict=True,
+
+            kept_papers, removed_low_recommendation, removed_recommendation_failed, warnings = (
+                await self._score_papers(
+                    recommend_input, query_understanding, state.get("paper_service_task_id")
                 )
             )
-            abstract_manifest = manifests_by_name.get("abstract")
-            existing_manifest = manifests_by_name.get("existing")
-            new_papers = (
-                abstract_manifest.get("papers", [])
-                if abstract_manifest
-                else []
-            )
-            existing_papers = (
-                existing_manifest.get("papers", [])
-                if existing_manifest
-                else []
-            )
-            manifest = dict(abstract_manifest or existing_manifest or {})
-
-            kept_papers: list[dict[str, Any]] = []
-            removed_low_recommendation: list[dict[str, Any]] = []
-            removed_recommendation_failed: list[dict[str, str]] = []
-            skipped_invalid_existing: list[dict[str, str]] = []
-            warnings: list[str] = []
-
-            recommend_input: list[dict[str, Any]] = []
-
-            for paper in new_papers:
-                if not isinstance(paper, dict):
-                    continue
-
-                if not isinstance(paper.get("paper_info"), dict):
-                    continue
-
-                paper["paper_id"] = None
-                recommend_input.append(paper)
-
-            for paper in existing_papers:
-                if not isinstance(paper, dict):
-                    skipped_invalid_existing.append(
-                        {
-                            "title": "",
-                            "reason": "已有论文记录不是对象。",
-                        }
-                    )
-                    continue
-
-                paper_info = paper.get("paper_info")
-                paper_id = paper.get("paper_id")
-
-                if (
-                    not isinstance(paper_info, dict)
-                    or not isinstance(paper_id, int)
-                    or isinstance(paper_id, bool)
-                    or paper_id <= 0
-                ):
-                    skipped_invalid_existing.append(
-                        {
-                            "title": (
-                                str(paper_info.get("title") or "")
-                                if isinstance(paper_info, dict)
-                                else ""
-                            ),
-                            "reason": (
-                                "已有论文缺少合法 paper_id 或 paper_info。"
-                            ),
-                        }
-                    )
-                    continue
-
-                recommend_input.append(paper)
-
-            semaphore = asyncio.Semaphore(RECOMMENDATION_CONCURRENCY)
-            tasks = [
-                asyncio.create_task(
-                    self._recommend_paper(
-                        query_understanding=query_understanding,
-                        paper=paper,
-                        semaphore=semaphore,
-                    )
-                )
-                for paper in recommend_input
-            ]
-            results = await self._gather_or_cancel(tasks)
-
-            for paper, result in zip(recommend_input, results, strict=True):
-                paper_info = paper["paper_info"]
-
-                if isinstance(result, Exception):
-                    title = str(paper_info.get("title") or "")
-
-                    removed_recommendation_failed.append(
-                        {
-                            "title": title,
-                            "reason": f"推荐评分失败：{result}",
-                        }
-                    )
-                    warnings.append(
-                        f"{title} 的推荐评分失败，已从当前任务结果移除。"
-                    )
-                    continue
-
-                recommendation = result
-
-                relation_draft = {
-                    "search_task_id": state.get(
-                        "paper_service_task_id"
-                    ),
-                    "paper_id": paper.get("paper_id"),
-                    "recommendation_stars": (
-                        recommendation.recommendation_stars
-                    ),
-                    "recommendation_reason": (
-                        recommendation.recommendation_reason
-                    ),
-                }
-
-                if recommendation.recommendation_stars < 3:
-                    removed_low_recommendation.append(
-                        {
-                            "title": paper_info.get("title"),
-                            **relation_draft,
-                        }
-                    )
-                    continue
-
-                paper["task_paper_relation_draft"] = relation_draft
-                kept_papers.append(paper)
 
             manifest["papers"] = kept_papers
             manifest["removed_low_recommendation"] = (
@@ -407,84 +374,26 @@ class RecommendationNode:
                 "error": f"论文推荐失败：{exc}",
             }
 
-        recommendation_failed = bool(
-            removed_recommendation_failed
-            or skipped_invalid_existing
-        )
-
+        if skipped_invalid_existing:
+            warnings.append(f"已跳过 {len(skipped_invalid_existing)} 条无效的已有论文记录。")
         if not kept_papers:
-            empty_warning = (
+            warnings.append(
                 "所有候选论文的推荐评分均失败。"
-                if recommendation_failed and not removed_low_recommendation
+                if (removed_recommendation_failed or skipped_invalid_existing)
+                and not removed_low_recommendation
                 else "没有推荐星数大于或等于 3 的论文。"
             )
-            return {
-                "stage": "failed",
-                "status": "failed",
-                "recommendation_manifest_artifact_ref": (
-                    artifact.artifact_uri
-                ),
-                "progress": {
-                    **state.get("progress", {}),
-                    "recommendation_kept": 0,
-                    "recommendation_removed": len(
-                        removed_low_recommendation
-                    ),
-                    "recommendation_failed": len(
-                        removed_recommendation_failed
-                    ),
-                    "recommendation_invalid_existing": len(
-                        skipped_invalid_existing
-                    ),
-                },
-                "warnings": [
-                    *state.get("warnings", []),
-                    *warnings,
-                    *(
-                        [
-                            (
-                                f"已跳过 {len(skipped_invalid_existing)} "
-                                "条无效的已有论文记录。"
-                            )
-                        ]
-                        if skipped_invalid_existing
-                        else []
-                    ),
-                    empty_warning,
-                ],
-                "error": "没有可用的推荐论文。",
-            }
-
         return {
-            "stage": "persisting_papers",
-            "status": "running",
+            "stage": "persisting_papers" if kept_papers else "failed",
+            "status": "running" if kept_papers else "failed",
             "recommendation_manifest_artifact_ref": artifact.artifact_uri,
             "progress": {
                 **state.get("progress", {}),
                 "recommendation_kept": len(kept_papers),
-                "recommendation_removed": len(
-                    removed_low_recommendation
-                ),
-                "recommendation_failed": len(
-                    removed_recommendation_failed
-                ),
-                "recommendation_invalid_existing": len(
-                    skipped_invalid_existing
-                ),
+                "recommendation_removed": len(removed_low_recommendation),
+                "recommendation_failed": len(removed_recommendation_failed),
+                "recommendation_invalid_existing": len(skipped_invalid_existing),
             },
-            "warnings": [
-                *state.get("warnings", []),
-                *warnings,
-                *(
-                    [
-                        (
-                            f"已跳过 {len(skipped_invalid_existing)} "
-                            "条无效的已有论文记录。"
-                        )
-                    ]
-                    if skipped_invalid_existing
-                    else []
-                ),
-            ],
-            "error": None,
+            "warnings": [*state.get("warnings", []), *warnings],
+            "error": None if kept_papers else "没有可用的推荐论文。",
         }

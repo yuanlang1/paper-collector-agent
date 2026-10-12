@@ -1,10 +1,14 @@
+import json
+
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from pydantic import BaseModel, Field, model_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import (
     content_hash,
     framework_input_hash,
-    invoke,
+    UNTRUSTED_INPUT_GUARD,
     read_optional_json,
     save,
 )
@@ -41,19 +45,15 @@ discussion_questions 列出后续可由论文原文证据回答的比较、条�
   "excluded_papers": []
 }
 ```
-""".strip()
+"""
 
 
 class ExcludedPaper(BaseModel):
-    """未纳入任一综述章节的输入论文及其理由。"""
-
     paper_id: str = Field(description="被排除的当前任务论文 ID。")
     reason: str = Field(min_length=1, description="该论文不适合当前综述范围的具体原因。")
 
 
 class FrameworkSection(BaseModel):
-    """综述 Framework 中一个按主题组织的章节。"""
-
     section_id: str = Field(
         pattern=r"^[a-z][a-z0-9_]*$",
         description="稳定的章节标识，只能使用小写字母、数字和下划线，并以字母开头。",
@@ -78,8 +78,6 @@ class FrameworkSection(BaseModel):
 
 
 class ReviewFramework(BaseModel):
-    """由论文画像生成、供 Claim 和章节写作使用的综述框架。"""
-
     title: str = Field(
         min_length=2,
         description="综述标题，概括主题而不把待核验结论写成事实。",
@@ -137,17 +135,15 @@ class GenerateFrameworkNode:
             ):
                 return {"stage": "generating_claims", "status": "running"}
 
-            framework = await invoke(
-                self.model,
-                ReviewFramework,
-                FRAMEWORK_PROMPT,
-                {
+            framework = (await self.model.ainvoke([
+                SystemMessage(content=FRAMEWORK_PROMPT + UNTRUSTED_INPUT_GUARD),
+                HumanMessage(content=json.dumps({
                     "topic": state["topic"],
                     "output_language": state["language"],
                     "review_type": state["review_type"],
                     "overview": studies,
-                },
-            )
+                }, ensure_ascii=False)),
+            ])).model_dump(mode="json")
             return await self._save_framework(state, old_payload, framework, input_hash)
         except Exception as exc:
             return failed(
@@ -173,7 +169,7 @@ class GenerateFrameworkNode:
 
         old_sections = {
             section["section_id"]: section
-            for section in (old_payload or {}).get("framework", {}).get("sections", [])
+            for section in (old_payload["framework"]["sections"] if old_payload else [])
         }
         changed_sections = [
             section["section_id"]

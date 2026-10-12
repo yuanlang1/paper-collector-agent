@@ -16,7 +16,7 @@ from app.memory.schemas import (
 from app.memory.semantic.service import FactService
 from app.models.memory import MemoryConsolidationCursor
 from app.history import chat_log
-from app.history.sqlite import HistoryDatabase
+from app.history.chat_log import AgentHistoryStore
 
 
 class MemoryExtractionModel(Protocol):
@@ -34,13 +34,13 @@ class Consolidator:
         db: Session,
         *,
         user_id: str,
-        history_db: HistoryDatabase,
+        history_store: AgentHistoryStore,
         extraction_model: MemoryExtractionModel,
         threshold_turns: int = 6,
     ) -> None:
         self.db = db
         self.user_id = user_id
-        self.history_db = history_db
+        self.history_store = history_store
         self.extraction_model = extraction_model
         self.threshold_turns = threshold_turns
         self._locks: dict[str, asyncio.Lock] = {}
@@ -54,7 +54,7 @@ class Consolidator:
 
         async with lock:
             cursor = self._get_cursor(conversation_id)
-            turns = await self.history_db.run(
+            turns = await self.history_store.run(
                 chat_log.list_completed_turns_after,
                 user_id=self.user_id,
                 conversation_id=conversation_id,

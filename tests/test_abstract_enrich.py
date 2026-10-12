@@ -82,7 +82,7 @@ class AbstractEnrichNodeTests(unittest.IsolatedAsyncioTestCase):
             )
             return update, manifest
 
-    async def test_uses_one_pdf_front_page_request_for_all_fields(self) -> None:
+    async def test_preserves_source_abstract_and_uses_one_request(self) -> None:
         front_pages = "Abstract: PDF abstract\nKeywords: PDF keyword"
         model = RecordingModel(
             PdfFrontPageEnrichmentResult(
@@ -102,13 +102,13 @@ class AbstractEnrichNodeTests(unittest.IsolatedAsyncioTestCase):
         )
 
         paper_info = manifest["papers"][0]["paper_info"]
-        self.assertEqual(paper_info["paper_abstract"], "PDF abstract")
+        self.assertEqual(paper_info["paper_abstract"], "source abstract")
         self.assertEqual(paper_info["keywords"], "PDF keyword, Second keyword")
         self.assertEqual(paper_info["ai_abstract"], "中文 AI 摘要")
         self.assertEqual(len(model.calls), 1)
         self.assertEqual(
             json.loads(model.calls[0][1].content),
-            {"pdf_front_pages": front_pages},
+            {"pdf_front_pages": front_pages, "source_abstract": "source abstract", "abstract_source": None},
         )
         self.assertEqual(update["stage"], "recommending")
 
@@ -132,10 +132,51 @@ class AbstractEnrichNodeTests(unittest.IsolatedAsyncioTestCase):
 
         paper = manifest["papers"][0]
         self.assertEqual(paper["paper_info"]["paper_abstract"], "source abstract")
-        self.assertEqual(paper["paper_info"]["keywords"], "source keyword")
-        self.assertIsNone(paper["paper_info"]["ai_abstract"])
-        self.assertEqual(model.calls, [])
+        self.assertEqual(paper["paper_info"]["ai_abstract"], "unused")
+        self.assertEqual(len(model.calls), 1)
+        self.assertEqual(json.loads(model.calls[0][1].content)["pdf_front_pages"], "")
+        self.assertEqual(paper["abstract_resolution"]["ai_summary_source"], "source_metadata")
         self.assertEqual(update["status"], "running")
+
+    async def test_missing_source_abstract_generates_both_summaries(self) -> None:
+        for generated in (False, True):
+            with self.subTest(generated=generated):
+                model = RecordingModel(PdfFrontPageEnrichmentResult(
+                    paper_abstract="Original-language summary",
+                    paper_abstract_generated=generated,
+                    ai_abstract="整理后的中文摘要",
+                ))
+                _, manifest = await self._run_node(
+                    model=model,
+                    paper_info={"paper_abstract": "  "},
+                    extract_side_effect=("Paper text", 2),
+                )
+                paper = manifest["papers"][0]
+                self.assertEqual(paper["paper_info"]["paper_abstract"], "Original-language summary")
+                self.assertEqual(paper["paper_info"]["ai_abstract"], "整理后的中文摘要")
+                self.assertEqual(paper["abstract_resolution"]["source"],
+                                 "generated_from_pdf" if generated else "pdf_front_pages")
+                self.assertEqual(len(model.calls), 1)
+
+    async def test_pdf_abstract_replaces_search_snippet(self) -> None:
+        _, manifest = await self._run_node(
+            model=RecordingModel(PdfFrontPageEnrichmentResult(
+                paper_abstract="Complete PDF abstract", ai_abstract="中文摘要",
+            )),
+            paper_info={"paper_abstract": "Fragment …", "abstract_source": "search_snippet"},
+            extract_side_effect=("Abstract: Complete PDF abstract", 1),
+        )
+        self.assertEqual(manifest["papers"][0]["paper_info"]["paper_abstract"], "Complete PDF abstract")
+
+    async def test_without_source_or_pdf_does_not_invent_abstracts(self) -> None:
+        model = RecordingModel(RuntimeError("must not be called"))
+        _, manifest = await self._run_node(
+            model=model, paper_info={"paper_abstract": None},
+            extract_side_effect=ValueError("no PDF text"),
+        )
+        self.assertEqual(model.calls, [])
+        self.assertIsNone(manifest["papers"][0]["paper_info"]["paper_abstract"])
+        self.assertIsNone(manifest["papers"][0]["paper_info"]["ai_abstract"])
 
     async def test_keeps_source_fields_when_single_request_fails(self) -> None:
         model = RecordingModel(RuntimeError("LLM unavailable"))

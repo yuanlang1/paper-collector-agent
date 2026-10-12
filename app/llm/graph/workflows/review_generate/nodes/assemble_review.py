@@ -13,7 +13,6 @@ from app.llm.graph.workflows.review_generate.citations import (
     citation_paper_ids as cited_paper_ids,
 )
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
-from app.llm.graph.workflows.review_generate.nodes.generate_framework import ReviewFramework
 from app.llm.provider import ChatClient, ModelOptions
 from app.llm.graph.workflows.review_generate.contracts import revisions_for
 
@@ -80,14 +79,14 @@ class AssembleReviewNode:
                 state["framework_artifact_ref"]
             )
             corpus_payload = await self.artifact_store.read_json_uri(state["corpus_artifact_ref"])
-            framework = ReviewFramework.model_validate(framework_payload["framework"])
+            framework = framework_payload["framework"]
             section_refs = state["section_draft_artifact_refs"]
 
             draft_payloads = await asyncio.gather(
                 *[
-                    self.artifact_store.read_json_uri(section_refs[section.section_id])
-                    for section in framework.sections
-                    if section.section_id in section_refs
+                    self.artifact_store.read_json_uri(section_refs[section["section_id"]])
+                    for section in framework["sections"]
+                    if section["section_id"] in section_refs
                 ]
             )
         except Exception as exc:
@@ -98,15 +97,15 @@ class AssembleReviewNode:
         sections = []
         omitted_sections = []
 
-        for section in framework.sections:
-            draft = drafts_by_section.get(section.section_id)
+        for section in framework["sections"]:
+            draft = drafts_by_section.get(section["section_id"])
             text = (draft or {}).get("text", "").strip()
 
             if not text:
                 omitted_sections.append(
                     {
-                        "section_id": section.section_id,
-                        "title": section.title,
+                        "section_id": section["section_id"],
+                        "title": section["title"],
                         "reason": "no_rendered_text",
                     }
                 )
@@ -114,10 +113,10 @@ class AssembleReviewNode:
 
             sections.append(
                 {
-                    "section_id": section.section_id,
-                    "title": section.title,
-                    "description": section.description,
-                    "discussion_questions": section.discussion_questions,
+                    "section_id": section["section_id"],
+                    "title": section["title"],
+                    "description": section["description"],
+                    "discussion_questions": section["discussion_questions"],
                     "text": text,
                     "summary": draft["summary"],
                     "arguments": draft.get("arguments", []),
@@ -136,15 +135,15 @@ class AssembleReviewNode:
 
         if sections:
             synthesis_revisions = revisions_for(state, "synthesis")
-            synthesis = await self._synthesize(
+            synthesis = await self.model.ainvoke(
                 [
                     SystemMessage(content=ASSEMBLE_REVIEW_PROMPT),
                     HumanMessage(
                         content=json.dumps(
                             {
                                 "output_language": state["language"],
-                                "review_title": framework.title,
-                                "review_scope": framework.scope,
+                                "review_title": framework["title"],
+                                "review_scope": framework["scope"],
                                 "section_summaries": [
                                     {
                                         "section_id": section["section_id"],
@@ -208,8 +207,8 @@ class AssembleReviewNode:
         review_draft = {
             "task_id": state["task_id"],
             "framework_hash": state["framework_hash"],
-            "title": framework.title,
-            "scope": framework.scope,
+            "title": framework["title"],
+            "scope": framework["scope"],
             "abstract": abstract,
             "sections": sections,
             "body_markdown": body_markdown,
@@ -243,14 +242,6 @@ class AssembleReviewNode:
             "status": "running",
             "error": None,
         }
-
-    async def _synthesize(self, messages: list[SystemMessage | HumanMessage],) -> ReviewSynthesis:
-        result = await self.model.ainvoke(messages)
-        return (
-            result
-            if isinstance(result, ReviewSynthesis)
-            else ReviewSynthesis.model_validate(result)
-        )
 
     @staticmethod
     def _render_synthesis(fragments, citation_sources):

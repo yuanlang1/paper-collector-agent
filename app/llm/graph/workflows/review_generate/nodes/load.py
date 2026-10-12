@@ -42,20 +42,8 @@ class LoadTaskCorpusNode:
         self, 
         state: dict
     ) -> dict:
-        if state.get("stage") != "loading_corpus":
-            return failed(
-                "load_task_corpus called in invalid stage"
-            )
-
         child_run_id = state["child_run_id"]
-        task_id = state.get("task_id")
-
-        if (
-            not isinstance(task_id, int)
-            or isinstance(task_id, bool)
-            or task_id <= 0
-        ):
-            return failed("missing valid task_id")
+        task_id = state["task_id"]
 
         response = await self.client.get_task_review_papers(task_id)
 
@@ -63,16 +51,11 @@ class LoadTaskCorpusNode:
             return failed(response["error"] or "failed to load task review papers")
 
         result = response["result"]
-        if not isinstance(result, dict):
-            return failed("task review papers response is invalid")
-
 
         if result.get("task_id") != task_id:
             return failed("task review papers returned a mismatched task_id")
 
-        raw_papers = result.get("papers")
-        if not isinstance(raw_papers, list):
-            return failed("task review papers payload is invalid")
+        raw_papers = result["papers"]
 
         if not raw_papers:
             return failed("task has no associated papers")
@@ -82,15 +65,8 @@ class LoadTaskCorpusNode:
         duplicate_count = 0
 
         for raw_paper in raw_papers:
-            if not isinstance(raw_paper, dict):
-                return failed("task review paper item is invalid")
-
-            paper_id = raw_paper.get("paper_id")
-            if (
-                not isinstance(paper_id, int)
-                or isinstance(paper_id, bool)
-                or paper_id <= 0
-            ):
+            paper_id = raw_paper["paper_id"]
+            if paper_id <= 0:
                 return failed("task review paper_id is invalid")
 
             if paper_id in seen_paper_ids:
@@ -105,12 +81,8 @@ class LoadTaskCorpusNode:
                     f"rag_status = {rag_status!r}"
                 )
 
-            chunk_count = raw_paper.get("chunk_count")
-            if (
-                not isinstance(chunk_count, int)
-                or isinstance(chunk_count, bool)
-                or chunk_count < 0
-            ):
+            chunk_count = raw_paper["chunk_count"]
+            if chunk_count < 0:
                 return failed(f"paper_id = {paper_id} has invalid chunk_count")
 
             if rag_status == "ready" and chunk_count == 0:

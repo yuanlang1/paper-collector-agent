@@ -197,18 +197,19 @@ def latest(
 
 
 def delete_conversation(
-    connection: sqlite3.Connection,
+    database: HistoryDatabase,
     *,
     user_id: str,
     conversation_id: str,
 ) -> None:
-    connection.execute(
-        """
-        DELETE FROM agent_stream_events
-        WHERE user_id = ? AND conversation_id = ?
-        """,
-        (user_id, conversation_id),
-    )
+    with database.transaction() as connection:
+        connection.execute(
+            """
+            DELETE FROM agent_stream_events
+            WHERE user_id = ? AND conversation_id = ?
+            """,
+            (user_id, conversation_id),
+        )
 
 
 def from_row(row: sqlite3.Row) -> AgentStreamEvent:

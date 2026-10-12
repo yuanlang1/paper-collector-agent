@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import asyncio
-import json
 from collections.abc import Mapping
-from pathlib import Path
 from typing import Any
 
 from app.llm.artifacts.store import LocalArtifactStore
@@ -26,39 +23,13 @@ class PaperEnrichmentNode:
             child_run_id = state["child_run_id"]
             artifact_uri = state.get("normalized_manifest_artifact_ref")
 
-            if (
-                not isinstance(artifact_uri, str)
-                or not artifact_uri.startswith("artifact://")
-            ):
-                raise ValueError("缺少 normalized manifest artifact。")
-
-            base_dir = self.artifact_store.base_dir.resolve()
-            path = (
-                base_dir / artifact_uri.removeprefix("artifact://")
-            ).resolve()
-            try:
-                path.relative_to(base_dir)
-            except ValueError as exc:
-                raise ValueError("manifest artifact 超出存储目录。") from exc
-
-            def read_manifest() -> dict[str, Any]:
-                with path.open("r", encoding="utf-8") as file:
-                    return json.load(file)
-
-            manifest = await asyncio.to_thread(read_manifest)
+            manifest = await self.artifact_store.read_json_uri(artifact_uri)
             papers = manifest.get("papers", [])
-            if not isinstance(papers, list):
-                raise ValueError("manifest papers 格式无效。")
-
             kept_papers: list[dict[str, Any]] = []
             removed_papers: list[dict[str, str]] = []
 
             for paper in papers:
-                if not isinstance(paper, dict):
-                    continue
-                paper_info = paper.get("paper_info")
-                if not isinstance(paper_info, dict):
-                    continue
+                paper_info = paper["paper_info"]
                 if not paper_info.get("pdf_url"):
                     removed_papers.append(
                         {

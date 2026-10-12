@@ -1,15 +1,16 @@
 import asyncio
+import json
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import (
     CandidateClaim,
     claim_hash,
-    invoke,
+    UNTRUSTED_INPUT_GUARD,
     revisions_for,
     save,
-    validate_claims,
 )
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
@@ -170,19 +171,17 @@ class GenerateClaimsNode:
         relevant = [
             study for study in studies if study["paper_id"] in section["relevant_paper_ids"]
         ]
-        result = await invoke(
-            self.model,
-            ClaimsPlan,
-            CLAIM_GENERATION_PROMPT,
-            {
+        result = (await self.model.ainvoke([
+            SystemMessage(content=CLAIM_GENERATION_PROMPT + UNTRUSTED_INPUT_GUARD),
+            HumanMessage(content=json.dumps({
                 "section": section,
                 "studies": relevant,
                 "existing_candidates": [claim["text"] for claim in existing],
                 "revisions": additions,
                 "claim_budget": claim_budget,
                 "output_language": state["language"],
-            },
-        )
+            }, ensure_ascii=False)),
+        ])).model_dump(mode="json")
         return result["claims"], result["unanswered_reason"]
 
     async def __call__(self, state):
@@ -214,8 +213,6 @@ class GenerateClaimsNode:
             ]
             claim_revisions = revisions_for(state, "claim")
             targets = {item["target_id"] for item in claim_revisions}
-            if not targets <= {claim["claim_id"] for claim in claims}:
-                raise ValueError("unknown claim revision target")
 
             async def wait_for(tasks):
                 try:
@@ -240,11 +237,9 @@ class GenerateClaimsNode:
 
                 async def revise(claim):
                     async with semaphore:
-                        result = await invoke(
-                            self.revision_model,
-                            ClaimRevisionPlan,
-                            CLAIM_REVISION_PROMPT,
-                            {
+                        result = (await self.revision_model.ainvoke([
+                            SystemMessage(content=CLAIM_REVISION_PROMPT + UNTRUSTED_INPUT_GUARD),
+                            HumanMessage(content=json.dumps({
                                 "old_claim": claim,
                                 "section": sections[claim["section_id"]],
                                 "output_language": state["language"],
@@ -252,8 +247,8 @@ class GenerateClaimsNode:
                                     state, "claim", claim["claim_id"]
                                 ),
                                 "evidence": evidence_by_claim[claim["claim_id"]],
-                            },
-                        )
+                            }, ensure_ascii=False)),
+                        ])).model_dump(mode="json")
                     return claim["claim_id"], result["claims"]
 
                 replacements_by_claim = dict(
@@ -328,8 +323,10 @@ class GenerateClaimsNode:
                     ]
                 )
             ))
-            used_ids = {claim["claim_id"] for claim in claims}
-            next_index = len(claims) + 1
+            next_index = max(
+                (int(claim["claim_id"].removeprefix("claim_")) for claim in claims),
+                default=0,
+            ) + 1
             warnings = list(state["warnings"])
             for section in framework["sections"]:
                 if section["section_id"] not in sections_to_generate:
@@ -347,16 +344,15 @@ class GenerateClaimsNode:
                 if reason:
                     unanswered.append({"section_id": section["section_id"], "reason": reason})
                 for claim in candidates:
-                    while f"claim_{next_index:03d}" in used_ids:
-                        next_index += 1
                     claim_id = f"claim_{next_index:03d}"
                     next_index += 1
-                    used_ids.add(claim_id)
                     claim.update(claim_id=claim_id, section_id=section["section_id"])
                     claim["claim_hash"] = claim_hash(claim)
                     claims.append(claim)
 
-            validate_claims(claims, framework, state["paper_ids_snapshot"])
+            paper_ids = set(state["paper_ids_snapshot"])
+            if any(not set(claim["candidate_paper_ids"]) <= paper_ids for claim in claims):
+                raise ValueError("claim references papers outside task")
             ref = await save(
                 self.artifact_store, state, "claims", {"claims": claims, "unanswered": unanswered}
             )

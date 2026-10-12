@@ -1,17 +1,18 @@
 import asyncio
+import json
 from typing import Literal
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import (
     content_hash,
     evidence_requirement_met,
-    invoke,
+    UNTRUSTED_INPUT_GUARD,
     required_source_count,
     save,
     supporting_paper_ids,
-    verified_pack,
 )
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
@@ -335,9 +336,10 @@ class VerifyClaimsNode:
         }
         for attempt in range(2):
             try:
-                result = await invoke(
-                    self.model, Verdict, CLAIM_VERIFICATION_PROMPT, payload
-                )
+                result = (await self.model.ainvoke([
+                    SystemMessage(content=CLAIM_VERIFICATION_PROMPT + UNTRUSTED_INPUT_GUARD),
+                    HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
+                ])).model_dump(mode="json")
                 return self._bind_verdict(result, claim, sources)
             except (StructuredOutputError, ValidationError, VerificationProtocolError) as exc:
                 if attempt:
@@ -345,30 +347,14 @@ class VerifyClaimsNode:
                 payload["validation_feedback"] = str(exc)
 
     async def _revision_snapshot(self, state):
-        values = []
-        for key in ("claims_artifact_ref", "evidence_ledger_artifact_ref"):
-            value = await self.artifact_store.read_json_uri(state[key]) if state.get(key) else None
-            if value and key == "evidence_ledger_artifact_ref":
-                value = [
-                    {"claim_id": item["claim_id"], "chunk_snippets": item["chunk_snippets"]}
-                    for item in value["claims"]
-                ]
-            if value and key == "claims_artifact_ref":
-                value = [
-                    {"claim_id": item["claim_id"], "claim_hash": item["claim_hash"]}
-                    for item in value["claims"]
-                ]
-            values.append(value)
-        return content_hash(values)
+        claims = await self.artifact_store.read_json_uri(state["claims_artifact_ref"])
+        ledger = await self.artifact_store.read_json_uri(state["evidence_ledger_artifact_ref"])
+        return content_hash([
+            [{"claim_id": item["claim_id"], "claim_hash": item["claim_hash"]} for item in claims["claims"]],
+            [{"claim_id": item["claim_id"], "chunk_snippets": item["chunk_snippets"]} for item in ledger["claims"]],
+        ])
 
-    async def _schedule_claim_revision(self, state, items, *, claim_ids, section_ids):
-        allowed = {"claim": set(claim_ids), "add_claim": set(section_ids)}
-        if any(
-            item["target_type"] not in allowed
-            or item["target_id"] not in allowed[item["target_type"]]
-            for item in items
-        ):
-            raise ValueError("revision contains an unknown target")
+    async def _schedule_claim_revision(self, state, items):
         current = await self._revision_snapshot(state)
         ref = await save(
             self.artifact_store,
@@ -381,7 +367,7 @@ class VerifyClaimsNode:
             },
         )
         update = {"revision_plan_artifact_ref": ref, "revision_items": items}
-        if not items or current == state.get("revision_before"):
+        if current == state.get("revision_before"):
             return failed(
                 "revision produced no actionable progress",
                 **update,
@@ -522,8 +508,6 @@ class VerifyClaimsNode:
                 if claim["withdrawn_reason"]:
                     continue
                 verdict = verdicts[claim["claim_id"]]
-                if verdict["status"] == "supported":
-                    verified_pack(claim, verdict)
                 revisions.extend(verdict["revisions"])
             supported = {
                 item["claim_id"] for item in ordered_verdicts if item["status"] == "supported"
@@ -554,8 +538,6 @@ class VerifyClaimsNode:
                 result = await self._schedule_claim_revision(
                     {**state, **update},
                     revisions,
-                    claim_ids=[claim["claim_id"] for claim in claims],
-                    section_ids=list(sections),
                 )
                 return {**update, **result}
             return {

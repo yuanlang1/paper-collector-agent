@@ -1,11 +1,13 @@
 import asyncio
+import json
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import (
     content_hash,
-    invoke,
+    UNTRUSTED_INPUT_GUARD,
     revisions_for,
     save,
     verified_pack,
@@ -62,8 +64,6 @@ section_outline 是固定的综述目录；本节只讨论当前 section 的范�
 
 
 class Argument(BaseModel):
-    """章节正文中绑定 Claim 与证据引用的一个论证单元。"""
-
     text: str = Field(
         min_length=1,
         description="基于已核验证据写成的正文论证，不得自行写入引用。",
@@ -79,8 +79,6 @@ class Argument(BaseModel):
 
 
 class SectionDraft(BaseModel):
-    """单个综述章节的结构化草稿。"""
-
     arguments: list[Argument] = Field(
         default_factory=list,
         description="按论证单元组织的章节正文；无已核验证据时必须为空。",
@@ -187,170 +185,12 @@ class RenderSectionsNode:
             ]
             semaphore = asyncio.Semaphore(self.max_concurrency)
 
-            async def render(section):
-                section_claims = [
-                    claim
-                    for claim in claims.values()
-                    if claim["section_id"] == section["section_id"]
-                    and claim["claim_id"] in verdicts
-                    and verdicts[claim["claim_id"]]["status"] == "supported"
-                ]
-                packages = [
-                    {"claim": claim, "evidence": verified_pack(claim, verdicts[claim["claim_id"]])}
-                    for claim in section_claims
-                ]
-                revisions = revisions_for(state, "section", section["section_id"])
-                signature = content_hash(
-                    [
-                        framework["title"],
-                        framework["scope"],
-                        section,
-                        packages,
-                        state["language"],
-                        section_outline,
-                    ]
-                )
-                old_ref = state.get("section_draft_artifact_refs", {}).get(section["section_id"])
-                old = await self.artifact_store.read_json_uri(old_ref) if old_ref else None
-                if old and section["section_id"] not in revision_targets and (
-                    revision_targets or old.get("input_hash") == signature
-                ):
-                    return section["section_id"], old_ref
-
-                if packages:
-                    evidence = {
-                        item["evidence_id"]: item
-                        for pack in packages
-                        for item in pack["evidence"]
-                    }
-                    sources = {
-                        index: item
-                        for index, item in enumerate(evidence.values(), start=1)
-                    }
-                    payload = {
-                        "output_language": state["language"],
-                        "review_title": framework["title"],
-                        "review_scope": framework["scope"],
-                        "section_outline": section_outline,
-                        "section": section,
-                        "claims_with_evidence": self._model_packages(packages, sources),
-                        "old_draft": old if revisions else None,
-                        "revisions": revisions,
-                    }
-                    async with semaphore:
-                        result = await invoke(
-                            self.model, SectionDraft, SECTION_DRAFT_PROMPT, payload
-                        )
-                    if result["insufficient_notice"]:
-                        raise ValueError(
-                            "evidence-backed section cannot contain an insufficiency notice"
-                        )
-                    claim_ids = {item["claim"]["claim_id"] for item in packages}
-                    arguments = []
-                    for argument in result["arguments"]:
-                        if (
-                            not set(argument["claim_ids"]) <= claim_ids
-                            or not set(argument["evidence_indices"]) <= sources.keys()
-                        ):
-                            raise ValueError(
-                                "section argument references unknown claim or evidence"
-                            )
-                        if "@paper-" in argument["text"] or "[[REF_" in argument["text"]:
-                            raise ValueError("section argument must not contain citations")
-                        evidence_ids = [
-                            sources[index]["evidence_id"]
-                            for index in argument["evidence_indices"]
-                        ]
-                        for claim_id in argument["claim_ids"]:
-                            claim_evidence = {
-                                item["evidence_id"]: item
-                                for item in verdicts[claim_id]["evidence"]
-                            }
-                            support = {
-                                claim_evidence[evidence_id]["paper_id"]
-                                for evidence_id in evidence_ids
-                                if evidence_id in claim_evidence
-                                and claim_evidence[evidence_id]["relation"] == "supports"
-                            }
-                            required = (
-                                2
-                                if claims[claim_id]["evidence_requirement"] == "multiple_fulltext"
-                                else 1
-                            )
-                            if len(support) < required:
-                                raise ValueError("argument omitted required claim sources")
-                        paper_ids = list(
-                            dict.fromkeys(
-                                sources[index]["paper_id"]
-                                for index in argument["evidence_indices"]
-                            )
-                        )
-                        arguments.append(
-                            {
-                                "text": self._citation_text(argument["text"], paper_ids),
-                                "claim_ids": argument["claim_ids"],
-                                "evidence_ids": evidence_ids,
-                            }
-                        )
-                    used = {
-                        claim_id
-                        for argument in arguments
-                        for claim_id in argument["claim_ids"]
-                    }
-                    if used != claim_ids:
-                        raise ValueError("section draft omitted verified claims")
-                    text = "\n\n".join(item["text"] for item in arguments)
-                    summary = result["summary"]
-                else:
-                    payload = {
-                        "output_language": state["language"],
-                        "review_title": framework["title"],
-                        "review_scope": framework["scope"],
-                        "section_outline": section_outline,
-                        "section": section,
-                        "claims_with_evidence": [],
-                        "old_draft": old if revisions else None,
-                        "revisions": revisions,
-                    }
-                    async with semaphore:
-                        result = await invoke(
-                            self.model, SectionDraft, SECTION_DRAFT_PROMPT, payload
-                        )
-                    arguments = result["arguments"]
-                    if (
-                        arguments
-                        or not result["insufficient_notice"]
-                        or "@paper-" in result["insufficient_notice"]
-                        or "[[REF_" in result["insufficient_notice"]
-                    ):
-                        raise ValueError(
-                            "insufficient-evidence section must contain only an uncited notice"
-                        )
-                    text = result["insufficient_notice"]
-                    summary = result["summary"]
-
-                draft = {
-                    "section_id": section["section_id"],
-                    "title": section["title"],
-                    "framework_hash": state["framework_hash"],
-                    "input_hash": signature,
-                    "claim_hashes": {
-                        claim["claim_id"]: claim["claim_hash"]
-                        for claim in section_claims
-                    },
-                    "arguments": arguments,
-                    "text": text,
-                    "summary": summary,
-                    "used_claim_ids": [claim["claim_id"] for claim in section_claims],
-                    "omitted_claim_ids": [],
-                }
-                ref = await save(
-                    self.artifact_store, state, "section_draft", draft
-                )
-                return section["section_id"], ref
-
             tasks = [
-                asyncio.create_task(render(section)) for section in framework["sections"]
+                asyncio.create_task(self._render_section(
+                    state, section, framework, claims, verdicts,
+                    section_outline, revision_targets, semaphore,
+                ))
+                for section in framework["sections"]
             ]
             try:
                 for task in asyncio.as_completed(tasks):
@@ -386,3 +226,152 @@ class RenderSectionsNode:
                 error_code="RENDER_FAILED",
                 retryable=True,
             )
+
+    async def _render_section(
+        self, state, section, framework, claims, verdicts,
+        section_outline, revision_targets, semaphore,
+    ):
+        section_claims = [
+            claim
+            for claim in claims.values()
+            if claim["section_id"] == section["section_id"]
+            and claim["claim_id"] in verdicts
+            and verdicts[claim["claim_id"]]["status"] == "supported"
+        ]
+        packages = [
+            {"claim": claim, "evidence": verified_pack(claim, verdicts[claim["claim_id"]])}
+            for claim in section_claims
+        ]
+        revisions = revisions_for(state, "section", section["section_id"])
+        signature = content_hash(
+            [
+                framework["title"],
+                framework["scope"],
+                section,
+                packages,
+                state["language"],
+                section_outline,
+            ]
+        )
+        old_ref = state.get("section_draft_artifact_refs", {}).get(section["section_id"])
+        old = await self.artifact_store.read_json_uri(old_ref) if old_ref else None
+        if old and section["section_id"] not in revision_targets and (
+            revision_targets or old.get("input_hash") == signature
+        ):
+            return section["section_id"], old_ref
+
+        evidence = {
+            item["evidence_id"]: item
+            for pack in packages
+            for item in pack["evidence"]
+        }
+        sources = {index: item for index, item in enumerate(evidence.values(), start=1)}
+        payload = {
+            "output_language": state["language"],
+            "review_title": framework["title"],
+            "review_scope": framework["scope"],
+            "section_outline": section_outline,
+            "section": section,
+            "claims_with_evidence": self._model_packages(packages, sources),
+            "old_draft": old if revisions else None,
+            "revisions": revisions,
+        }
+        async with semaphore:
+            result = (await self.model.ainvoke([
+                SystemMessage(content=SECTION_DRAFT_PROMPT + UNTRUSTED_INPUT_GUARD),
+                HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
+            ])).model_dump(mode="json")
+        if packages:
+            arguments = self._render_arguments(result, packages, sources, claims, verdicts)
+            text = "\n\n".join(item["text"] for item in arguments)
+        else:
+            arguments = result["arguments"]
+            if (
+                arguments
+                or not result["insufficient_notice"]
+                or "@paper-" in result["insufficient_notice"]
+                or "[[REF_" in result["insufficient_notice"]
+            ):
+                raise ValueError("insufficient-evidence section must contain only an uncited notice")
+            text = result["insufficient_notice"]
+
+        draft = {
+            "section_id": section["section_id"],
+            "title": section["title"],
+            "framework_hash": state["framework_hash"],
+            "input_hash": signature,
+            "claim_hashes": {
+                claim["claim_id"]: claim["claim_hash"]
+                for claim in section_claims
+            },
+            "arguments": arguments,
+            "text": text,
+            "summary": result["summary"],
+            "used_claim_ids": [claim["claim_id"] for claim in section_claims],
+            "omitted_claim_ids": [],
+        }
+        ref = await save(
+            self.artifact_store, state, "section_draft", draft
+        )
+        return section["section_id"], ref
+
+    def _render_arguments(self, result, packages, sources, claims, verdicts):
+        if result["insufficient_notice"]:
+            raise ValueError(
+                "evidence-backed section cannot contain an insufficiency notice"
+            )
+        claim_ids = {item["claim"]["claim_id"] for item in packages}
+        arguments = []
+        for argument in result["arguments"]:
+            if (
+                not set(argument["claim_ids"]) <= claim_ids
+                or not set(argument["evidence_indices"]) <= sources.keys()
+            ):
+                raise ValueError(
+                    "section argument references unknown claim or evidence"
+                )
+            if "@paper-" in argument["text"] or "[[REF_" in argument["text"]:
+                raise ValueError("section argument must not contain citations")
+            evidence_ids = [
+                sources[index]["evidence_id"]
+                for index in argument["evidence_indices"]
+            ]
+            for claim_id in argument["claim_ids"]:
+                claim_evidence = {
+                    item["evidence_id"]: item
+                    for item in verdicts[claim_id]["evidence"]
+                }
+                support = {
+                    claim_evidence[evidence_id]["paper_id"]
+                    for evidence_id in evidence_ids
+                    if evidence_id in claim_evidence
+                    and claim_evidence[evidence_id]["relation"] == "supports"
+                }
+                required = (
+                    2
+                    if claims[claim_id]["evidence_requirement"] == "multiple_fulltext"
+                    else 1
+                )
+                if len(support) < required:
+                    raise ValueError("argument omitted required claim sources")
+            paper_ids = list(
+                dict.fromkeys(
+                    sources[index]["paper_id"]
+                    for index in argument["evidence_indices"]
+                )
+            )
+            arguments.append(
+                {
+                    "text": self._citation_text(argument["text"], paper_ids),
+                    "claim_ids": argument["claim_ids"],
+                    "evidence_ids": evidence_ids,
+                }
+            )
+        used = {
+            claim_id
+            for argument in arguments
+            for claim_id in argument["claim_ids"]
+        }
+        if used != claim_ids:
+            raise ValueError("section draft omitted verified claims")
+        return arguments
