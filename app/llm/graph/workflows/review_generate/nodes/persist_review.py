@@ -51,7 +51,6 @@ class PersistReviewNode:
                 "citation_paper_ids": final_review["citation_paper_ids"],
                 "citation_labels": final_review["citation_labels"],
                 "references": final_review["references"],
-                "framework_hash": state.get("framework_hash"),
             }
         )
 

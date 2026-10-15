@@ -9,7 +9,6 @@ from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import (
     content_hash,
     evidence_requirement_met,
-    UNTRUSTED_INPUT_GUARD,
     required_source_count,
     save,
     supporting_paper_ids,

@@ -98,7 +98,6 @@ class ReviewCitationTests(unittest.IsolatedAsyncioTestCase):
                     "child_run_id": "child-review-test",
                     "task_id": 1,
                     "language": "en",
-                    "framework_hash": "hash",
                     "framework_artifact_ref": framework.artifact_uri,
                     "corpus_artifact_ref": corpus.artifact_uri,
                     "section_draft_artifact_refs": {"evidence": section.artifact_uri},
@@ -209,7 +208,6 @@ class ReviewCitationTests(unittest.IsolatedAsyncioTestCase):
                     "review_type": "narrative",
                     "citation_style": "harvard",
                     "paper_ids_snapshot": ["1"],
-                    "framework_hash": "hash",
                 }
             )
 

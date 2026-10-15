@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import (
     content_hash,
-    UNTRUSTED_INPUT_GUARD,
     revisions_for,
     save,
     verified_pack,
@@ -298,7 +297,6 @@ class RenderSectionsNode:
         draft = {
             "section_id": section["section_id"],
             "title": section["title"],
-            "framework_hash": state["framework_hash"],
             "input_hash": signature,
             "claim_hashes": {
                 claim["claim_id"]: claim["claim_hash"]

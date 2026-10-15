@@ -43,8 +43,6 @@ async def initialize_review_node(state: Mapping[str, Any],) -> dict[str, Any]:
         "study_extraction_report_artifact_ref": None,
         "reading_summary": {"total": 0, "succeeded": 0, "failed": 0},
         "framework_artifact_ref": None,
-        "framework_hash": None,
-        "changed_section_ids": [],
         "claims_artifact_ref": None,
         "evidence_ledger_artifact_ref": None,
         "section_draft_artifact_refs": {},

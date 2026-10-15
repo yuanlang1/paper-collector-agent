@@ -29,7 +29,8 @@ message AddReviewRequest {
   string citation_paper_ids = 15;
   string citation_labels = 16;
   string references = 17;
-  string framework_hash = 18;
+  reserved 18;
+  reserved "framework_hash";
 }
 
 message AddReviewResponse {

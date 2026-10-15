@@ -186,7 +186,6 @@ class ReviewServiceGrpcClient:
                 review.get("citation_labels"),
             ),
             references=cls._references_json(review.get("references")),
-            framework_hash=str(review.get("framework_hash") or "").strip(),
         )
 
     async def add_review(

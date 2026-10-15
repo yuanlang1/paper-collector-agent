@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from app.llm.subagents.registry import SubAgentRuntime
 
 
-class TaskIndexingDelegation(BaseModel):
+class TaskIndexingParams(BaseModel):
     task_id: int = Field(gt=0)
     timeout_seconds: int = Field(
         default=settings.TASK_RAG_WORKFLOW_TIMEOUT_SECONDS,

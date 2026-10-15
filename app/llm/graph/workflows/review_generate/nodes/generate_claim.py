@@ -8,7 +8,6 @@ from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import (
     CandidateClaim,
     claim_hash,
-    UNTRUSTED_INPUT_GUARD,
     revisions_for,
     save,
 )
@@ -200,16 +199,15 @@ class GenerateClaimsNode:
                 else {"claims": [], "unanswered": []}
             )
             section_ids = set(sections)
-            changed = set(state.get("changed_section_ids", []))
             claims = [
                 claim
                 for claim in payload["claims"]
-                if claim["section_id"] in section_ids and claim["section_id"] not in changed
+                if claim["section_id"] in section_ids
             ]
             unanswered = [
                 item
                 for item in payload["unanswered"]
-                if item["section_id"] in section_ids and item["section_id"] not in changed
+                if item["section_id"] in section_ids
             ]
             claim_revisions = revisions_for(state, "claim")
             targets = {item["target_id"] for item in claim_revisions}
@@ -358,7 +356,6 @@ class GenerateClaimsNode:
             )
             return {
                 "claims_artifact_ref": ref,
-                "changed_section_ids": [],
                 "revision_items": [
                     item
                     for item in state.get("revision_items", [])

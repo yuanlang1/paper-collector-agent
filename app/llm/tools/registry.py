@@ -14,7 +14,7 @@ from app.events.errors import EventPublicationError
 from app.llm.tools.base import BaseTool, ToolResult
 
 
-@dataclass(frozen=True)
+@dataclass()
 class ToolExecutionContext:
     db: Session | None
     user_id: str = "0"
@@ -24,97 +24,34 @@ class ToolExecutionContext:
 
 
 class ToolRegistry:
-    def __init__(self, db: Session | None = None) -> None:
+    def __init__(
+        self, 
+        db: Session | None = None
+    ) -> None:
         self._tools: dict[str, BaseTool] = {}
-        self._db = db
+        self._tool_context: ToolExecutionContext
 
-    def register(self, tool: BaseTool) -> None:
+    def register(
+        self, 
+        tool: BaseTool
+    ) -> None:
         self._tools[tool.name] = tool
 
-    def get(self, name: str) -> BaseTool | None:
+    def get(
+        self, 
+        name: str
+    ) -> BaseTool | None:
         return self._tools.get(name)
 
-    def schemas(self) -> list[dict[str, Any]]:
-        return [tool.to_api() for tool in self._tools.values()]
-
-    async def execute(
-        self,
-        name: str,
-        args: dict[str, Any],
-        *,
-        context: ToolExecutionContext | None = None,
-        timeout: float = 20,
-    ) -> ToolResult:
-        tool_context = context or ToolExecutionContext(db=self._db)
-        event_context = current_event_context()
-        await event_context.bus.publish(
-            event_context.event(
-                "tool_started",
-                {"message": "工具开始执行。", "progress": 0, "data": {}},
-            ),
-        )
-        try:
-            tool = self.get(name)
-            if tool is None:
-                raise LookupError(f"未知工具：{name}")
-            if tool.params_model is not None:
-                try:
-                    tool.params_model.model_validate(dict(args))
-                except ValidationError as exc:
-                    return await self._fail(
-                        event_context,
-                        error_message=str(exc),
-                        error_name=type(exc).__name__,
-                    )
-
-            result = await asyncio.wait_for(tool.fn(args, tool_context), timeout)
-
-            await event_context.bus.publish(
-                event_context.event(
-                    "tool_completed",
-                    {
-                        "message": result.content,
-                        "progress": 100,
-                        "data": {},
-                    },
-                ),
-            )
-        except asyncio.TimeoutError:
-            return await self._fail(
-                event_context,
-                error_message=f"工具执行超时（{timeout:g}s）。",
-                error_name="timeout",
-            )
-        except EventPublicationError:
-            raise
-        except Exception as exc:
-            return await self._fail(
-                event_context,
-                error_message=str(exc),
-                error_name=type(exc).__name__,
-            )
-
-        return result
-
-    async def _fail(
-        self,
-        event_context,
-        *,
-        error_message: str,
-        error_name: str,
-    ) -> ToolResult:
-        result = ToolResult(
-            content=error_message,
-            is_error=True,
-            error_type=error_name,
-        )
-        await event_context.bus.publish(
-            event_context.event(
-                "tool_failed",
-                {"message": result.content, "progress": None, "data": {}},
-            ),
-        )
-        return result
+    def tool_schemas(self) -> list[dict[str, object]]:
+        return [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": tool.input_schemas,
+            }
+            for tool in self._tools.values()
+        ]
 
 
 def build_tool_registry(db: Session | None = None) -> ToolRegistry:

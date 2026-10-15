@@ -206,7 +206,6 @@ class AssembleReviewNode:
 
         review_draft = {
             "task_id": state["task_id"],
-            "framework_hash": state["framework_hash"],
             "title": framework["title"],
             "scope": framework["scope"],
             "abstract": abstract,

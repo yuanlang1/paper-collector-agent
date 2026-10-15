@@ -34,8 +34,6 @@ class TaskReviewWorkflowState(TypedDict, total=False):
     reading_summary: dict[str, int]
 
     framework_artifact_ref: str | None
-    framework_hash: str | None
-    changed_section_ids: list[str]
 
     claims_artifact_ref: str | None
     evidence_ledger_artifact_ref: str | None

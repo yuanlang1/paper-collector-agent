@@ -5,13 +5,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, model_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.graph.workflows.review_generate.contracts import (
-    content_hash,
-    framework_input_hash,
-    UNTRUSTED_INPUT_GUARD,
-    read_optional_json,
-    save,
-)
+from app.llm.graph.workflows.review_generate.contracts import save
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
 
@@ -119,38 +113,31 @@ class GenerateFrameworkNode:
         )
 
     async def __call__(self, state):
+        if state.get("framework_artifact_ref"):
+            return {"stage": "generating_claims", "status": "running"}
         try:
             studies = (
                 await self.artifact_store.read_json_uri(state["study_records_artifact_ref"])
             )["studies"]
-            old_payload = await read_optional_json(
-                self.artifact_store, state.get("framework_artifact_ref")
-            )
-            input_hash = framework_input_hash(
-                state["topic"], state["language"], state["review_type"], studies
-            )
-            if (
-                old_payload
-                and old_payload.get("framework_input_hash") == input_hash
-            ):
-                return {"stage": "generating_claims", "status": "running"}
+            framework = await self.model.ainvoke([
+                SystemMessage(content = FRAMEWORK_PROMPT),
+                HumanMessage(
+                    content = json.dumps({
+                        "topic": state["topic"],
+                        "output_language": state["language"],
+                        "review_type": state["review_type"],
+                        "overview": studies,
+                    }, ensure_ascii=False)),
+            ])
 
-            framework = (await self.model.ainvoke([
-                SystemMessage(content=FRAMEWORK_PROMPT + UNTRUSTED_INPUT_GUARD),
-                HumanMessage(content=json.dumps({
-                    "topic": state["topic"],
-                    "output_language": state["language"],
-                    "review_type": state["review_type"],
-                    "overview": studies,
-                }, ensure_ascii=False)),
-            ])).model_dump(mode="json")
-            return await self._save_framework(state, old_payload, framework, input_hash)
+            return await self._save_framework(state, framework)
+            
         except Exception as exc:
             return failed(
                 f"framework generation failed: {exc}", error_code="FRAMEWORK_FAILED", retryable=True
             )
 
-    async def _save_framework(self, state, old_payload, framework, input_hash):
+    async def _save_framework(self, state, framework):
         paper_ids = set(state["paper_ids_snapshot"])
         mapped = {
             paper_id
@@ -167,31 +154,16 @@ class GenerateFrameworkNode:
         if framework["corpus_scope_mismatch"]:
             return failed(framework["adjustment_reason"], error_code="CORPUS_SCOPE_MISMATCH")
 
-        old_sections = {
-            section["section_id"]: section
-            for section in (old_payload["framework"]["sections"] if old_payload else [])
-        }
-        changed_sections = [
-            section["section_id"]
-            for section in framework["sections"]
-            if old_sections.get(section["section_id"]) != section
-        ]
-        digest = content_hash(framework)
         ref = await save(
             self.artifact_store,
             state,
             "framework",
             {
                 "framework": framework,
-                "framework_hash": digest,
-                "framework_input_hash": input_hash,
-                "changed_section_ids": changed_sections,
             },
         )
         return {
             "framework_artifact_ref": ref,
-            "framework_hash": digest,
-            "changed_section_ids": changed_sections,
             "stage": "generating_claims",
             "status": "running",
         }

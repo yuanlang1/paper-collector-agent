@@ -12,7 +12,7 @@ from app.llm.graph.workflows.review_generate.citations import (
     citation_paper_ids,
     unsupported_synthesis_citation_ids,
 )
-from app.llm.graph.workflows.review_generate.contracts import UNTRUSTED_INPUT_GUARD, save
+from app.llm.graph.workflows.review_generate.contracts import save
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
 
@@ -155,7 +155,7 @@ class ReflectReviewNode:
                 require_citations=bool(supported_claims),
             )
             result = (await self.model.ainvoke([
-                SystemMessage(content=WRITING_REVIEW_PROMPT + UNTRUSTED_INPUT_GUARD),
+                SystemMessage(content=WRITING_REVIEW_PROMPT),
                 HumanMessage(content=json.dumps({
                     "review_mode": "acceptance" if previous_plan else "initial",
                     "framework": {

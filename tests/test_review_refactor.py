@@ -305,19 +305,15 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-    async def seed_framework(self, framework=FRAMEWORK, changed_section_ids=None):
+    async def seed_framework(self, framework=FRAMEWORK):
         self.state["framework_artifact_ref"] = await save(
             self.store,
             self.state,
             "framework",
             {
                 "framework": framework,
-                "framework_hash": "framework-hash",
-                "framework_input_hash": "input-hash",
-                "changed_section_ids": changed_section_ids or [],
             },
         )
-        self.state["framework_hash"] = "framework-hash"
 
     async def seed_claim(self):
         await self.seed_framework()
@@ -431,6 +427,7 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(update["stage"], "generating_claims")
         self.assertEqual(model.inputs[0]["overview"][0]["main_discussion"], "Conditional result")
         framework = await self.store.read_json_uri(update["framework_artifact_ref"])
+        self.assertNotIn("framework_input_hash", framework)
         self.assertEqual(
             framework["framework"]["sections"][0]["discussion_questions"],
             ["How do study conditions affect outcomes?"],
@@ -447,7 +444,7 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
             claim_model.inputs[0]["section"]["discussion_questions"],
             ["How do study conditions affect outcomes?"],
         )
-        self.assertEqual(claims["changed_section_ids"], [])
+        self.assertNotIn("changed_section_ids", claims)
 
     async def test_framework_requires_discussion_questions(self):
         framework = copy.deepcopy(FRAMEWORK)
@@ -576,9 +573,12 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(update["error_code"], "CLAIMS_FAILED")
         self.assertEqual(model.cancelled, ["section_3"])
 
-    async def test_framework_cache_does_not_depend_on_claim_changes(self):
+    async def test_existing_framework_skips_generation_without_reading_artifacts(self):
         first = Model(FRAMEWORK)
         self.state.update(await GenerateFrameworkNode(artifact_store=self.store, model=first)(self.state))
+        self.state["topic"] = "Changed topic"
+        self.state["study_records_artifact_ref"] = "missing-studies"
+        self.state["framework_artifact_ref"] = "existing-framework"
         cached = Model()
         update = await GenerateFrameworkNode(artifact_store=self.store, model=cached)(self.state)
         self.assertEqual(update["stage"], "generating_claims")

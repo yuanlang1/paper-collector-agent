@@ -1,46 +1,36 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import ClassVar
+from langgraph.types import StreamWriter
 
 from pydantic import BaseModel
 
 
-@dataclass(frozen=True)
+@dataclass
 class ToolResult:
     content: str
     is_error: bool = False
     error_type: str | None = None
 
+@dataclass
+class ToolContext:
+    writer: StreamWriter | None = None
+    user_id: str | None = None
+    session_id: str | None = None
 
-ToolService = Callable[[dict[str, Any], Any], Awaitable[dict[str, Any]]]
-ToolHandler = Callable[[dict[str, Any], Any], Awaitable[ToolResult]]
-ConfirmationPolicy = bool | Callable[[dict[str, Any]], bool]
-
-
-def as_tool(service: ToolService) -> ToolHandler:
-    async def handler(
-        params: dict[str, Any],
-        context: Any,
-    ) -> ToolResult:
-        return ToolResult(content=str(await service(params, context)))
-
-    return handler
-
-
-@dataclass(frozen=True)
 class BaseTool:
     name: str
     description: str
-    input_schema: dict[str, Any]
-    fn: ToolHandler
-    requires_confirmation: ConfirmationPolicy = False
-    params_model: type[BaseModel] | None = None
+    input_schemas: dict[str, object]
+    params_model: ClassVar[type[BaseModel] | None] = None
 
-    def to_api(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "description": self.description,
-            "input_schema": self.input_schema,
-        }
+    @abstractmethod
+    async def invoke(
+        self, 
+        params: dict[str, object],
+        *,
+        context: ToolContext | None = None,
+    ) -> ToolResult:
+        ...
