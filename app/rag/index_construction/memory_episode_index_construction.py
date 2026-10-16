@@ -6,7 +6,7 @@ from langchain_core.documents import Document
 from qdrant_client import AsyncQdrantClient, models
 
 from app.config import settings
-from app.models.memory import MemoryEpisode
+from app.db.models import MemoryEpisode
 from app.rag.index_construction.base import BaseQdrantIndexConstructionModule
 
 

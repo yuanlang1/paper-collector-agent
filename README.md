@@ -54,53 +54,17 @@ AGENT_GRPC_MAX_MESSAGE_LENGTH=16777216
 
 服务以 `SERVICE_NAME` 注册一次；注册 metadata 中的 `grpc_port` 表示内部 gRPC 端口。主服务发现 `paper-collector-agent` 实例后，使用实例 IP 和该 metadata 端口建立 gRPC 连接。必须通过网络策略限制该端口只允许主服务访问。
 
-协议位于 [`app/protos/agent/v1/agent.proto`](app/protos/agent/v1/agent.proto)，包括：
+协议位于 [app/protos/agent/v1/agent.proto](app/protos/agent/v1/agent.proto)。当前只注册 `SettingsService.GetSourceLimits` 和 `UpdateSourceLimits`。旧主 Agent 图、会话历史和 LLM 配置档案的运行入口已停用；保留协议定义，相关 RPC 返回 `UNIMPLEMENTED`。论文检索、RAG 索引和综述生成的业务工作流仍保留，等待新主架构接入。
 
-- `AgentService`：启动、恢复、查询和订阅运行事件；运行与事件请求均要求非空 `user_id`、`conversation_id`、`run_id`。
-- `ConversationService`：会话与消息查询、会话删除。
-- `SettingsService`：检索来源限制和 LLM 配置档案管理。
+## 数据库生命周期
 
-主服务可使用以下命令生成 Python 客户端：
+数据库引擎和异步会话工厂由 FastAPI `lifespan` 调用 `create_database()` 创建，关闭时释放连接池。会话工厂使用 `async_sessionmaker(bind=engine, expire_on_commit=False)`。HTTP 从 `app.state.session_factory` 取得工厂，gRPC 通过构造参数接收工厂；每次操作创建独立会话。
 
-```powershell
-python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. app/protos/agent/v1/agent.proto
-```
+数据库代码统一放在 `app/db/`：`base.py` 定义唯一 ORM 基类，`session.py` 管理引擎与会话，`models/` 按表定义模型，`repositories/` 实现异步数据访问。业务服务负责校验和事务，仓储只查询、修改及 flush，不自行 commit。
 
-最小调用示例：
+MySQL 使用 `mysql+aiomysql://`，现有 `mysql+pymysql://` 和 `mysql://` 配置会在创建异步引擎时转换驱动；SQLite 使用 `sqlite+aiosqlite://`，也兼容原有 `sqlite://` 配置。设置和记忆 CRUD 使用原生 `AsyncSession`，同步建表接口仍通过 `AsyncConnection.run_sync()` 执行。
 
-```python
-import grpc
-from app.protos.agent.v1 import agent_pb2, agent_pb2_grpc
-
-async with grpc.aio.insecure_channel("agent-service:50052") as channel:
-    agent = agent_pb2_grpc.AgentServiceStub(channel)
-    started = await agent.StartRun(agent_pb2.StartRunRequest(
-        user_id="verified-user-id",
-        conversation_id="conversation-1",
-        run_id="run-1",
-        message="检索多模态大模型视觉 token 压缩论文",
-    ))
-    async for event in agent.SubscribeRunEvents(
-        agent_pb2.SubscribeRunEventsRequest(
-            user_id="verified-user-id",
-            conversation_id=started.conversation_id,
-            run_id=started.run_id,
-        )
-    ):
-        print(event.sequence, event.event_name, event.data_json)
-```
-
-## LLM 配置档案
-
-主服务通过 `SettingsService` 管理 OpenAI-compatible 与 DeepSeek 的多个 LLM 配置档案，并在 `AgentService.StartRun` 中传入可选 `llm_profile_id`。未指定时使用默认档案，未创建默认档案时回退到现有 `.env` 配置。
-
-启用配置档案前，必须在服务端 `.env` 设置用于加密 API Key 的 Fernet 密钥：
-
-```powershell
-.\.venv311\Scripts\python.exe -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-```
-
-将输出写入 `LLM_PROFILE_ENCRYPTION_KEY`。请妥善保管该密钥；更换或丢失后，现有档案中的 API Key 将无法解密。
+本次移除了 `agent_conversation`、`agent_run`、`agent_message` 和 `llm_profiles` 的本地 ORM 定义及旧功能接入，不执行删表或数据清理。设置、长期记忆的表定义以及 SQLite 事件回放存储保留。LLM 调用使用既有环境配置。
 
 ## 预下载 RAG 模型
 

@@ -7,8 +7,10 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.config import settings
-from app.llm.tools.base import BaseTool, as_tool
-from app.llm.tools.registry import ToolExecutionContext
+from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
+
+from app.llm.tools.registry import ToolExecutionContext, require_tool_context
 from app.memory.procedural.loader import (
     Skill,
     render_skill_document,
@@ -94,11 +96,33 @@ async def create_skill_handler(
     }
 
 
-CREATE_SKILL_TOOL = BaseTool(
-    name="create_skill",
-    description="为当前用户创建可复用的本地工作流 Skill。仅在用户明确要求沉淀或创建可复用流程时使用。",
-    input_schema=CreateSkillArgs.model_json_schema(),
-    fn=as_tool(create_skill_handler),
-    requires_confirmation=True,
-    params_model=CreateSkillArgs,
+@tool(
+    "create_skill",
+    description=(
+        "为当前用户创建可复用的本地工作流 Skill。"
+        "仅当用户明确要求保存或创建可复用流程时，调用此工具。"
+        "输入应包含技能名称 name、单行用途说明 description、触发词 triggers 和执行步骤 instructions。"
+        "技能名称使用小写字母、数字或连字符，不覆盖已有同名技能。"
+    ),
+    args_schema=CreateSkillArgs,
 )
+async def create_skill_tool(
+    *,
+    config: RunnableConfig,
+    name: str,
+    description: str,
+    triggers: list[str],
+    instructions: str,
+) -> dict[str, Any]:
+    """为当前用户创建可复用的本地工作流 Skill。仅在用户明确要求沉淀或创建可复用流程时使用。"""
+    params = {
+        "name": name,
+        "description": description,
+        "triggers": triggers,
+        "instructions": instructions,
+    }
+    return await create_skill_handler(params, require_tool_context(config))
+
+
+CREATE_SKILL_TOOL = create_skill_tool
+CREATE_SKILL_TOOL.metadata = {"requires_confirmation": True}

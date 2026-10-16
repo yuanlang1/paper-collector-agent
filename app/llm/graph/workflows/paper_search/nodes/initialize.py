@@ -5,23 +5,14 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from app.llm.subagents.paper_search import PaperSearchDelegation
+from app.llm.subagents.paper_search import PaperSearchParams
 
 
 async def initialize_paper_search_node(
     state: Mapping[str, Any],
 ) -> dict[str, Any]:
-    call = state.get("active_tool_call")
-    request_payload = call.get("args") if isinstance(call, Mapping) else None
-    if not isinstance(request_payload, Mapping):
-        return {
-            "stage": "failed",
-            "status": "failed",
-            "error": "论文检索子图缺少有效委派请求。",
-        }
-
     try:
-        request = PaperSearchDelegation.model_validate(request_payload)
+        request = PaperSearchParams.model_validate(state)
     except ValidationError as exc:
         return {
             "stage": "failed",

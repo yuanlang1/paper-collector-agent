@@ -6,7 +6,7 @@ from typing import Any, Dict, Literal
 
 from pydantic import BaseModel, Field
 
-from app.llm.tools.base import BaseTool, as_tool
+from langchain_core.tools import tool
 from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.arxiv.search_arxiv import arxiv_search_service
 
@@ -401,14 +401,35 @@ async def arxiv_supplement_handler(
     }
 
 
-ARXIV_SUPPLEMENT_TOOL = BaseTool(
-    name="arxiv_supplement",
+@tool(
+    "arxiv_supplement",
     description=(
-        "当 DBLP 或 Google Scholar 检索结果中的论文缺少 summary、pdf_url、"
-        "abstract_url 或 arxiv_id 时，使用 DOI 或标题到 arXiv 检索并补全字段。"
-        "该工具不负责初始论文检索，只负责对已有 papers 做字段增强。"
+        "通过 arXiv 匹配结果补全已有论文的缺失字段。"
+        "当 DBLP、Google Scholar 等来源的论文缺少摘要、PDF 链接或 arXiv ID 时，调用此工具。"
+        "输入 papers 应为已有论文列表，包含可供匹配的 DOI 或标题；可用 fill_fields 指定需要补全的字段。"
+        "默认仅补缺失值，不用于初始论文检索。"
     ),
-    input_schema=ArxivSupplementArgs.model_json_schema(),
-    fn=as_tool(arxiv_supplement_handler),
-    params_model=ArxivSupplementArgs,
+    args_schema=ArxivSupplementArgs,
 )
+async def arxiv_supplement_tool(
+    *,
+    papers: list[dict[str, Any]],
+    fill_fields: list[Literal['summary', 'pdf_url', 'abstract_url', 'arxiv_id', 'published', 'updated', 'authors', 'categories', 'doi']] | None = None,
+    match_threshold: float = 0.88,
+    max_candidates: int = 3,
+    only_when_missing: bool = True,
+) -> dict[str, Any]:
+    """当 DBLP 或 Google Scholar 检索结果中的论文缺少 summary、pdf_url、abstract_url 或 arxiv_id 时，使用 DOI 或标题到 arXiv 检索并补全字段。该工具不负责初始论文检索，只负责对已有 papers 做字段增强。"""
+    params = {
+        "papers": papers,
+        "match_threshold": match_threshold,
+        "max_candidates": max_candidates,
+        "only_when_missing": only_when_missing,
+    }
+    if fill_fields is not None:
+        params["fill_fields"] = fill_fields
+    return await arxiv_supplement_handler(params, None)
+
+
+ARXIV_SUPPLEMENT_TOOL = arxiv_supplement_tool
+ARXIV_SUPPLEMENT_TOOL.metadata = {"requires_confirmation": False}

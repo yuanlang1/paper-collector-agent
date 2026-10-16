@@ -222,7 +222,6 @@ class ReviewCitationTests(unittest.IsolatedAsyncioTestCase):
         ):
             result = await finalize_task_review_node(
                 {
-                    "active_tool_call": {"id": "review", "name": "task_review_agent"},
                     "child_run_id": "child-review-finalize",
                     "stage": "failed",
                     "error_code": "VERIFICATION_PROTOCOL_FAILED",
@@ -232,10 +231,8 @@ class ReviewCitationTests(unittest.IsolatedAsyncioTestCase):
             )
 
         store.delete_run_directories.assert_not_awaited()
-        self.assertEqual(
-            result["last_action_result"]["artifact_refs"],
-            ["artifact://review/verify/result.json"],
-        )
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("artifact://review/verify/result.json", result["content"])
 
     async def test_stale_reflection_report_cannot_approve_a_new_draft(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

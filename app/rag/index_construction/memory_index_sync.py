@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable, Iterable, Sequence
 from functools import lru_cache
 
 from app.config import settings
-from app.models.memory import MemoryEpisode, MemoryFact, PREFERENCE_SUBJECT
+from app.db.models import MemoryEpisode, MemoryFact, PREFERENCE_SUBJECT
 from app.rag.index_construction.memory_episode_index_construction import (
     MemoryEpisodeIndexConstructionModule,
 )

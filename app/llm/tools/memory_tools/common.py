@@ -1,24 +1,11 @@
 from __future__ import annotations
 
-from typing import Any
-
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.tools.registry import ToolExecutionContext
-from app.models.memory import MemoryFact
 
 
-def require_database(context: ToolExecutionContext) -> Session:
+def require_database(context: ToolExecutionContext) -> AsyncSession:
     if context.db is None:
         raise RuntimeError("Tool execution requires a database session")
     return context.db
-
-
-def fact_data(fact: MemoryFact) -> dict[str, Any]:
-    return {
-        "id": fact.id,
-        "subject": fact.subject,
-        "content": fact.content,
-        "status": fact.status,
-        "updated_at": fact.updated_at.isoformat(),
-    }

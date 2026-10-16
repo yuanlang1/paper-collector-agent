@@ -15,7 +15,7 @@ from app.llm.graph.workflows.task_indexing.nodes.run_or_wait import (
 from app.llm.graph.workflows.task_indexing.nodes.verify_completion import (
     verify_task_indexing_node,
 )
-from app.llm.graph.workflows.task_indexing.state import TaskIndexingWorkflowState
+from app.llm.graph.workflows.task_indexing.state import TaskIndexingOutputState, TaskIndexingWorkflowState
 from app.llm.graph.workflows.progress import (
     instrument_subagent_progress_node,
 )
@@ -60,7 +60,7 @@ def build_task_indexing_workflow(
             data_builder=_progress_data,
         )
 
-    builder = StateGraph(TaskIndexingWorkflowState)
+    builder = StateGraph(TaskIndexingWorkflowState, output_schema=TaskIndexingOutputState)
     builder.add_node("initialize", node("initialize", initialize_task_indexing_node))
     builder.add_node(
         "check_rag_status",

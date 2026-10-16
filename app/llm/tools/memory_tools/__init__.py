@@ -1,1 +1,1 @@
-"""Tools for user-managed notes, preferences, and reusable skills."""
+"""Tools for user preferences and reusable skills."""

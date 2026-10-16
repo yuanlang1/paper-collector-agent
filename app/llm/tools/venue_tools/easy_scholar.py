@@ -9,7 +9,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import settings
-from app.llm.tools.base import BaseTool, as_tool
+from langchain_core.tools import tool
 from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.common import (
     elapsed_ms,
@@ -215,15 +215,25 @@ async def easy_scholar_venue_handler(
         },
     }
 
-EASY_SCHOLAR_VENUE_TOOL = BaseTool(
-    name="get_venue_info",
+@tool(
+    "get_venue_info",
     description=(
-        "查询单个学术期刊的等级信息。可返回 JCR 分区、CCF、"
-        "影响因子、中科院分区、北大核心、CSSCI、EI、CSCD 等；"
-        "仅用于期刊等级查询，不用于检索论文。"
+        "查询单个学术期刊的等级及收录信息，包括 JCR 分区、CCF、影响因子、中科院分区、北大核心、CSSCI、EI 和 CSCD 等。"
+        "当用户需要了解期刊等级、分区或影响力时，调用此工具。"
+        "输入 publication_name 应为明确的期刊名称，例如 Nature；不用于检索论文。"
     ),
-    input_schema=EasyScholarVenueArgs.model_json_schema(),
-    fn=as_tool(easy_scholar_venue_handler),
-    requires_confirmation=False,
-    params_model=EasyScholarVenueArgs,
+    args_schema=EasyScholarVenueArgs,
 )
+async def get_venue_info_tool(
+    *,
+    publication_name: str,
+) -> dict[str, Any]:
+    """查询单个学术期刊的等级信息。可返回 JCR 分区、CCF、影响因子、中科院分区、北大核心、CSSCI、EI、CSCD 等；仅用于期刊等级查询，不用于检索论文。"""
+    params = {
+        "publication_name": publication_name,
+    }
+    return await easy_scholar_venue_handler(params, None)
+
+
+EASY_SCHOLAR_VENUE_TOOL = get_venue_info_tool
+EASY_SCHOLAR_VENUE_TOOL.metadata = {"requires_confirmation": False}

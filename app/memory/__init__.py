@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.memory.episodic.service import EpisodeService
 from app.memory.semantic.service import FactService
@@ -11,7 +11,7 @@ class Memory:
 
     def __init__(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         user_id: str,
     ) -> None:

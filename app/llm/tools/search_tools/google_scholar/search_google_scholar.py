@@ -8,7 +8,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import settings
-from app.llm.tools.base import BaseTool, ToolResult
+from langchain_core.tools import tool
 from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.common import RETRYABLE_STATUS_CODES, clean_text, elapsed_ms, parse_year
 
@@ -435,26 +435,41 @@ async def _fetch_scholar_pages(args: GoogleScholarSearchArgs) -> dict[str, Any]:
     }
 
 
-async def google_scholar_search_handler(
-    params: dict[str, Any],
-    context: ToolExecutionContext,
-) -> ToolResult:
-    return ToolResult(
-        content=str(await google_scholar_search_service(params, context))
-    )
-
-
-GOOGLE_SCHOLAR_SEARCH_TOOL = BaseTool(
-    name="google_scholar_search",
+@tool(
+    "google_scholar_search",
     description=(
         "通过 SerpApi 的 Google Scholar 接口少量检索学术论文。"
-        "适用于补充跨领域候选论文、获取引用量、版本数及 PDF 候选链接。"
-        "单次默认返回 5 篇，最多 10 篇。"
-        "Google Scholar 返回的是摘要片段 snippet，而非完整论文摘要。"
+        "当需要补充跨领域候选论文、获取引用量、版本数或 PDF 候选链接时，调用此工具。"
+        "输入 query 应为明确的研究主题、论文标题或关键词，可附加年份及综述筛选条件。"
+        "默认返回 5 篇，少量检索最多取 10 篇；返回的 snippet 是摘要片段，不是完整摘要。"
         "不用于批量检索、分页、文件导出或跨来源补全。"
     ),
-    input_schema=GoogleScholarSearchArgs.model_json_schema(),
-    fn=google_scholar_search_handler,
-    requires_confirmation=False,
-    params_model=GoogleScholarSearchArgs,
+    args_schema=GoogleScholarSearchArgs,
 )
+async def google_scholar_search_tool(
+    *,
+    query: str,
+    start: int = 0,
+    num: int = 5,
+    total_limit: int = 5,
+    max_pages: int = 1,
+    year_from: int | None = None,
+    year_to: int | None = None,
+    review_only: bool = False,
+) -> dict[str, Any]:
+    """通过 SerpApi 的 Google Scholar 接口少量检索学术论文。适用于补充跨领域候选论文、获取引用量、版本数及 PDF 候选链接。单次默认返回 5 篇，最多 10 篇。Google Scholar 返回的是摘要片段 snippet，而非完整论文摘要。不用于批量检索、分页、文件导出或跨来源补全。"""
+    params = {
+        "query": query,
+        "start": start,
+        "num": num,
+        "total_limit": total_limit,
+        "max_pages": max_pages,
+        "year_from": year_from,
+        "year_to": year_to,
+        "review_only": review_only,
+    }
+    return await google_scholar_search_service(params, None)
+
+
+GOOGLE_SCHOLAR_SEARCH_TOOL = google_scholar_search_tool
+GOOGLE_SCHOLAR_SEARCH_TOOL.metadata = {"requires_confirmation": False}

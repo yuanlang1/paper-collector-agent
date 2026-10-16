@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from typing import List, Literal
 
 from sqlalchemy import false
@@ -28,8 +28,6 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str
     THINKING_TYPE: str
     REASONING_EFFORT: str
-    LLM_PROFILE_ENCRYPTION_KEY: str | None = None
-    LLM_PROFILE_ENCRYPTION_KEY: str
 
     # Nacos
     NACOS_SERVER_ADDR: str
@@ -114,10 +112,13 @@ class Settings(BaseSettings):
     MINERU_BASE_URL: str
     MINERU_PARSE_TIMEOUT_SECONDS: int = 1200
     TASK_RAG_POST_PROCESSING_GRACE_SECONDS: int = 600
-    TASK_RAG_WORKFLOW_TIMEOUT_SECONDS: int = 1800
+    TASK_RAG_WORKFLOW_TIMEOUT_SECONDS: int = Field(default=1800, ge=1, le=3600)
+    TASK_RAG_POLL_INTERVAL_SECONDS: int = Field(default=5, ge=1, le=60)
     TASK_RAG_LEASE_SECONDS: int = 1800
     SUBAGENT_DISPATCH_TIMEOUT_SECONDS: int = 1800
     TASK_REVIEW_SUBAGENT_TIMEOUT_SECONDS: int = 3600
+    TASK_REVIEW_MAX_REFLECTION_ROUNDS: int = Field(default=5, ge=1, le=5)
+    TASK_REVIEW_MAX_WRITING_REVISION_ROUNDS: int = Field(default=1, ge=0, le=5)
     SUBAGENT_DISPATCH_TIMEOUT_GRACE_SECONDS: int = 60
 
     # embedding settings
@@ -148,6 +149,15 @@ class Settings(BaseSettings):
     APP_TIMEZONE: str = "Asia/Shanghai"
     AGENT_SKILLS_DIR: str = "data/agent-skills"
     AGENT_HISTORY_TURNS: int = 12
+
+    DATABASE_POSTGRES_URL: str
+
+    @model_validator(mode="after")
+    def validate_task_rag_timeout(self) -> "Settings":
+        minimum = self.MINERU_PARSE_TIMEOUT_SECONDS + self.TASK_RAG_POST_PROCESSING_GRACE_SECONDS
+        if self.TASK_RAG_WORKFLOW_TIMEOUT_SECONDS < minimum:
+            raise ValueError("TASK_RAG_WORKFLOW_TIMEOUT_SECONDS must cover parsing and post-processing")
+        return self
 
     @model_validator(mode="after")
     def validate_paper_search_pagination(self) -> "Settings":

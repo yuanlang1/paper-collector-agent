@@ -14,7 +14,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.tools.base import BaseTool, as_tool
+from langchain_core.tools import tool
 from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.common import (
     RETRYABLE_STATUS_CODES,
@@ -427,15 +427,34 @@ async def download_file_handler(
         )
 
 
-DOWNLOAD_FILE_TOOL = BaseTool(
-    name="download_file",
+@tool(
+    "download_file",
     description=(
-        "根据 HTTP 或 HTTPS 下载链接下载文件。"
-        "必须提供保存目录 save_dir 和文件名 file_name。"
-        "默认仅下载并校验 PDF，单个文件最大 50 MB。"
+        "将 HTTP 或 HTTPS 链接指向的文件下载并保存到本地。"
+        "当用户明确要求下载文件时，调用此工具。"
+        "输入应包含文件链接 url、相对于产物目录的 save_dir 和文件名 file_name。"
+        "默认下载并校验 PDF，单个文件最大 50 MB；需要其他类型时使用 expected_type=any。"
     ),
-    input_schema=DownloadFileArgs.model_json_schema(),
-    fn=as_tool(download_file_handler),
-    requires_confirmation=True,
-    params_model=DownloadFileArgs,
+    args_schema=DownloadFileArgs,
 )
+async def download_file_tool(
+    *,
+    url: str,
+    save_dir: str,
+    file_name: str,
+    expected_type: Literal['pdf', 'any'] = 'pdf',
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """根据 HTTP 或 HTTPS 下载链接下载文件。必须提供保存目录 save_dir 和文件名 file_name。默认仅下载并校验 PDF，单个文件最大 50 MB。"""
+    params = {
+        "url": url,
+        "save_dir": save_dir,
+        "file_name": file_name,
+        "expected_type": expected_type,
+        "overwrite": overwrite,
+    }
+    return await download_file_handler(params, None)
+
+
+DOWNLOAD_FILE_TOOL = download_file_tool
+DOWNLOAD_FILE_TOOL.metadata = {"requires_confirmation": True}

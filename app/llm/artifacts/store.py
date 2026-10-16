@@ -11,7 +11,7 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from app.config import settings
-from app.history.chat_log import InvalidRunIdError, validate_run_id
+from app.core.identifiers import InvalidRunIdError, validate_run_id
 from app.llm.artifacts.schemas import ArtifactRef
 
 

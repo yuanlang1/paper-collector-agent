@@ -7,6 +7,7 @@ from typing import Literal
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, model_validator
 
+from app.config import settings
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.citations import (
     citation_paper_ids,
@@ -229,7 +230,7 @@ class ReflectReviewNode:
             stop_reason = "hard_constraints_failed"
         elif (
             decision == "revise"
-            and state["writing_revision_round"] >= state["max_writing_revision_rounds"]
+            and state["writing_revision_round"] >= settings.TASK_REVIEW_MAX_WRITING_REVISION_ROUNDS
         ):
             effective_decision = "blocked"
             stop_reason = "writing_revision_limit_reached"

@@ -11,7 +11,7 @@ from urllib.parse import quote
 import httpx
 
 from app.config import settings
-from app.llm.tools.base import BaseTool, ToolResult
+from langchain_core.tools import tool
 from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.common import (
     RETRYABLE_STATUS_CODES,
@@ -423,24 +423,41 @@ async def crossref_search_service(
         )
 
 
-async def crossref_search_handler(
-    params: Dict[str, Any],
-    context: ToolExecutionContext,
-) -> ToolResult:
-    return ToolResult(
-        content=str(await crossref_search_service(params, context))
-    )
-
-
-CROSSREF_SEARCH_TOOL = BaseTool(
-    name="crossref_search",
+@tool(
+    "crossref_search",
     description=(
-        "通过 Crossref 查询论文元数据。支持 DOI 精确查询，或按标题、"
-        "关键词、作者、ISSN、发表日期和作品类型检索。"
-        "返回 DOI、作者、期刊或会议、发表日期、引用数及可用 PDF 链接。"
+        "通过 Crossref 查询论文的 DOI、作者、期刊或会议、发表日期、引用量及可用 PDF 链接等元数据。"
+        "当需要核对论文书目信息，或按标题、关键词、作者、ISSN、发表日期和作品类型查找论文时，调用此工具。"
+        "输入应为精确的 doi，或 query、title、author 等检索条件；DOI 查询不能与其他筛选条件混用。"
     ),
-    input_schema=CrossrefSearchArgs.model_json_schema(),
-    fn=crossref_search_handler,
-    requires_confirmation=False,
-    params_model=CrossrefSearchArgs,
+    args_schema=CrossrefSearchArgs,
 )
+async def crossref_search_tool(
+    *,
+    doi: str | None = None,
+    query: str | None = None,
+    title: str | None = None,
+    author: str | None = None,
+    issn: str | None = None,
+    from_pub_date: date | None = None,
+    until_pub_date: date | None = None,
+    work_type: str | None = None,
+    limit: int = 5,
+) -> dict[str, Any]:
+    """通过 Crossref 查询论文元数据。支持 DOI 精确查询，或按标题、关键词、作者、ISSN、发表日期和作品类型检索。返回 DOI、作者、期刊或会议、发表日期、引用数及可用 PDF 链接。"""
+    params = {
+        "doi": doi,
+        "query": query,
+        "title": title,
+        "author": author,
+        "issn": issn,
+        "from_pub_date": from_pub_date,
+        "until_pub_date": until_pub_date,
+        "work_type": work_type,
+        "limit": limit,
+    }
+    return await crossref_search_service(params, None)
+
+
+CROSSREF_SEARCH_TOOL = crossref_search_tool
+CROSSREF_SEARCH_TOOL.metadata = {"requires_confirmation": False}

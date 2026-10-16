@@ -6,23 +6,14 @@ from typing import Any
 from pydantic import ValidationError
 
 from app.llm.graph.workflows.task_indexing.nodes.common import failure
-from app.llm.subagents.task_indexing import TaskIndexingDelegation
+from app.llm.subagents.task_indexing import TaskIndexingParams
 
 
 async def initialize_task_indexing_node(
     state: Mapping[str, Any],
 ) -> dict[str, Any]:
-    call = state.get("active_tool_call")
-    raw_request = call.get("args") if isinstance(call, Mapping) else None
-    if not isinstance(raw_request, Mapping):
-        return failure(
-            code="INVALID_INDEXING_REQUEST",
-            message="missing task indexing delegation",
-            state=state,
-        )
-
     try:
-        request = TaskIndexingDelegation.model_validate(raw_request)
+        request = TaskIndexingParams.model_validate(state)
     except ValidationError as exc:
         return failure(
             code="INVALID_INDEXING_REQUEST",
@@ -32,8 +23,6 @@ async def initialize_task_indexing_node(
 
     return {
         "task_id": request.task_id,
-        "timeout_seconds": request.timeout_seconds,
-        "poll_interval_seconds": request.poll_interval_seconds,
         "stage": "checking_status",
         "status": "running",
         "error_code": None,

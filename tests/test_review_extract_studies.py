@@ -274,7 +274,7 @@ class ExtractStudiesNodeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("topic", json.loads(first_prompt))
         self.assertIn("zh-CN", first_prompt)
         self.assertTrue(any(isinstance(message, ToolMessage) for message in model.messages[1]))
-        self.assertEqual(model.tools[0]["function"]["name"], "search_paper_index")
+        self.assertEqual(model.tools[0].name, "search_paper_index")
 
     async def test_all_not_reported_is_unusable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -579,13 +579,12 @@ class ExtractStudiesNodeTests(unittest.IsolatedAsyncioTestCase):
             result = await finalize_task_review_node(
                 {
                     **update,
-                    "active_tool_call": {"id": "call-1", "name": "task_review"},
                     "child_run_id": "child-review-test",
                     "task_id": 1,
                 }
             )
-            self.assertEqual(result["last_action_result"]["artifact_refs"], [])
-            self.assertNotIn("artifact://", str(result["last_action_result"]))
+            self.assertEqual(result["status"], "failed")
+            self.assertNotIn("artifact://", result["content"])
 
     def test_markdown_context_takes_first_two_sections_without_title_selection(self) -> None:
         markdown = "# Introduction\nOpening.\n## Details\nDetails.\n# Abstract\nAbstract.\n# Conclusion\nConclusion."

@@ -3,10 +3,10 @@ from collections.abc import Mapping
 from math import ceil
 from typing import Any
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.system_setting import SystemSetting
+from app.db.repositories.system_setting import SystemSettingRepository
 
 
 SOURCE_LIMITS_KEY = "source_limits"
@@ -77,8 +77,9 @@ def source_pagination_settings(
     }
 
 
-def get_setting(db: Session, key: str, default: Any = None) -> Any:
-    setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+async def get_setting(db: AsyncSession, key: str, default: Any = None) -> Any:
+    async with db.begin():
+        setting = await SystemSettingRepository(db).get(key)
     if setting and setting.value:
         try:
             return json.loads(setting.value)
@@ -87,19 +88,14 @@ def get_setting(db: Session, key: str, default: Any = None) -> Any:
     return default
 
 
-def save_setting(db: Session, key: str, value: Any) -> None:
+async def save_setting(db: AsyncSession, key: str, value: Any) -> None:
     serialized = json.dumps(value, ensure_ascii=False)
-    setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
-    if setting is None:
-        db.add(SystemSetting(key=key, value=serialized))
-    else:
-        setting.value = serialized
-        setting.modifier_id = 0
-    db.commit()
+    async with db.begin():
+        await SystemSettingRepository(db).set_value(key, serialized)
 
 
-def get_source_limits(db: Session) -> dict[str, int]:
-    stored = get_setting(db, SOURCE_LIMITS_KEY)
+async def get_source_limits(db: AsyncSession) -> dict[str, int]:
+    stored = await get_setting(db, SOURCE_LIMITS_KEY)
     if not isinstance(stored, Mapping):
         return default_source_limits()
     try:
@@ -108,14 +104,14 @@ def get_source_limits(db: Session) -> dict[str, int]:
         return default_source_limits()
 
 
-def save_source_limits(
-    db: Session,
+async def save_source_limits(
+    db: AsyncSession,
     source_limits: Mapping[str, Any],
 ) -> dict[str, int]:
     normalized = validate_source_limits(source_limits)
-    save_setting(db, SOURCE_LIMITS_KEY, normalized)
+    await save_setting(db, SOURCE_LIMITS_KEY, normalized)
     return normalized
 
 
-def get_custom_system_prompt(db: Session) -> str:
-    return get_setting(db, "agent_system_prompt", "") or ""
+async def get_custom_system_prompt(db: AsyncSession) -> str:
+    return (await get_setting(db, "agent_system_prompt", "")) or ""

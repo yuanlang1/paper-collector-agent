@@ -1,20 +1,19 @@
-from typing import Annotated, Any, Literal, TypedDict
+from typing import Any, Literal
 
-from langchain_core.messages import BaseMessage
-from langgraph.graph.message import add_messages
+from typing_extensions import TypedDict
+
+
+class TaskIndexingOutputState(TypedDict):
+    content: str
+    status: Literal["success", "failed", "timed_out"]
 
 
 class TaskIndexingWorkflowState(TypedDict, total=False):
     run_id: str
     child_run_id: str
-    active_tool_call: dict[str, Any] | None
-    messages: Annotated[list[BaseMessage], add_messages]
-    last_action_result: dict[str, Any] | None
-    artifact_refs: list[str]
+    content: str
 
     task_id: int
-    timeout_seconds: int
-    poll_interval_seconds: int
     remote_task_state: str | None
 
     stage: Literal[
@@ -25,7 +24,7 @@ class TaskIndexingWorkflowState(TypedDict, total=False):
         "failed",
         "timed_out",
     ]
-    status: Literal["running", "completed", "failed", "timed_out"]
+    status: Literal["running", "completed", "failed", "timed_out", "success"]
     error_code: str | None
     error: str | None
 

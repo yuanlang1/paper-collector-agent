@@ -5,6 +5,7 @@ from typing import Literal
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
+from app.config import settings
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import (
     content_hash,
@@ -522,7 +523,7 @@ class VerifyClaimsNode:
             if revisions:
                 if (
                     state["reflection_round"]
-                    >= state["max_reflection_rounds"] - 1
+                    >= settings.TASK_REVIEW_MAX_REFLECTION_ROUNDS - 1
                 ):
                     return {
                         **update,

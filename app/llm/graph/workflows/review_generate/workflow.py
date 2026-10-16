@@ -17,7 +17,7 @@ from app.llm.graph.workflows.review_generate.nodes.persist_review import Persist
 from app.llm.graph.workflows.review_generate.nodes.reflect_review import ReflectReviewNode
 from app.llm.graph.workflows.review_generate.nodes.render_section import RenderSectionsNode
 from app.llm.graph.workflows.review_generate.nodes.retrieve_evidence import RetrieveEvidenceNode
-from app.llm.graph.workflows.review_generate.state import TaskReviewWorkflowState
+from app.llm.graph.workflows.review_generate.state import TaskReviewOutputState, TaskReviewWorkflowState
 from app.llm.graph.workflows.progress import instrument_subagent_progress_node
 
 from app.llm.graph.workflows.review_generate.nodes.verify_claims import VerifyClaimsNode
@@ -128,7 +128,7 @@ def build_task_review_workflow(
             iteration_resolver=_iteration_resolver(name),
         )
 
-    builder = StateGraph(TaskReviewWorkflowState)
+    builder = StateGraph(TaskReviewWorkflowState, output_schema=TaskReviewOutputState)
     builder.add_node("verify_claims", node("verify_claims", lambda: VerifyClaimsNode(chat=chat)))
     builder.add_node("initialize", node("initialize", lambda: initialize_review_node))
     builder.add_node(

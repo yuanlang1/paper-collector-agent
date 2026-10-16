@@ -1,0 +1,34 @@
+from collections.abc import AsyncIterator
+
+from fastapi import Request
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+
+from app.config import settings
+
+
+def create_database() -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
+    url = make_url(settings.DATABASE_URL)
+    if url.drivername in {"mysql", "mysql+pymysql"}:
+        url = url.set(drivername="mysql+aiomysql")
+    engine = create_async_engine(
+        url,
+        pool_pre_ping=True,
+        pool_recycle=3600,
+        echo=settings.SQL_ECHO,
+    )
+    session_factory = async_sessionmaker(
+        bind=engine,
+        expire_on_commit=False,
+    )
+    return engine, session_factory
+
+
+async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
+    async with request.app.state.session_factory() as session:
+        yield session

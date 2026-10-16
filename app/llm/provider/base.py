@@ -12,7 +12,7 @@ ModelPurpose = Literal["agent", "memory"]
 @dataclass(frozen=True)
 class ModelOptions:
     temperature: float = 0.7
-    streaming: bool = False
+    streaming: bool = True
     purpose: ModelPurpose = "agent"
 
 

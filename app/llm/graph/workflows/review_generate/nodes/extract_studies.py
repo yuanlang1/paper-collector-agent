@@ -22,7 +22,6 @@ from app.infrastructure.oss import AliyunOssObjectStore, OssObjectStore
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
 from app.llm.tools.search_tools.search_paper_index import (
-    SEARCH_PAPER_INDEX_TOOL_SCHEMA,
     build_search_paper_index_tool,
 )
 from app.rag.retrieval.paper_content_retrieval import PaperContentHybridRetrievalModule
@@ -114,7 +113,7 @@ class ExtractStudiesNode:
             content_retrieval=self.content_retrieval,
             top_k=query_top_k,
         )
-        self.model = base_model.bind_tools([SEARCH_PAPER_INDEX_TOOL_SCHEMA])
+        self.model = base_model.bind_tools([self.search_paper_index_tool])
         self.reading_index = reading_index or PaperReadingIndexConstructionModule()
         self.max_rounds = max_rounds
         self.max_concurrent_papers = max_concurrent_papers
@@ -304,11 +303,11 @@ class ExtractStudiesNode:
                 if round_index == self.max_rounds - 1:
                     raise ProfileExtractionError("profile reading loop limit reached")
                 for tool_call in response.tool_calls:
-                    result = await self.search_paper_index_tool.fn(
-                        {**tool_call["args"], "paper_id": paper_id}, None,
+                    result = await self.search_paper_index_tool.ainvoke(
+                        {**tool_call["args"], "paper_id": paper_id},
                     )
                     messages.append(ToolMessage(
-                        content=result.content,
+                        content=self._json(result),
                         name=self.search_paper_index_tool.name,
                         tool_call_id=tool_call["id"],
                     ))

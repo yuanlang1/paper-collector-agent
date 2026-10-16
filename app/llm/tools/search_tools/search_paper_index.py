@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.llm.tools.base import BaseTool, ToolResult
+from langchain_core.tools import BaseTool, tool
 from app.rag.retrieval.paper_content_retrieval import PaperContentHybridRetrievalModule
 
 
@@ -50,16 +49,6 @@ class SearchPaperIndexArgs(BaseModel):
         if not value:
             raise ValueError("paper_id must not be blank")
         return value
-
-
-SEARCH_PAPER_INDEX_TOOL_SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "search_paper_index",
-        "description": "Search indexed Markdown chunks for one specified paper.",
-        "parameters": SearchPaperIndexArgs.model_json_schema(),
-    },
-}
 
 
 def _clip(value: str, max_chars: int) -> str:
@@ -116,18 +105,22 @@ def build_search_paper_index_tool(
     content_retrieval: PaperContentHybridRetrievalModule,
     top_k: int = QUERY_TOP_K,
 ) -> BaseTool:
-    async def handler(params: dict[str, Any], _context: Any) -> ToolResult:
-        result = await search_paper_index(
-            params,
+    @tool(
+        "search_paper_index",
+        description=(
+            "在指定论文的已有索引中检索相关 Markdown 正文片段。"
+            "当需要查找某篇论文的方法、实验、结论或支持论点的原文证据时，调用此工具。"
+            "输入应包含目标论文 paper_id，以及 querys 中的一到三条具体内容检索语句。"
+            "检索范围仅限该论文，不用于外部论文搜索。"
+        ),
+        args_schema=SearchPaperIndexArgs,
+    )
+    async def search_paper_index_tool(querys: list[str], paper_id: str) -> dict[str, Any]:
+        """在指定论文的索引内容中批量检索 Markdown 片段。"""
+        return await search_paper_index(
+            {"querys": querys, "paper_id": paper_id},
             content_retrieval=content_retrieval,
             top_k=top_k,
         )
-        return ToolResult(content=json.dumps(result, ensure_ascii=False, separators=(",", ":")))
 
-    return BaseTool(
-        name="search_paper_index",
-        description="在指定论文的索引内容中批量检索 Markdown 片段。",
-        input_schema=SearchPaperIndexArgs.model_json_schema(),
-        fn=handler,
-        params_model=SearchPaperIndexArgs,
-    )
+    return search_paper_index_tool

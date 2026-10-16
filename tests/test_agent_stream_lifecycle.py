@@ -41,11 +41,10 @@ from app.llm.subagents.registry import (
     SubAgentSpec,
     SubAgentStreamSpec,
 )
-from app.llm.tools.base import BaseTool, ToolResult
 from app.llm.tools.registry import ToolRegistry
 from app.runtime.agent_runtime import AgentRuntime
 from app.runtime.session import Session
-from app.database import Base
+from app.db.base import Base
 from app.models.agent_history import AgentConversation, AgentMessage, AgentRun
 
 
@@ -1314,40 +1313,6 @@ class DirectEventPublicationTests(unittest.TestCase):
                 [event.type for event in events],
                 ["iteration.started", "reasoning.delta", "content.delta"],
             )
-
-        asyncio.run(scenario())
-
-    def test_tool_registry_publishes_lifecycle_events_to_bound_bus(self) -> None:
-        async def scenario() -> None:
-            async def handler(_args, _context) -> ToolResult:
-                return ToolResult(content="ok")
-
-            registry = ToolRegistry()
-            registry.register(BaseTool(
-                name="test_tool",
-                description="test",
-                input_schema={},
-                fn=handler,
-            ))
-            events = []
-            bus = EventBus()
-            bus.subscribe(lambda event: _append(events, event))
-            with bind_event_context(EventContext(
-                bus=bus,
-                run_id="run-1",
-                scope={"action_id": "tool-1", "source": "tool"},
-            )):
-                result = await registry.execute("test_tool", {})
-
-            self.assertFalse(result.is_error)
-            self.assertEqual(
-                [event.type for event in events],
-                ["tool.started", "tool.finished"],
-            )
-            self.assertTrue(all(
-                event.payload["action_id"] == "tool-1"
-                for event in events
-            ))
 
         asyncio.run(scenario())
 

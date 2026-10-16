@@ -5,14 +5,14 @@ from unittest.mock import AsyncMock, patch
 from langchain_core.documents import Document
 from pydantic import ValidationError
 
-from app.config import settings
+from app.config import Settings, settings
 from app.infrastructure.grpc.rag_grpc_client import RagGrpcClient
 from app.infrastructure.grpc.task_service_grpc_client import TaskState
 from app.infrastructure.mineru.mineru_client import MinerUClient
 from app.llm.graph.workflows.task_indexing.nodes.run_or_wait import (
     RunOrWaitTaskRagNode,
 )
-from app.llm.subagents.task_indexing import TaskIndexingDelegation
+from app.llm.subagents.task_indexing import TaskIndexingParams
 from app.protos.rag.v1 import rag_pb2
 from app.rag.data_preparation.data_preparation import DataPreparationModule
 from app.rag.file_parser.file_parser import FileParser
@@ -557,12 +557,13 @@ class MinerUBatchLoggingTests(unittest.IsolatedAsyncioTestCase):
 
 class TaskIndexingTimeoutTests(unittest.IsolatedAsyncioTestCase):
     async def test_defaults_leave_post_processing_time_after_mineru(self) -> None:
-        request = TaskIndexingDelegation(task_id=1)
+        request = TaskIndexingParams(task_id=1)
         client = MinerUClient(token="test-token")
         try:
-            self.assertEqual(
-                request.timeout_seconds,
+            self.assertEqual(request.model_dump(), {"task_id": 1})
+            self.assertGreaterEqual(
                 settings.TASK_RAG_WORKFLOW_TIMEOUT_SECONDS,
+                settings.MINERU_PARSE_TIMEOUT_SECONDS + settings.TASK_RAG_POST_PROCESSING_GRACE_SECONDS,
             )
             self.assertEqual(
                 client.parse_timeout,
@@ -577,7 +578,7 @@ class TaskIndexingTimeoutTests(unittest.IsolatedAsyncioTestCase):
             + settings.TASK_RAG_POST_PROCESSING_GRACE_SECONDS
         )
         with self.assertRaises(ValidationError):
-            TaskIndexingDelegation(task_id=1, timeout_seconds=minimum - 1)
+            Settings.model_validate(settings.model_dump() | {"TASK_RAG_WORKFLOW_TIMEOUT_SECONDS": minimum - 1})
 
     async def test_timeout_reconciles_remote_terminal_status(self) -> None:
         cases = (

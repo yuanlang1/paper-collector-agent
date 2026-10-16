@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, TypedDict
+from typing import Any, Literal
 
-from langchain_core.messages import BaseMessage
-from langgraph.graph.message import add_messages
+from typing_extensions import TypedDict
 
 
 SourceName = Literal["Google Scholar"]
@@ -31,6 +30,8 @@ PaperSearchStatus = Literal[
     "completed",
     "failed",
     "blocked",
+    "success",
+    "timed_out",
 ]
 
 
@@ -50,14 +51,18 @@ class SourceRunSummary(TypedDict):
     error: str | None
 
 
+class PaperSearchOutputState(TypedDict):
+    content: str
+    status: Literal["success", "failed", "timed_out"]
+
+
 class PaperSearchWorkflowState(TypedDict, total=False):
     conversation_id: str
     run_id: str
     child_run_id: str
-    active_tool_call: dict[str, Any] | None
-    messages: Annotated[list[BaseMessage], add_messages]
-    last_action_result: dict[str, Any] | None
-    artifact_refs: list[str]
+    prompt: str
+    task_id: int | None
+    content: str
     paper_search_source_limits: dict[str, int] | None
     original_prompt: str
 

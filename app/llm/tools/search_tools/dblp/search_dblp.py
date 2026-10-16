@@ -9,7 +9,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import settings
-from app.llm.tools.base import BaseTool, ToolResult
+from langchain_core.tools import tool
 from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.common import RETRYABLE_STATUS_CODES, clean_text, elapsed_ms, ensure_list, parse_year
 
@@ -495,26 +495,43 @@ async def dblp_search_service(
         )
 
 
-async def dblp_search_handler(
-    params: Dict[str, Any],
-    context: ToolExecutionContext,
-) -> ToolResult:
-    return ToolResult(
-        content=str(await dblp_search_service(params, context))
-    )
-
-
-DBLP_SEARCH_TOOL = BaseTool(
-    name="dblp_search",
+@tool(
+    "dblp_search",
     description=(
-        "从 DBLP 少量检索计算机领域出版物并直接返回论文元数据。"
-        "适用于论文标题、作者、研究主题、会议或期刊查询。"
-        "单次默认返回 5 篇，最多 20 篇。"
-        "DBLP 通常不提供摘要和 PDF，因此这些字段可能为空。"
+        "从 DBLP 少量检索计算机领域出版物并返回论文元数据。"
+        "当需要查找计算机领域某个主题、作者、会议或期刊的论文时，调用此工具。"
+        "输入 query 应为明确的论文标题、作者或研究关键词，可附加年份、出版场所和论文类型筛选。"
+        "默认返回 5 篇，少量检索最多取 20 篇；DBLP 通常不提供摘要和 PDF。"
         "不用于批量检索、分页、文件导出或跨来源去重。"
     ),
-    input_schema=DblpSearchArgs.model_json_schema(),
-    fn=dblp_search_handler,
-    requires_confirmation=False,
-    params_model=DblpSearchArgs,
+    args_schema=DblpSearchArgs,
 )
+async def dblp_search_tool(
+    *,
+    query: str,
+    f: int = 0,
+    h: int = 5,
+    total_limit: int = 5,
+    max_pages: int = 1,
+    year_from: int | None = None,
+    year_to: int | None = None,
+    venue: str | None = None,
+    paper_type: DblpPaperType = 'all',
+) -> dict[str, Any]:
+    """从 DBLP 少量检索计算机领域出版物并直接返回论文元数据。适用于论文标题、作者、研究主题、会议或期刊查询。单次默认返回 5 篇，最多 20 篇。DBLP 通常不提供摘要和 PDF，因此这些字段可能为空。不用于批量检索、分页、文件导出或跨来源去重。"""
+    params = {
+        "query": query,
+        "f": f,
+        "h": h,
+        "total_limit": total_limit,
+        "max_pages": max_pages,
+        "year_from": year_from,
+        "year_to": year_to,
+        "venue": venue,
+        "paper_type": paper_type,
+    }
+    return await dblp_search_service(params, None)
+
+
+DBLP_SEARCH_TOOL = dblp_search_tool
+DBLP_SEARCH_TOOL.metadata = {"requires_confirmation": False}

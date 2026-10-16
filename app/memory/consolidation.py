@@ -4,8 +4,7 @@ import asyncio
 from collections.abc import Sequence
 from typing import Protocol
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.memory.episodic.service import EpisodeService
 from app.memory.schemas import (
@@ -14,7 +13,7 @@ from app.memory.schemas import (
     HistoryTurn,
 )
 from app.memory.semantic.service import FactService
-from app.models.memory import MemoryConsolidationCursor
+from app.db.repositories.memory_consolidation_cursor import ConsolidationCursorRepository
 from app.history import chat_log
 from app.history.chat_log import AgentHistoryStore
 
@@ -31,7 +30,7 @@ class MemoryExtractionModel(Protocol):
 class Consolidator:
     def __init__(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         user_id: str,
         history_store: AgentHistoryStore,
@@ -39,6 +38,7 @@ class Consolidator:
         threshold_turns: int = 6,
     ) -> None:
         self.db = db
+        self.cursors = ConsolidationCursorRepository(db)
         self.user_id = user_id
         self.history_store = history_store
         self.extraction_model = extraction_model
@@ -53,7 +53,10 @@ class Consolidator:
         lock = self._locks.setdefault(conversation_id, asyncio.Lock())
 
         async with lock:
-            cursor = self._get_cursor(conversation_id)
+            async with self.db.begin():
+                cursor = await self.cursors.get(
+                    user_id=self.user_id, conversation_id=conversation_id,
+                )
             turns = await self.history_store.run(
                 chat_log.list_completed_turns_after,
                 user_id=self.user_id,
@@ -78,7 +81,7 @@ class Consolidator:
             fact_service = FactService(self.db, user_id=self.user_id)
             episode_service = EpisodeService(self.db, user_id=self.user_id)
 
-            try:
+            async with self.db.begin():
                 created_fact_records = []
                 source_message_ids = [
                     turn.assistant_message_id
@@ -86,7 +89,7 @@ class Consolidator:
                 ]
 
                 for candidate in extracted.facts:
-                    created = fact_service.stage_consolidated_candidate(
+                    created = await fact_service.stage_consolidated_candidate(
                         candidate=candidate,
                         source_conversation_id=conversation_id,
                         source_message_ids=source_message_ids,
@@ -97,62 +100,30 @@ class Consolidator:
                 created_episode_record = None
                 if extracted.episode is not None:
                     created_episode_record = (
-                        episode_service.stage_consolidated_candidate(
+                        await episode_service.stage_consolidated_candidate(
                             candidate=extracted.episode,
                             source_conversation_id=conversation_id,
                         )
                     )
 
                 last_message_id = turns[-1].assistant_message_id
-                self._advance_cursor(
+                await self.cursors.advance(
+                    user_id=self.user_id,
                     conversation_id=conversation_id,
                     last_assistant_message_id=last_message_id,
                 )
-                self.db.commit()
-                from app.rag.index_construction.memory_index_sync import (
-                    get_memory_index_synchronizer,
-                )
-
-                synchronizer = get_memory_index_synchronizer()
-                await synchronizer.upsert_facts(created_fact_records)
-                if created_episode_record is not None:
-                    await synchronizer.upsert_episodes([created_episode_record])
-
-                return ConsolidationResult(
-                    due=True,
-                    facts_created=len(created_fact_records),
-                    episode_created=created_episode_record is not None,
-                    last_assistant_message_id=last_message_id,
-                )
-            except Exception:
-                self.db.rollback()
-                raise
-
-    def _get_cursor(
-        self,
-        conversation_id: str,
-    ) -> MemoryConsolidationCursor | None:
-        return self.db.scalar(
-            select(MemoryConsolidationCursor).where(
-                MemoryConsolidationCursor.user_id == self.user_id,
-                MemoryConsolidationCursor.conversation_id == conversation_id,
+            from app.rag.index_construction.memory_index_sync import (
+                get_memory_index_synchronizer,
             )
-        )
 
-    def _advance_cursor(
-        self,
-        *,
-        conversation_id: str,
-        last_assistant_message_id: int,
-    ) -> None:
-        cursor = self._get_cursor(conversation_id)
-        if cursor is None:
-            cursor = MemoryConsolidationCursor(
-                user_id=self.user_id,
-                conversation_id=conversation_id,
-                last_assistant_message_id=last_assistant_message_id,
+            synchronizer = get_memory_index_synchronizer()
+            await synchronizer.upsert_facts(created_fact_records)
+            if created_episode_record is not None:
+                await synchronizer.upsert_episodes([created_episode_record])
+
+            return ConsolidationResult(
+                due=True,
+                facts_created=len(created_fact_records),
+                episode_created=created_episode_record is not None,
+                last_assistant_message_id=last_message_id,
             )
-            self.db.add(cursor)
-        else:
-            cursor.last_assistant_message_id = last_assistant_message_id
-        self.db.flush()

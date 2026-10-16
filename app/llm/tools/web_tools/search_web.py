@@ -10,7 +10,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.config import settings
-from app.llm.tools.base import BaseTool, as_tool
+from langchain_core.tools import tool
 from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.common import (
     RETRYABLE_STATUS_CODES,
@@ -283,15 +283,39 @@ async def search_web_handler(
         )
 
 
-SEARCH_WEB_TOOL = BaseTool(
-    name="search_web",
+@tool(
+    "search_web",
     description=(
-        "通过 Firecrawl 搜索实时网页、官网文档或新闻。"
-        "默认只返回标题、链接和摘要；仅在需要阅读页面内容时设置 include_markdown=true。"
-        "完整论文检索仍应使用 paper_search_agent。"
+        "通过 Firecrawl 检索实时网页、官方文档和新闻。"
+        "当需要查找网络资料、核实最新信息或获取相关页面时，调用此工具。"
+        "输入 query 应为明确的检索关键词，可附加域名及时间筛选条件。"
+        "默认返回标题、链接和摘要，仅在需要阅读页面正文时设置 include_markdown=true。"
+        "完整论文检索流程应使用 paper_search_agent。"
     ),
-    input_schema=SearchWebArgs.model_json_schema(),
-    fn=as_tool(search_web_handler),
-    requires_confirmation=False,
-    params_model=SearchWebArgs,
+    args_schema=SearchWebArgs,
 )
+async def search_web_tool(
+    *,
+    query: str,
+    limit: int = 5,
+    include_domains: list[str] | None = None,
+    exclude_domains: list[str] | None = None,
+    tbs: str | None = None,
+    include_markdown: bool = False,
+) -> dict[str, Any]:
+    """通过 Firecrawl 搜索实时网页、官网文档或新闻。默认只返回标题、链接和摘要；仅在需要阅读页面内容时设置 include_markdown=true。完整论文检索仍应使用 paper_search_agent。"""
+    params = {
+        "query": query,
+        "limit": limit,
+        "tbs": tbs,
+        "include_markdown": include_markdown,
+    }
+    if include_domains is not None:
+        params["include_domains"] = include_domains
+    if exclude_domains is not None:
+        params["exclude_domains"] = exclude_domains
+    return await search_web_handler(params, None)
+
+
+SEARCH_WEB_TOOL = search_web_tool
+SEARCH_WEB_TOOL.metadata = {"requires_confirmation": False}

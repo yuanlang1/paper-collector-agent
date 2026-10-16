@@ -1,8 +1,26 @@
+from enum import Enum
 from typing import Any
 
-from app.llm.streaming.utils import (
-    to_jsonable,
-)
+
+def to_jsonable(value: Any) -> Any:
+    if isinstance(value, Enum):
+        return value.value
+
+    if hasattr(value, "model_dump"):
+        return to_jsonable(value.model_dump(mode="json"))
+
+    if isinstance(value, dict):
+        return {
+            key: to_jsonable(item)
+            for key, item in value.items()
+        }
+
+    if isinstance(value, (list, tuple, set)):
+        return [
+            to_jsonable(item) for item in value
+        ]
+
+    return value
 
 
 def _string_value(

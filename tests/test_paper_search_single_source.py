@@ -55,7 +55,7 @@ from app.llm.graph.workflows.paper_search.workflow import (
 )
 from app.llm.graph.workflows.paper_search_schemas import SearchTagArgs
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.subagents.paper_search import PaperSearchDelegation
+from app.llm.subagents.paper_search import PaperSearchParams
 from app.llm.tools.registry import build_tool_registry
 
 
@@ -172,12 +172,8 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
     async def test_initialize_binds_provided_task_id(self) -> None:
         update = await initialize_paper_search_node(
             {
-                "active_tool_call": {
-                    "args": {
-                        "prompt": "检索 RAG 方法论文",
-                        "task_id": 24,
-                    }
-                }
+                "prompt": "检索 RAG 方法论文",
+                "task_id": 24,
             }
         )
 
@@ -187,7 +183,7 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_initialize_clears_task_id_when_none_is_provided(self) -> None:
         update = await initialize_paper_search_node(
-            {"active_tool_call": {"args": {"prompt": "检索 RAG 方法论文"}}}
+            {"prompt": "检索 RAG 方法论文"}
         )
 
         self.assertIsNone(update["paper_service_task_id"])
@@ -1592,20 +1588,20 @@ class PaperSearchSingleSourceValidationTests(unittest.TestCase):
                 SearchTagArgs.model_validate({"sourceTag": [source]})
 
     def test_delegation_schema_does_not_expose_constraints(self) -> None:
-        schema = PaperSearchDelegation.model_json_schema()
+        schema = PaperSearchParams.model_json_schema()
         self.assertNotIn("constraints", schema["properties"])
         self.assertIn("task_id", schema["properties"])
 
     def test_delegation_accepts_only_positive_integer_task_ids(self) -> None:
         self.assertEqual(
-            PaperSearchDelegation.model_validate(
+            PaperSearchParams.model_validate(
                 {"prompt": "检索 RAG 方法论文", "task_id": 24}
             ).task_id,
             24,
         )
         for value in (True, 0, -1, "24"):
             with self.assertRaises(ValidationError):
-                PaperSearchDelegation.model_validate(
+                PaperSearchParams.model_validate(
                     {"prompt": "检索 RAG 方法论文", "task_id": value}
                 )
 
@@ -1613,7 +1609,7 @@ class PaperSearchSingleSourceValidationTests(unittest.TestCase):
         self.assertNotIn("download_pdfs", PaperSearchWorkflowState.__annotations__)
 
     def test_subgraph_only_uses_google_scholar(self) -> None:
-        names = {schema["name"] for schema in build_tool_registry().schemas()}
+        names = {schema["name"] for schema in build_tool_registry().tool_schemas()}
         self.assertIn("google_scholar_search", names)
         self.assertIn("arxiv_search", names)
         self.assertIn("dblp_search", names)

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from typing import Any, Optional
+from contextvars import copy_context
+from datetime import UTC, datetime
+from typing import Any
 
-from langchain_core.runnables import RunnableConfig
+from langgraph.runtime import Runtime
 
-from app.events.context import EventContext, current_event_context
-from app.events.errors import EventPublicationError
+from app.bus.events import SubagentProgressEvent
+from app.config import settings
 from app.infrastructure.grpc.task_service_grpc_client import TaskState
 from app.llm.graph.workflows.task_indexing.nodes.common import (
     failure,
@@ -34,15 +36,13 @@ class RunOrWaitTaskRagNode:
     async def __call__(
         self,
         state: Mapping[str, Any],
-        config: Optional[RunnableConfig] = None,
+        runtime: Runtime,
     ) -> dict[str, Any]:
         task_id = state["task_id"]
         latest_event: RagProgressEvent | None = None
-        event_context = current_event_context().scoped(
-            source="subagent",
-            workflow="task_indexing",
-            node="run_or_wait",
-        )
+        context = runtime.context
+        writer = runtime.stream_writer
+        writer_context = copy_context()
         publication_failure: asyncio.Future[None] = (
             asyncio.get_running_loop().create_future()
         )
@@ -51,24 +51,21 @@ class RunOrWaitTaskRagNode:
             nonlocal latest_event
             latest_event = event
             try:
-                await event_context.bus.publish(
-                    event_context.event(
-                        "subagent_progress",
-                        total_progress_payload(
-                            task_id=event.task_id,
-                            summary=event.summary,
-                            progress_percent=event.progress_percent,
-                            batch_id=event.batch_id,
-                            event_type=event.type,
-                            committed_summary=event.committed_summary,
-                            committed_progress_percent=(
-                                event.committed_progress_percent
-                            ),
-                            batch_summary=event.batch_summary,
-                        ),
-                    ),
+                payload = total_progress_payload(
+                    task_id=event.task_id,
+                    summary=event.summary,
+                    progress_percent=event.progress_percent,
+                    batch_id=event.batch_id,
+                    event_type=event.type,
+                    committed_summary=event.committed_summary,
+                    committed_progress_percent=event.committed_progress_percent,
+                    batch_summary=event.batch_summary,
                 )
-            except EventPublicationError as exc:
+                # Existing workers may invoke listeners outside this graph's context.
+                writer_context.run(writer, SubagentProgressEvent(
+                    **context["event_fields"], ts=datetime.now(UTC).isoformat(), description=payload["message"],
+                ))
+            except Exception as exc:
                 if not publication_failure.done():
                     publication_failure.set_exception(exc)
                 raise
@@ -85,13 +82,13 @@ class RunOrWaitTaskRagNode:
                 listener=on_rag_event,
             )
             if handle is None:
-                return await self._wait_for_remote_task(state, event_context)
+                return await self._wait_for_remote_task(state, runtime)
 
         try:
             worker_result = await self._wait_for_result_or_publication_failure(
                 handle=handle,
                 publication_failure=publication_failure,
-                timeout_seconds=state["timeout_seconds"],
+                timeout_seconds=settings.TASK_RAG_WORKFLOW_TIMEOUT_SECONDS,
             )
         except TimeoutError:
             status = await get_task_rag_status(task_id)
@@ -154,26 +151,27 @@ class RunOrWaitTaskRagNode:
     async def _wait_for_remote_task(
         self,
         state: Mapping[str, Any],
-        event_context: EventContext,
+        runtime: Runtime,
     ) -> dict[str, Any]:
+        context = runtime.context
+        writer = runtime.stream_writer
+
         async def on_status(status: dict[str, Any]) -> None:
             summary = status["result"]["summary"]
-            await event_context.bus.publish(
-                event_context.event(
-                    "subagent_progress",
-                    total_progress_payload(
-                        task_id=state["task_id"],
-                        summary=summary,
-                        progress_percent=rag_progress_percent(summary),
-                        event_type="remote_status",
-                    ),
-                ),
+            payload = total_progress_payload(
+                task_id=state["task_id"],
+                summary=summary,
+                progress_percent=rag_progress_percent(summary),
+                event_type="remote_status",
             )
+            writer(SubagentProgressEvent(
+                **context["event_fields"], ts=datetime.now(UTC).isoformat(), description=payload["message"],
+            ))
 
         status = await wait_for_rag_terminal_status(
             task_id=state["task_id"],
-            poll_interval_seconds=state["poll_interval_seconds"],
-            timeout_seconds=state["timeout_seconds"],
+            poll_interval_seconds=settings.TASK_RAG_POLL_INTERVAL_SECONDS,
+            timeout_seconds=settings.TASK_RAG_WORKFLOW_TIMEOUT_SECONDS,
             on_status=on_status,
         )
         update = status_update(status) if status.get("ok") else {}
@@ -208,15 +206,18 @@ class RunOrWaitTaskRagNode:
         waiter = asyncio.create_task(
             wait_for_rag_run(handle, timeout_seconds=timeout_seconds),
         )
-        done, _ = await asyncio.wait(
-            {waiter, publication_failure},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if publication_failure in done:
-            waiter.cancel()
+        try:
+            done, _ = await asyncio.wait(
+                {waiter, publication_failure},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if publication_failure in done:
+                return publication_failure.result()
+            return await waiter
+        finally:
+            if not waiter.done():
+                waiter.cancel()
             await asyncio.gather(waiter, return_exceptions=True)
-            return publication_failure.result()
-        return await waiter
 
     @staticmethod
     def _event_update(event: RagProgressEvent | None) -> dict[str, Any]:

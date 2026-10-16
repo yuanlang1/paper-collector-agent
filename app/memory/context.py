@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable
 import logging
 from typing import Any
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.memory.episodic.service import EpisodeService
@@ -15,7 +15,7 @@ from app.memory.schemas import (
     MemoryUsage,
 )
 from app.memory.semantic.service import FactService
-from app.models.memory import MemoryEpisode, MemoryFact
+from app.db.models import MemoryEpisode, MemoryFact
 from app.rag.retrieval.memory_retrieval import MemoryHybridRetrieval
 from app.services.llm_profile_service import LlmRuntimeConfig
 
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class MemoryContextService:
     def __init__(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         user_id: str,
         retrieval_gate: MemoryRetrievalGate | None = None,
@@ -127,12 +127,12 @@ class MemoryContextService:
                 )
                 return (
                     self._order_by_ids(
-                        self.fact_service.get_active_by_ids(result.fact_ids),
+                        await self.fact_service.get_active_by_ids(result.fact_ids),
                         result.fact_ids,
                         limit=6,
                     ),
                     self._order_by_ids(
-                        self.episode_service.get_active_by_ids_for_conversation(
+                        await self.episode_service.get_active_by_ids_for_conversation(
                             episode_ids=result.episode_ids,
                             conversation_id=conversation_id,
                         ),
@@ -147,9 +147,9 @@ class MemoryContextService:
                 )
 
         return (
-            list(self.fact_service.search_active(query=query, limit=6)),
+            list(await self.fact_service.search_active(query=query, limit=6)),
             list(
-                self.episode_service.list_active_for_conversation(
+                await self.episode_service.list_active_for_conversation(
                     conversation_id=conversation_id,
                     limit=2,
                 )

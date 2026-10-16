@@ -10,7 +10,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import settings
-from app.llm.tools.base import BaseTool, ToolResult
+from langchain_core.tools import tool
 from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.common import RETRYABLE_STATUS_CODES, clean_text, elapsed_ms
 
@@ -609,25 +609,49 @@ async def arxiv_search_service(
         )
 
 
-async def arxiv_search_handler(
-    params: Dict[str, Any],
-    context: ToolExecutionContext,
-) -> ToolResult:
-    return ToolResult(
-        content=str(await arxiv_search_service(params, context))
-    )
-
-
-ARXIV_SEARCH_TOOL = BaseTool(
-    name="arxiv_search",
+@tool(
+    "arxiv_search",
     description=(
         "从 arXiv 少量检索论文并直接返回论文信息。"
-        "支持主题、标题、作者、摘要、分类和 arXiv ID 精确查询。"
-        "单次默认返回 5 篇，最多 20 篇。"
-        "不用于批量检索、分页、文件导出或跨来源去重。"
+        "当需要按研究主题、标题、作者、摘要、分类查找预印本，或按 arXiv ID 精确查询时，调用此工具。"
+        "输入应提供明确的 query 和对应 search_type，或提供 arxiv_ids；两者不能同时使用。"
+        "默认返回 5 篇，少量检索最多取 20 篇；不用于批量检索、分页、文件导出或跨来源去重。"
     ),
-    input_schema=ArxivSearchArgs.model_json_schema(),
-    fn=arxiv_search_handler,
-    requires_confirmation=False,
-    params_model=ArxivSearchArgs,
+    args_schema=ArxivSearchArgs,
 )
+async def arxiv_search_tool(
+    *,
+    query: str | None = None,
+    arxiv_ids: list[str] | None = None,
+    search_type: Literal['topic', 'title', 'author', 'abstract', 'category'] = 'topic',
+    category: str | None = None,
+    year_from: int | None = None,
+    year_to: int | None = None,
+    start: int = 0,
+    max_results: int = 5,
+    total_limit: int = 5,
+    max_pages: int = 1,
+    sort: Literal['relevance', 'newest', 'updated'] = 'relevance',
+    include_abstract: bool = True,
+) -> dict[str, Any]:
+    """从 arXiv 少量检索论文并直接返回论文信息。支持主题、标题、作者、摘要、分类和 arXiv ID 精确查询。单次默认返回 5 篇，最多 20 篇。不用于批量检索、分页、文件导出或跨来源去重。"""
+    params = {
+        "query": query,
+        "search_type": search_type,
+        "category": category,
+        "year_from": year_from,
+        "year_to": year_to,
+        "start": start,
+        "max_results": max_results,
+        "total_limit": total_limit,
+        "max_pages": max_pages,
+        "sort": sort,
+        "include_abstract": include_abstract,
+    }
+    if arxiv_ids is not None:
+        params["arxiv_ids"] = arxiv_ids
+    return await arxiv_search_service(params, None)
+
+
+ARXIV_SEARCH_TOOL = arxiv_search_tool
+ARXIV_SEARCH_TOOL.metadata = {"requires_confirmation": False}

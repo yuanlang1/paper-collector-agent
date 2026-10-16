@@ -16,7 +16,7 @@ from app.llm.graph.workflows.paper_search.nodes.review import ReviewNode
 from app.llm.graph.workflows.paper_search.nodes.search import SearchNode
 from app.llm.graph.workflows.paper_search.nodes.update_task_status import UpdatePaperSearchTaskStatusNode
 from app.llm.graph.workflows.paper_search.nodes.venue import VenueResolutionNode
-from app.llm.graph.workflows.paper_search.state import PaperSearchWorkflowState
+from app.llm.graph.workflows.paper_search.state import PaperSearchOutputState, PaperSearchWorkflowState
 from app.llm.provider import ChatClient
 from app.llm.graph.workflows.paper_search.progress import instrument_paper_search_node
 
@@ -108,7 +108,7 @@ def build_paper_search_workflow(
             node=node_overrides.get(name, default),
         )
 
-    builder = StateGraph(PaperSearchWorkflowState)
+    builder = StateGraph(PaperSearchWorkflowState, output_schema=PaperSearchOutputState)
     builder.add_node(
         "initialize",
         node("initialize", initialize_paper_search_node),

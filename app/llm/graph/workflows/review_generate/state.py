@@ -1,25 +1,24 @@
-from typing import Annotated, Any, TypedDict
+from typing import Any, Literal
 
-from langchain_core.messages import BaseMessage
-from langgraph.graph.message import add_messages
+from typing_extensions import TypedDict
+
+
+class TaskReviewOutputState(TypedDict):
+    content: str
+    status: Literal["success", "failed", "timed_out"]
 
 
 class TaskReviewWorkflowState(TypedDict, total=False):
     run_id: str
     child_run_id: str
-    active_tool_call: dict[str, Any] | None
-    messages: Annotated[list[BaseMessage], add_messages]
-    last_action_result: dict[str, Any] | None
-    artifact_refs: list[str]
+    content: str
     task_id: int
     topic: str
     language: str
     citation_style: str
     review_type: str
     allow_abstract_evidence: bool
-    max_reflection_rounds: int
     reflection_round: int
-    max_writing_revision_rounds: int
     writing_revision_round: int
 
     stage: str

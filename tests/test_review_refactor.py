@@ -4,9 +4,11 @@ import json
 import re
 import tempfile
 import unittest
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 from langchain_core.documents import Document
+
+from app.config import Settings, settings
 
 from app.events.adapter import event_data, sse_name_for
 from app.events.bus import EventBus
@@ -28,7 +30,6 @@ from app.llm.graph.workflows.review_generate.nodes.extract_studies import (
     SubmittedArticleProfile,
 )
 from app.llm.tools.search_tools.search_paper_index import (
-    SEARCH_PAPER_INDEX_TOOL_SCHEMA,
     SearchPaperIndexArgs,
 )
 from app.llm.graph.workflows.review_generate.nodes.generate_claim import (
@@ -84,8 +85,8 @@ from app.llm.graph.workflows.task_indexing.nodes.common import (
 )
 from app.llm.provider.structured_output import build_json_mode_instruction
 from app.llm.subagents.task_review import (
-    TaskReviewDelegation,
-    build_task_review_runtime,
+    TaskReviewParams,
+    task_review_agent,
 )
 
 
@@ -258,6 +259,7 @@ def writing_revision(target_type="section", target_id="results"):
 
 class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        self.enterContext(patch.object(settings, "TASK_REVIEW_MAX_REFLECTION_ROUNDS", 3))
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.store = LocalArtifactStore(self.directory.name)
@@ -269,9 +271,7 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
             "language": "en",
             "review_type": "narrative",
             "paper_ids_snapshot": ["1", "2"],
-            "max_reflection_rounds": 3,
             "reflection_round": 0,
-            "max_writing_revision_rounds": 1,
             "writing_revision_round": 0,
             "writing_review_plan_ref": None,
             "revision_items": [],
@@ -690,7 +690,7 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
     async def test_supported_comparison_with_one_source_revises_the_claim(self):
         await self.seed_claim()
         await self.retrieve([document("1"), document("1", "chunk2")])
-        self.state["reflection_round"] = self.state["max_reflection_rounds"] - 2
+        self.state["reflection_round"] = settings.TASK_REVIEW_MAX_REFLECTION_ROUNDS - 2
         result = verdict()
         result["evidence"] = result["evidence"][:1]
         model = Model(result)
@@ -700,7 +700,7 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
         )(self.state)
         self.assertEqual(update["stage"], "generating_claims")
         self.assertEqual(update["revision_items"][0]["target_type"], "claim")
-        self.assertEqual(update["reflection_round"], self.state["max_reflection_rounds"] - 1)
+        self.assertEqual(update["reflection_round"], settings.TASK_REVIEW_MAX_REFLECTION_ROUNDS - 1)
         self.assertEqual(len(model.inputs), 1)
         self.assertEqual(
             [item["paper_index"] for item in model.inputs[0]["original_evidence"]],
@@ -755,7 +755,8 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
     async def test_exhausted_evidence_revision_renders_material_insufficiency(self):
         await self.seed_claim()
         await self.retrieve()
-        self.state.update(max_reflection_rounds=1, reflection_round=0)
+        self.enterContext(patch.object(settings, "TASK_REVIEW_MAX_REFLECTION_ROUNDS", 1))
+        self.state["reflection_round"] = 0
 
         update = await self.verify(verdict("insufficient"))
 
@@ -1570,7 +1571,7 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_writing_reflection_stops_when_budget_is_exhausted(self):
         await self.seed_review_draft()
-        self.state["max_writing_revision_rounds"] = 0
+        self.enterContext(patch.object(settings, "TASK_REVIEW_MAX_WRITING_REVISION_ROUNDS", 0))
 
         update = await ReflectReviewNode(
             artifact_store=self.store,
@@ -1584,7 +1585,7 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_writing_reflection_uses_two_revision_rounds_then_accepts(self):
         await self.seed_review_draft()
-        self.state["max_writing_revision_rounds"] = 2
+        self.enterContext(patch.object(settings, "TASK_REVIEW_MAX_WRITING_REVISION_ROUNDS", 2))
         model = Model(
             writing_review("revise", [writing_revision()]),
             writing_review("revise", [writing_revision()]),
@@ -1724,60 +1725,38 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
             WritingReviewResult.model_validate(writing_review("pass", [writing_revision()]))
 
     def test_claim_reflection_budget_default_and_bounds(self):
-        self.assertEqual(TaskReviewDelegation(task_id=1, topic="topic").max_reflection_rounds, 5)
+        name = "TASK_REVIEW_MAX_REFLECTION_ROUNDS"
+        self.assertEqual(Settings.model_fields[name].default, 5)
         for value in (1, 5):
-            self.assertEqual(
-                TaskReviewDelegation(
-                    task_id=1,
-                    topic="topic",
-                    max_reflection_rounds=value,
-                ).max_reflection_rounds,
-                value,
-            )
+            self.assertEqual(getattr(Settings.model_validate(settings.model_dump() | {name: value}), name), value)
         for value in (0, 6):
             with self.assertRaises(ValueError):
-                TaskReviewDelegation(
-                    task_id=1,
-                    topic="topic",
-                    max_reflection_rounds=value,
-                )
+                Settings.model_validate(settings.model_dump() | {name: value})
 
     def test_review_subagent_does_not_require_confirmation(self):
-        runtime = build_task_review_runtime(chat=Mock())
-
-        self.assertFalse(runtime.spec.requires_confirmation)
-        self.assertEqual(runtime.timeout_seconds, 3600)
+        self.assertFalse(task_review_agent.metadata["requires_confirmation"])
 
     def test_writing_revision_budget_default_and_bounds(self):
-        self.assertEqual(TaskReviewDelegation(task_id=1, topic="topic").max_writing_revision_rounds, 1)
+        name = "TASK_REVIEW_MAX_WRITING_REVISION_ROUNDS"
+        self.assertEqual(Settings.model_fields[name].default, 1)
         for value in (0, 5):
-            self.assertEqual(
-                TaskReviewDelegation(
-                    task_id=1,
-                    topic="topic",
-                    max_writing_revision_rounds=value,
-                ).max_writing_revision_rounds,
-                value,
-            )
-        with self.assertRaises(ValueError):
-            TaskReviewDelegation(task_id=1, topic="topic", max_writing_revision_rounds=6)
+            self.assertEqual(getattr(Settings.model_validate(settings.model_dump() | {name: value}), name), value)
+        for value in (-1, 6):
+            with self.assertRaises(ValueError):
+                Settings.model_validate(settings.model_dump() | {name: value})
 
-    async def test_initialize_passes_writing_revision_budget_to_state(self):
+    async def test_initialize_does_not_copy_writing_revision_budget_to_state(self):
         update = await initialize_review_node(
             {
                 "run_id": "review-test",
                 "child_run_id": "child-review-test",
-                "active_tool_call": {
-                    "args": {
-                        "task_id": 1,
-                        "topic": "topic",
-                        "max_writing_revision_rounds": 2,
-                    }
-                },
+                "task_id": 1,
+                "topic": "topic",
+                "max_writing_revision_rounds": 2,
             }
         )
 
-        self.assertEqual(update["max_writing_revision_rounds"], 2)
+        self.assertNotIn("max_writing_revision_rounds", update)
         self.assertEqual(update["writing_revision_round"], 0)
         self.assertIsNone(update["writing_review_plan_ref"])
 
@@ -2081,7 +2060,7 @@ class ReviewPromptSchemaTests(unittest.TestCase):
         self.assertIn("章节正文中绑定 Claim 与证据引用的一个论证单元", instruction)
         self.assertIn("本节 arguments 的简短衔接性概述", instruction)
 
-        search_parameters = SEARCH_PAPER_INDEX_TOOL_SCHEMA["function"]["parameters"]
+        search_parameters = SearchPaperIndexArgs.model_json_schema()
         self.assertTrue(search_parameters["properties"]["querys"].get("description"))
         self.assertTrue(search_parameters["properties"]["paper_id"].get("description"))
         self.assertNotIn("quote 必须逐字", CLAIM_VERIFICATION_PROMPT)
