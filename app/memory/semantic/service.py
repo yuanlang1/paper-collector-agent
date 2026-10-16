@@ -7,7 +7,7 @@ import json
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import MemoryFact
-from app.db.repositories.memory_fact import FactRepository
+from app.db.repositories import memory_fact
 from app.memory.errors import MemoryNotFoundError, MemoryValidationError
 from app.memory.schemas import FactCandidate
 
@@ -18,32 +18,41 @@ class FactService:
         db: AsyncSession,
         *,
         user_id: str,
-        repository: FactRepository | None = None,
     ) -> None:
         if not user_id.strip():
             raise MemoryValidationError("user_id is required")
         self.db = db
         self.user_id = user_id.strip()
-        self.repository = repository or FactRepository(db)
 
     async def remember_explicit(
-        self, *, subject: str, content: str, source_conversation_id: str | None,
+        self,
+        *,
+        subject: str,
+        content: str,
+        source_conversation_id: str | None,
     ) -> tuple[MemoryFact, bool]:
         subject, content = self._validate(subject, content)
         dedupe_key = self._dedupe_key(subject, content)
 
         async with self.db.begin():
-            existing = await self.repository.get_by_dedupe_key(
-                user_id=self.user_id, dedupe_key=dedupe_key,
+            existing = await memory_fact.get_by_dedupe_key(
+                self.db,
+                user_id=self.user_id,
+                dedupe_key=dedupe_key,
             )
             if existing is not None:
                 if existing.status == "deleted":
-                    await self.repository.set_status(existing, status="active")
+                    await memory_fact.set_status(
+                        self.db,
+                        existing,
+                        status="active",
+                    )
                     await self.db.refresh(existing)
                     return existing, True
                 return existing, False
 
-            fact = await self.repository.add(
+            fact = await memory_fact.add(
+                self.db,
                 user_id=self.user_id,
                 subject=subject,
                 content=content,
@@ -58,17 +67,23 @@ class FactService:
             return fact, True
 
     async def stage_consolidated_candidate(
-        self, *, candidate: FactCandidate, source_conversation_id: str,
+        self,
+        *,
+        candidate: FactCandidate,
+        source_conversation_id: str,
         source_message_ids: list[int],
     ) -> MemoryFact | None:
         subject, content = self._validate(candidate.subject, candidate.content)
         dedupe_key = self._dedupe_key(subject, content)
-        existing = await self.repository.get_by_dedupe_key(
-            user_id=self.user_id, dedupe_key=dedupe_key,
+        existing = await memory_fact.get_by_dedupe_key(
+            self.db,
+            user_id=self.user_id,
+            dedupe_key=dedupe_key,
         )
         if existing is not None:
             return None
-        return await self.repository.add(
+        return await memory_fact.add(
+            self.db,
             user_id=self.user_id,
             subject=subject,
             content=content,
@@ -82,84 +97,145 @@ class FactService:
 
     async def list_active(self, *, limit: int = 50) -> Sequence[MemoryFact]:
         async with self.db.begin():
-            return await self.repository.list(
-                user_id=self.user_id, statuses=("active",), limit=self._limit(limit),
+            return await memory_fact.list_facts(
+                self.db,
+                user_id=self.user_id,
+                statuses=("active",),
+                limit=self._limit(limit),
             )
 
     async def list_pending(self, *, limit: int = 50) -> Sequence[MemoryFact]:
         async with self.db.begin():
-            return await self.repository.list(
-                user_id=self.user_id, statuses=("pending",), limit=self._limit(limit),
+            return await memory_fact.list_facts(
+                self.db,
+                user_id=self.user_id,
+                statuses=("pending",),
+                limit=self._limit(limit),
             )
 
     async def list_active_by_subject(
-        self, *, subject: str, limit: int = 50,
+        self,
+        *,
+        subject: str,
+        limit: int = 50,
     ) -> Sequence[MemoryFact]:
         async with self.db.begin():
-            return await self.repository.list_by_subject(
-                user_id=self.user_id, subject=subject.strip(),
-                statuses=("active",), limit=self._limit(limit),
+            return await memory_fact.list_by_subject(
+                self.db,
+                user_id=self.user_id,
+                subject=subject.strip(),
+                statuses=("active",),
+                limit=self._limit(limit),
             )
 
-    async def search_active(self, *, query: str, limit: int = 6) -> Sequence[MemoryFact]:
+    async def search_active(
+        self,
+        *,
+        query: str,
+        limit: int = 6,
+    ) -> Sequence[MemoryFact]:
         if not query.strip():
             return []
         async with self.db.begin():
-            return await self.repository.search_active(
-                user_id=self.user_id, query=query.strip(), limit=self._limit(limit),
+            return await memory_fact.search_active(
+                self.db,
+                user_id=self.user_id,
+                query=query.strip(),
+                limit=self._limit(limit),
             )
 
     async def get_active_by_ids(self, fact_ids: Sequence[int]) -> Sequence[MemoryFact]:
         async with self.db.begin():
-            return await self.repository.list_by_ids(
-                user_id=self.user_id, fact_ids=fact_ids, statuses=("active",),
+            return await memory_fact.list_by_ids(
+                self.db,
+                user_id=self.user_id,
+                fact_ids=fact_ids,
+                statuses=("active",),
             )
 
-    async def correct(self, *, fact_id: int, subject: str, content: str) -> MemoryFact:
+    async def correct(
+        self,
+        *,
+        fact_id: int,
+        subject: str,
+        content: str,
+    ) -> MemoryFact:
         subject, content = self._validate(subject, content)
         dedupe_key = self._dedupe_key(subject, content)
         async with self.db.begin():
             fact = await self._get_editable(fact_id)
-            duplicate = await self.repository.get_by_dedupe_key(
-                user_id=self.user_id, dedupe_key=dedupe_key,
+            duplicate = await memory_fact.get_by_dedupe_key(
+                self.db,
+                user_id=self.user_id,
+                dedupe_key=dedupe_key,
             )
             if duplicate is not None and duplicate.id != fact.id:
                 raise MemoryValidationError("An equivalent memory already exists")
-            await self.repository.update(
-                fact, subject=subject, content=content, dedupe_key=dedupe_key,
+            await memory_fact.update(
+                self.db,
+                fact,
+                subject=subject,
+                content=content,
+                dedupe_key=dedupe_key,
             )
             await self.db.refresh(fact)
             return fact
 
     async def confirm(self, *, fact_id: int) -> MemoryFact:
-        return await self._transition(fact_id=fact_id, from_status="pending", to_status="active")
+        return await self._transition(
+            fact_id=fact_id,
+            from_status="pending",
+            to_status="active",
+        )
 
     async def reject(self, *, fact_id: int) -> MemoryFact:
-        return await self._transition(fact_id=fact_id, from_status="pending", to_status="rejected")
+        return await self._transition(
+            fact_id=fact_id,
+            from_status="pending",
+            to_status="rejected",
+        )
 
     async def forget(self, *, fact_id: int) -> MemoryFact:
         async with self.db.begin():
             fact = await self._get_editable(fact_id)
-            await self.repository.set_status(fact, status="deleted")
+            await memory_fact.set_status(
+                self.db,
+                fact,
+                status="deleted",
+            )
             await self.db.refresh(fact)
             return fact
 
     async def _transition(
-        self, *, fact_id: int, from_status: str, to_status: str,
+        self,
+        *,
+        fact_id: int,
+        from_status: str,
+        to_status: str,
     ) -> MemoryFact:
         async with self.db.begin():
-            fact = await self.repository.get(
-                user_id=self.user_id, fact_id=fact_id, statuses=(from_status,),
+            fact = await memory_fact.get(
+                self.db,
+                user_id=self.user_id,
+                fact_id=fact_id,
+                statuses=(from_status,),
             )
             if fact is None:
                 raise MemoryNotFoundError("Memory fact not found")
-            await self.repository.set_status(fact, status=to_status)
+            await memory_fact.set_status(
+                self.db,
+                fact,
+                status=to_status,
+            )
             await self.db.refresh(fact)
             return fact
 
     async def _get_editable(self, fact_id: int) -> MemoryFact:
-        fact = await self.repository.get(
-            user_id=self.user_id, fact_id=fact_id, statuses=("active", "pending"),
+        fact = await memory_fact.get(
+            self.db,
+            user_id=self.user_id,
+            fact_id=fact_id,
+            statuses=("active", "pending"),
         )
         if fact is None:
             raise MemoryNotFoundError("Memory fact not found")

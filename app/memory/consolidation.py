@@ -13,7 +13,7 @@ from app.memory.schemas import (
     HistoryTurn,
 )
 from app.memory.semantic.service import FactService
-from app.db.repositories.memory_consolidation_cursor import ConsolidationCursorRepository
+from app.db.repositories import memory_consolidation_cursor
 from app.history import chat_log
 from app.history.chat_log import AgentHistoryStore
 
@@ -38,7 +38,6 @@ class Consolidator:
         threshold_turns: int = 6,
     ) -> None:
         self.db = db
-        self.cursors = ConsolidationCursorRepository(db)
         self.user_id = user_id
         self.history_store = history_store
         self.extraction_model = extraction_model
@@ -54,8 +53,10 @@ class Consolidator:
 
         async with lock:
             async with self.db.begin():
-                cursor = await self.cursors.get(
-                    user_id=self.user_id, conversation_id=conversation_id,
+                cursor = await memory_consolidation_cursor.get(
+                    self.db,
+                    user_id=self.user_id,
+                    conversation_id=conversation_id,
                 )
             turns = await self.history_store.run(
                 chat_log.list_completed_turns_after,
@@ -107,7 +108,8 @@ class Consolidator:
                     )
 
                 last_message_id = turns[-1].assistant_message_id
-                await self.cursors.advance(
+                await memory_consolidation_cursor.advance(
+                    self.db,
                     user_id=self.user_id,
                     conversation_id=conversation_id,
                     last_assistant_message_id=last_message_id,

@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.db.repositories.system_setting import SystemSettingRepository
+from app.db.repositories import system_setting
 
 
 SOURCE_LIMITS_KEY = "source_limits"
@@ -77,9 +77,13 @@ def source_pagination_settings(
     }
 
 
-async def get_setting(db: AsyncSession, key: str, default: Any = None) -> Any:
+async def get_setting(
+    db: AsyncSession,
+    key: str,
+    default: Any = None,
+) -> Any:
     async with db.begin():
-        setting = await SystemSettingRepository(db).get(key)
+        setting = await system_setting.get(db, key)
     if setting and setting.value:
         try:
             return json.loads(setting.value)
@@ -88,10 +92,18 @@ async def get_setting(db: AsyncSession, key: str, default: Any = None) -> Any:
     return default
 
 
-async def save_setting(db: AsyncSession, key: str, value: Any) -> None:
+async def save_setting(
+    db: AsyncSession,
+    key: str,
+    value: Any,
+) -> None:
     serialized = json.dumps(value, ensure_ascii=False)
     async with db.begin():
-        await SystemSettingRepository(db).set_value(key, serialized)
+        await system_setting.set_value(
+            db,
+            key,
+            serialized,
+        )
 
 
 async def get_source_limits(db: AsyncSession) -> dict[str, int]:
@@ -109,9 +121,19 @@ async def save_source_limits(
     source_limits: Mapping[str, Any],
 ) -> dict[str, int]:
     normalized = validate_source_limits(source_limits)
-    await save_setting(db, SOURCE_LIMITS_KEY, normalized)
+    await save_setting(
+        db,
+        SOURCE_LIMITS_KEY,
+        normalized,
+    )
     return normalized
 
 
 async def get_custom_system_prompt(db: AsyncSession) -> str:
-    return (await get_setting(db, "agent_system_prompt", "")) or ""
+    return (
+        await get_setting(
+            db,
+            "agent_system_prompt",
+            "",
+        )
+    ) or ""

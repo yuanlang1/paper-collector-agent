@@ -17,8 +17,7 @@ from app.db.session import create_database, get_db
 from app.grpc.services import add_services
 from app.db.models import MemoryConsolidationCursor, MemoryEpisode, MemoryFact
 from app.db.models import SystemSetting
-from app.db.repositories.memory_consolidation_cursor import ConsolidationCursorRepository
-from app.db.repositories.memory_fact import FactRepository
+from app.db.repositories import memory_consolidation_cursor, memory_fact
 from app.memory.episodic.service import EpisodeService
 from app.memory.errors import MemoryNotFoundError
 from app.memory.schemas import EpisodeCandidate, FactCandidate
@@ -28,8 +27,14 @@ from app.protos.agent.v1 import agent_pb2, agent_pb2_grpc
 
 class AsyncDatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        with patch.object(settings, "DATABASE_URL", "sqlite:///:memory:"), patch.object(
-            settings, "SQL_ECHO", False,
+        with patch.object(
+            settings,
+            "DATABASE_URL",
+            "sqlite+aiosqlite:///:memory:",
+        ), patch.object(
+            settings,
+            "SQL_ECHO",
+            False,
         ):
             self.engine, self.factory = create_database()
         async with self.engine.begin() as connection:
@@ -117,65 +122,107 @@ class AsyncDatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(restored.id, fact_id)
 
     async def test_service_rolls_back_failed_write_and_session_remains_usable(self):
-        class FailingRepository(FactRepository):
-            async def update(self, fact, **fields):
-                await super().update(fact, **fields)
-                raise RuntimeError("write failed")
+        original_update = memory_fact.update
+
+        async def fail_after_update(
+            db,
+            fact,
+            **fields,
+        ):
+            await original_update(
+                db,
+                fact,
+                **fields,
+            )
+            raise RuntimeError("write failed")
 
         async with self.factory() as session:
             service = FactService(session, user_id="owner")
             fact, _ = await service.remember_explicit(
-                subject="topic", content="original", source_conversation_id=None,
+                subject="topic",
+                content="original",
+                source_conversation_id=None,
             )
             fact_id = fact.id
-            failing = FactService(
-                session, user_id="owner", repository=FailingRepository(session),
-            )
-            with self.assertRaisesRegex(RuntimeError, "write failed"):
-                await failing.correct(fact_id=fact_id, subject="topic", content="changed")
+            with patch.object(
+                memory_fact,
+                "update",
+                side_effect=fail_after_update,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "write failed"):
+                    await service.correct(
+                        fact_id=fact_id,
+                        subject="topic",
+                        content="changed",
+                    )
             self.assertFalse(session.in_transaction())
-            self.assertEqual((await service.get_active_by_ids([fact_id]))[0].content, "original")
+            self.assertEqual(
+                (await service.get_active_by_ids([fact_id]))[0].content, "original"
+            )
 
     async def test_staged_memories_and_cursor_share_one_transaction(self):
         async with self.factory() as session:
             facts = FactService(session, user_id="owner")
             episodes = EpisodeService(session, user_id="owner")
-            cursors = ConsolidationCursorRepository(session)
             with self.assertRaisesRegex(RuntimeError, "abort"):
                 async with session.begin():
                     await facts.stage_consolidated_candidate(
                         candidate=FactCandidate(subject="topic", content="pending"),
-                        source_conversation_id="chat", source_message_ids=[1],
+                        source_conversation_id="chat",
+                        source_message_ids=[1],
                     )
-                    await cursors.advance(
-                        user_id="owner", conversation_id="chat", last_assistant_message_id=1,
+                    await memory_consolidation_cursor.advance(
+                        session,
+                        user_id="owner",
+                        conversation_id="chat",
+                        last_assistant_message_id=1,
                     )
                     raise RuntimeError("abort")
             async with session.begin():
                 self.assertIsNone(await session.scalar(select(MemoryFact)))
-                self.assertIsNone(await cursors.get(user_id="owner", conversation_id="chat"))
+                self.assertIsNone(
+                    await memory_consolidation_cursor.get(
+                        session,
+                        user_id="owner",
+                        conversation_id="chat",
+                    )
+                )
                 episode = await episodes.stage_consolidated_candidate(
                     candidate=EpisodeCandidate(
-                        happened_at=date(2026, 10, 15),
-                        summary="summary", source_assistant_message_id=2,
+                        happened_at=date(
+                            2026,
+                            10,
+                            15,
+                        ),
+                        summary="summary",
+                        source_assistant_message_id=2,
                     ),
                     source_conversation_id="chat",
                 )
                 episode_id = episode.id
-                await cursors.advance(
-                    user_id="owner", conversation_id="chat", last_assistant_message_id=2,
+                await memory_consolidation_cursor.advance(
+                    session,
+                    user_id="owner",
+                    conversation_id="chat",
+                    last_assistant_message_id=2,
                 )
             self.assertEqual(
                 await episodes.get_active_by_ids_for_conversation(
-                    episode_ids=[episode_id], conversation_id="another-chat",
-                ), [],
+                    episode_ids=[episode_id],
+                    conversation_id="another-chat",
+                ),
+                [],
             )
             self.assertEqual(
                 (await episodes.list_active_for_conversation(conversation_id="chat"))[0].id,
                 episode_id,
             )
             async with session.begin():
-                cursor = await cursors.get(user_id="owner", conversation_id="chat")
+                cursor = await memory_consolidation_cursor.get(
+                    session,
+                    user_id="owner",
+                    conversation_id="chat",
+                )
                 self.assertEqual(cursor.last_assistant_message_id, 2)
 
     async def test_mysql_sync_url_selects_an_async_driver_without_connecting(self):
