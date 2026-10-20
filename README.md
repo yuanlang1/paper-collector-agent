@@ -42,7 +42,7 @@ python -m pip install -r requirements.venv311.lock.txt
 
 ## 内部 gRPC 接口
 
-本服务只暴露根路径 `/` 和健康检查 `/health` 作为 HTTP 接口。主服务完成用户鉴权和权限判断后，通过内网 gRPC 调用本服务；业务 HTTP 接口、Swagger、ReDoc 和 OpenAPI 均已关闭。
+HTTP 提供根路径 `/`、健康检查 `/health`、Agent SSE 与历史接口、thread 操作和 run 查询。主服务负责用户鉴权和权限判断；内部配置接口仍通过 gRPC 调用。Swagger、ReDoc 和 OpenAPI 均已关闭。
 
 默认监听 `0.0.0.0:50052`，可通过 `.env` 配置以下值：
 
@@ -60,11 +60,36 @@ AGENT_GRPC_MAX_MESSAGE_LENGTH=16777216
 
 数据库引擎和异步会话工厂由 FastAPI `lifespan` 调用 `create_database()` 创建，关闭时释放连接池。会话工厂使用 `async_sessionmaker(bind=engine, expire_on_commit=False)`。HTTP 从 `app.state.session_factory` 取得工厂，gRPC 通过构造参数接收工厂；每次操作创建独立会话。
 
-数据库代码统一放在 `app/db/`：`base.py` 定义唯一 ORM 基类，`session.py` 管理引擎与会话，`models/` 按表定义模型，`repositories/` 实现异步数据访问。业务服务负责校验和事务，仓储只查询、修改及 flush，不自行 commit。
+`app/database.py` 统一定义 ORM 基类、数据库引擎工厂和会话依赖；`app/db/models/` 按表定义模型，`app/db/repositories/` 实现异步数据访问。业务服务负责校验和事务，仓储只查询、修改及 flush，不自行 commit。
 
-MySQL 使用 `mysql+aiomysql://`，现有 `mysql+pymysql://` 和 `mysql://` 配置会在创建异步引擎时转换驱动；SQLite 使用 `sqlite+aiosqlite://`，也兼容原有 `sqlite://` 配置。设置和记忆 CRUD 使用原生 `AsyncSession`，同步建表接口仍通过 `AsyncConnection.run_sync()` 执行。
+业务数据库统一使用 `DATABASE_POSTGRES_URL=postgresql://user:password@host:5432/database`。SQLAlchemy 使用 `postgresql+psycopg` 异步驱动，LangGraph checkpointer 和 store 使用原始连接地址。启动时通过 `Base.metadata.create_all()` 创建缺失业务表，不升级已有表结构，也不搬迁旧数据库数据。
 
-本次移除了 `agent_conversation`、`agent_run`、`agent_message` 和 `llm_profiles` 的本地 ORM 定义及旧功能接入，不执行删表或数据清理。设置、长期记忆的表定义以及 SQLite 事件回放存储保留。LLM 调用使用既有环境配置。
+Windows 上 Psycopg 异步连接需要 Selector 事件循环。使用当前锁定的 Uvicorn 启动时指定：`python -m uvicorn app.main:app --loop asyncio:SelectorEventLoop`；自行使用 `asyncio.run()` 时，需在创建循环前设置 `asyncio.WindowsSelectorEventLoopPolicy()`。
+
+七张业务表统一继承 `EntityBase`，共用自增 ID、创建人、修改人、创建时间和修改时间。时间字段使用带时区类型；SQLAlchemy 更新时维护 `modification_time`，原生 SQL 和 Upsert 需显式赋值。`llm_setting` 保存模型配置，主图按请求的 `metadata.model_id` 和 `user_id` 读取；SQLite 事件回放存储继续独立使用。
+
+`llm_setting.user_id` 表示配置所属用户，与审计操作人独立；配置 CRUD 和 `get_llm_config()` 均要求显式传入 `user_id`。已有空表可执行 [新增用户字段 SQL](migrations/20261020_add_llm_setting_user_id.sql)。有历史数据的表需要单独新增该列、按实际归属回填历史记录，再设置非空约束和索引；启动建表不会升级已有表，也不会根据创建人自动推断归属。
+
+`agent_thread` 和 `agent_run` 显式保存并按 `user_id` 过滤；`config_setting` 继续保持系统级配置。run 执行由 `agent_run_service` 管理，历史查询由 `thread_service` 校验会话归属后读取 LangGraph checkpoint，消息及图状态保存在 checkpoint 中。
+
+`agent_run` 为每次被接受的 Agent 请求保存独立 `run_id`、模型参数、状态及起止时间。`POST /api/agent/run` 接收正整数 `user_id`、可选的字符串 `thread_id`、必填的 `metadata`，以及二选一的 `message` 或 `resume`。`metadata` 包含正整数 `model_id` 和可选的 `think_effort`，直接保存到 `agent_run.metadata` JSON 列；消息和恢复值仅通过请求传给 Runner，不存入 run 表。ORM 使用 `run_metadata` 属性映射该列，避免覆盖 SQLAlchemy 的 `metadata`；run 查询对外返回平铺的 `metadata` 字段。恢复请求同样显式传递 `metadata` 并创建新 run，原 run 保留 `interrupted`。状态包括 `pending`、`running`、`completed`、`failed`、`interrupted`、`cancelled`。创建及状态变化与 thread 更新时间在同一短事务内提交；同一 thread 只允许一个 `pending/running` run，并发执行或删除活跃 thread 返回 `409`。
+
+发送 `message` 时，`thread_id` 未传、为 `null` 或空字符串均表示新会话，服务端生成 ID 并在同一事务内创建 thread 和首个 run，`topic` 为 `null`；run 入库失败时两者一起回滚，执行阶段失败则保留 thread 和 `failed` run。非空 ID 校验会话归属，不存在或属于其他用户时返回 `404`；`resume` 必须提供非空 `thread_id`。SSE 首条状态事件及后续事件携带实际的 `thread_id` 和 `run_id`，前端保存生成的会话 ID 用于后续请求。
+
+已有数据库需要停写后执行 [字段迁移 SQL](migrations/20261020_rename_agent_run_input_to_metadata.sql)，再启动新版代码；`create_all()` 不会自动改列。脚本针对当前 `input.metadata` 的 JSON 格式，将列改名并仅保留其中的模型参数，去掉旧 JSON 中的消息和恢复值；整个迁移在同一事务内执行。
+
+针对本次检查到的空业务表旧结构，可使用 [统一迁移 SQL](migrations/20261020_align_business_tables.sql)：统一字段类型、时间字段和约束，并删除 `agent_session`、`agent_message`、`agent_summary`。它包含上述两份独立迁移的改动，不应重复执行；脚本在同一事务内锁定目标表，发现任何业务记录时中止，LangGraph 自有表不参与迁移。
+
+主图在创建 `AgentRunner` 前调用 `agent_build.get_model()` 和 `build_tools()`，分别注入模型和工具注册表。模型使用所选配置的 `model`、`base_url`、`api_key` 直接构建 `ChatOpenAI(streaming=True)`；`metadata.think_effort` 映射到 `reasoning_effort`，合法取值复用当前 SDK 的 `ReasoningEffort` 类型，不传或传 `null` 时不向模型接口发送该参数。具体模型不支持该参数时沿用 run 的失败处理。`provider` 字段保留，暂不参与主图模型构建。子代理内部的模型构建继续使用各自现有逻辑。
+
+`GET /api/agent/threads/{thread_id}/runs` 支持 `user_id`、`limit`、`offset`，按 ID 倒序分页；`GET /api/agent/threads/{thread_id}/runs/{run_id}` 查询单次请求。SSE 事件包含 `run_id` 和 `thread_id`，终止事件在最终状态提交后发送。图中断时先发送 `type: "interrupt"`，包含 `status: "interrupted"` 和完整的 `interrupts: [{id, value}]`，再发送保留相同中断数据的 `done` 事件；`done` 表示本次流结束，执行结果以 `status` 为准。前端按 SSE JSON `data` 中的 `type` 分发事件。断连取消会关闭图流并将尚未结束的 run 记录为 `cancelled`；已提交的 `interrupted` 等终态保持不变。进程被强制终止后的遗留状态恢复尚未实现。
+
+数据库集成测试只读取显式设置的独立测试库地址，在随机隔离 schema 内运行并清理；没有该变量时跳过数据库测试：
+
+```powershell
+$env:TEST_DATABASE_POSTGRES_URL = "postgresql://user:password@localhost:5432/paper_collector_test"
+.\.venv311\Scripts\python.exe -m unittest tests.test_async_database tests.test_postgres_models tests.test_agent_runs -v
+```
 
 ## 预下载 RAG 模型
 

@@ -150,6 +150,5 @@ async def task_review_agent(
 
 
 task_review_agent.metadata = {
-    "requires_confirmation": False, 
     "display_name": "文献综述子代理"
 }

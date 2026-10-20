@@ -9,13 +9,13 @@ from pydantic import BaseModel
 from app.llm.provider.base import ModelOptions
 from app.llm.provider.registry import get_provider, resolve_provider_config
 from app.llm.provider.structured_output import StructuredOutputT, ValidatedJsonInvoker
-from app.services.llm_profile_service import LlmRuntimeConfig
+from app.services.llm_setting_service import LlmConfig
 
 
 class ChatClient:
     def __init__(
         self,
-         runtime_config: LlmRuntimeConfig | None = None
+         runtime_config: LlmConfig | None = None
     ) -> None:
         self._config = resolve_provider_config(runtime_config)
         self._provider = get_provider(self._config.provider)

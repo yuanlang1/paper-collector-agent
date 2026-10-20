@@ -5,15 +5,14 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.llm.artifacts.access import (
+    ArtifactAccessError,
+    ArtifactAccessService,
     MAX_CONTEXT_LINES,
     MAX_JSON_ITEMS,
     MAX_SEARCH_MATCHES,
     MAX_TEXT_LINES,
 )
-from langchain_core.tools import tool
-from langchain_core.runnables import RunnableConfig
-
-from app.llm.tools.registry import ToolExecutionContext, require_tool_context
+from langchain_core.tools import BaseTool, ToolException, tool
 
 
 class ReadArtifactArgs(BaseModel):
@@ -57,12 +56,11 @@ class ReadArtifactArgs(BaseModel):
 
 async def read_artifact_handler(
     params: dict[str, Any],
-    context: ToolExecutionContext,
+    *,
+    artifact_access: ArtifactAccessService,
 ) -> dict[str, Any]:
     args = ReadArtifactArgs.model_validate(params)
-    if context.artifact_access is None:
-        raise RuntimeError("artifact 读取服务尚未初始化。")
-    data = await context.artifact_access.read(
+    data = await artifact_access.read(
         artifact_uri=args.artifact_uri,
         mode=args.mode,
         start_line=args.start_line,
@@ -77,44 +75,48 @@ async def read_artifact_handler(
     return {"ok": True, "data": data, "artifact_refs": [args.artifact_uri]}
 
 
-@tool(
-    "read_artifact",
-    description=(
-        "按需读取已有的 artifact:// JSON 文件。"
-        "当需要查看先前工作流产物的摘要、指定行、JSON 字段或关键词匹配时，调用此工具。"
-        "输入必须使用先前工作流实际返回的 artifact_uri，并按需要选择读取模式及范围；不得编造 URI。"
-    ),
-    args_schema=ReadArtifactArgs,
-)
-async def read_artifact_tool(
+def build_read_artifact_tool(
     *,
-    config: RunnableConfig,
-    artifact_uri: str,
-    mode: Literal['summary', 'text', 'json', 'search'] = 'summary',
-    start_line: int = 1,
-    max_lines: int = 100,
-    json_pointer: str | None = None,
-    offset: int = 0,
-    limit: int = 20,
-    query: str | None = None,
-    context_lines: int = 0,
-    max_matches: int = 10,
-) -> dict[str, Any]:
-    """按需读取可用的 artifact:// JSON 文件。仅使用真实工作流结果中的 URI；可查看摘要、行范围、JSON Pointer 或关键词匹配。"""
-    params = {
-        "artifact_uri": artifact_uri,
-        "mode": mode,
-        "start_line": start_line,
-        "max_lines": max_lines,
-        "json_pointer": json_pointer,
-        "offset": offset,
-        "limit": limit,
-        "query": query,
-        "context_lines": context_lines,
-        "max_matches": max_matches,
-    }
-    return await read_artifact_handler(params, require_tool_context(config))
+    artifact_access: ArtifactAccessService,
+) -> BaseTool:
+    @tool(
+        "read_artifact",
+        description=(
+            "按需读取已有的 artifact:// JSON 文件。"
+            "当需要查看先前工作流产物的摘要、指定行、JSON 字段或关键词匹配时，调用此工具。"
+            "输入必须使用先前工作流实际返回的 artifact_uri，并按需要选择读取模式及范围；不得编造 URI。"
+        ),
+        args_schema=ReadArtifactArgs,
+    )
+    async def read_artifact_tool(
+        *,
+        artifact_uri: str,
+        mode: Literal['summary', 'text', 'json', 'search'] = 'summary',
+        start_line: int = 1,
+        max_lines: int = 100,
+        json_pointer: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+        query: str | None = None,
+        context_lines: int = 0,
+        max_matches: int = 10,
+    ) -> dict[str, Any]:
+        """按需读取可用的 artifact:// JSON 文件。仅使用真实工作流结果中的 URI；可查看摘要、行范围、JSON Pointer 或关键词匹配。"""
+        params = {
+            "artifact_uri": artifact_uri,
+            "mode": mode,
+            "start_line": start_line,
+            "max_lines": max_lines,
+            "json_pointer": json_pointer,
+            "offset": offset,
+            "limit": limit,
+            "query": query,
+            "context_lines": context_lines,
+            "max_matches": max_matches,
+        }
+        try:
+            return await read_artifact_handler(params, artifact_access=artifact_access)
+        except ArtifactAccessError as exc:
+            raise ToolException(str(exc)) from exc
 
-
-READ_ARTIFACT_TOOL = read_artifact_tool
-READ_ARTIFACT_TOOL.metadata = {"requires_confirmation": False}
+    return read_artifact_tool

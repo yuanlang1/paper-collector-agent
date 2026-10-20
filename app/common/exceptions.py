@@ -2,14 +2,27 @@ import logging
 from typing import Any
 
 from fastapi import FastAPI, Request, status
-from requests import status_codes
 from fastapi.exceptions import RequestValidationError
 from starlette.responses import JSONResponse
 from pydantic import ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from app.core.response import ServiceResponse
+from app.common.response import ServiceResponse
 
 logger = logging.getLogger(__name__)
+
+class BusinessException(Exception):
+    def __init__(
+        self,
+        message: str,
+        code: 1,
+        status_code: int = 500,
+        other: dict[str, Any] | None = None
+    ):
+        self.message = message
+        self.code = code
+        self.status_code = status_code
+        self.other = other
+        super().__init__(message)
 
 class AppException(Exception):
     def __init__(
@@ -91,7 +104,6 @@ class ServiceUnavailableException(AppException):
             status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
-# 返回json格式 dict
 def _build_error_response(
     *,
     code: int,

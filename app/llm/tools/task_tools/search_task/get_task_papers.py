@@ -7,8 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from app.infrastructure.grpc.paper_service_grpc_client import (
     paper_service_grpc_client,
 )
-from langchain_core.tools import tool
-from app.llm.tools.registry import ToolExecutionContext
+from langchain_core.tools import ToolException, tool
 
 
 class GetTaskPapersArgs(BaseModel):
@@ -21,7 +20,7 @@ class GetTaskPapersArgs(BaseModel):
 
 async def get_task_papers_handler(
     params: dict[str, Any],
-    context: ToolExecutionContext,
+    context: object | None = None,
 ) -> dict[str, Any]:
     del context
     request = GetTaskPapersArgs.model_validate(params)
@@ -29,7 +28,7 @@ async def get_task_papers_handler(
         request.task_id
     )
     if not result.get("ok"):
-        raise RuntimeError(str(result.get("error") or "任务论文查询失败。"))
+        raise ToolException(str(result.get("error") or "任务论文查询失败。"))
 
     papers = result.get("result", {}).get("papers", [])
     payload = {
@@ -67,4 +66,3 @@ async def get_task_papers_tool(
 
 
 GET_TASK_PAPERS_TOOL = get_task_papers_tool
-GET_TASK_PAPERS_TOOL.metadata = {"requires_confirmation": False}

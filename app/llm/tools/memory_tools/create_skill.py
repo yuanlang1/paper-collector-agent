@@ -7,10 +7,8 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.config import settings
-from langchain_core.tools import tool
-from langchain_core.runnables import RunnableConfig
-
-from app.llm.tools.registry import ToolExecutionContext, require_tool_context
+from langchain.tools import ToolRuntime
+from langchain_core.tools import ToolException, tool
 from app.memory.procedural.loader import (
     Skill,
     render_skill_document,
@@ -64,9 +62,15 @@ class CreateSkillArgs(BaseModel):
         return list(dict.fromkeys(normalized))
 
 
+class CreateSkillToolArgs(CreateSkillArgs):
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+
+    runtime: ToolRuntime[Any] = Field(exclude=True)
+
+
 async def create_skill_handler(
     params: dict[str, Any],
-    context: ToolExecutionContext,
+    runtime: ToolRuntime,
 ) -> dict[str, Any]:
     args = CreateSkillArgs.model_validate(params)
     skill = Skill(
@@ -77,7 +81,7 @@ async def create_skill_handler(
     )
     directory = user_skill_directory(
         Path(settings.AGENT_SKILLS_DIR),
-        context.user_id,
+        runtime.context.user_id,
     )
     path = directory / skill.name / "SKILL.md"
     if path.exists():
@@ -104,11 +108,11 @@ async def create_skill_handler(
         "输入应包含技能名称 name、单行用途说明 description、触发词 triggers 和执行步骤 instructions。"
         "技能名称使用小写字母、数字或连字符，不覆盖已有同名技能。"
     ),
-    args_schema=CreateSkillArgs,
+    args_schema=CreateSkillToolArgs,
 )
 async def create_skill_tool(
     *,
-    config: RunnableConfig,
+    runtime: ToolRuntime,
     name: str,
     description: str,
     triggers: list[str],
@@ -121,8 +125,10 @@ async def create_skill_tool(
         "triggers": triggers,
         "instructions": instructions,
     }
-    return await create_skill_handler(params, require_tool_context(config))
+    try:
+        return await create_skill_handler(params, runtime)
+    except OSError as exc:
+        raise ToolException(str(exc)) from exc
 
 
 CREATE_SKILL_TOOL = create_skill_tool
-CREATE_SKILL_TOOL.metadata = {"requires_confirmation": True}

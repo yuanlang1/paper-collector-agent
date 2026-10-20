@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 
-from sqlalchemy import Date, DateTime, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, Date, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base
+from app.database import Base
+from app.db.models.entity_base import EntityBase
 
 
-class MemoryEpisode(Base):
+class MemoryEpisode(EntityBase, Base):
     __tablename__ = "memory_episodes"
     __table_args__ = (
         UniqueConstraint(
@@ -18,21 +19,11 @@ class MemoryEpisode(Base):
         ),
     )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
     happened_at: Mapped[date] = mapped_column(Date, nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     source_conversation_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    source_assistant_message_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_assistant_message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     status: Mapped[str] = mapped_column(
         String(16), default="pending", nullable=False, index=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
     )

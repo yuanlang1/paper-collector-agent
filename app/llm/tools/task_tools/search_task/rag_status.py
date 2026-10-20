@@ -2,8 +2,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from langchain_core.tools import tool
-from app.llm.tools.registry import ToolExecutionContext
+from langchain_core.tools import ToolException, tool
 from app.rag.processing.task_rag_status import get_task_rag_status
 
 
@@ -15,13 +14,13 @@ class GetTaskRagStatusArgs(BaseModel):
 
 async def get_task_rag_status_handler(
     params: dict[str, Any],
-    context: ToolExecutionContext,
+    context: object | None = None,
 ) -> dict[str, Any]:
     del context
     request = GetTaskRagStatusArgs.model_validate(params)
     result = await get_task_rag_status(request.task_id)
     if not result.get("ok"):
-        raise RuntimeError(str(result.get("error") or "RAG 状态查询失败。"))
+        raise ToolException(str(result.get("error") or "RAG 状态查询失败。"))
     return result
 
 
@@ -46,4 +45,3 @@ async def get_task_rag_status_tool(
 
 
 GET_TASK_RAG_STATUS_TOOL = get_task_rag_status_tool
-GET_TASK_RAG_STATUS_TOOL.metadata = {"requires_confirmation": False}

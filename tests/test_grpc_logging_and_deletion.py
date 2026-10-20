@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from app.db.base import Base
+from app.database import Base
 from app.history import chat_log, stream_events
 from app.history.sqlite import HistoryDatabase
 from app.models.agent_history import AgentConversation, AgentMessage, AgentRun

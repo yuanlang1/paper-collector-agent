@@ -10,8 +10,7 @@ from app.llm.graph.workflows.paper_search_schemas import (
     PromptUnderstandingArgs,
     SearchTagArgs,
 )
-from langchain_core.tools import tool
-from app.llm.tools.registry import ToolExecutionContext
+from langchain_core.tools import ToolException, tool
 
 
 class AddQueryTaskArgs(BaseModel):
@@ -24,7 +23,7 @@ class AddQueryTaskArgs(BaseModel):
 
 async def add_query_task_handler(
     params: dict[str, Any],
-    context: ToolExecutionContext,
+    context: object | None = None,
 ) -> dict[str, Any]:
     del context
     request = AddQueryTaskArgs.model_validate(params)
@@ -36,7 +35,7 @@ async def add_query_task_handler(
 
     result = await task_service_grpc_client.add_query_task(payload)
     if not result.get("ok"):
-        raise RuntimeError(str(result.get("error") or "创建检索任务失败。"))
+        raise ToolException(str(result.get("error") or "创建检索任务失败。"))
     return result
 
 
@@ -66,4 +65,3 @@ async def add_query_task_tool(
 
 
 ADD_QUERY_TASK_TOOL = add_query_task_tool
-ADD_QUERY_TASK_TOOL.metadata = {"requires_confirmation": True}

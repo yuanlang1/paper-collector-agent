@@ -6,14 +6,13 @@ from typing import Any
 from langchain_core.runnables import RunnableConfig
 
 from app.llm.artifacts.paper_artifacts import save_paper_search_artifact
-from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.google_scholar.search_google_scholar import (
     google_scholar_search_service,
 )
 
 
 SearchHandler = Callable[
-    [dict[str, Any], ToolExecutionContext | None],
+    [dict[str, Any], object | None],
     Awaitable[dict[str, Any]],
 ]
 

@@ -11,8 +11,7 @@ from urllib.parse import quote
 import httpx
 
 from app.config import settings
-from langchain_core.tools import tool
-from app.llm.tools.registry import ToolExecutionContext
+from langchain_core.tools import ToolException, tool
 from app.llm.tools.search_tools.common import (
     RETRYABLE_STATUS_CODES,
     clean_text,
@@ -294,7 +293,7 @@ def _query_label(args: CrossrefSearchArgs) -> str:
 
 async def crossref_search_service(
     params: Dict[str, Any],
-    context: ToolExecutionContext,
+    context: object | None = None,
 ) -> Dict[str, Any]:
     del context
 
@@ -309,7 +308,7 @@ async def crossref_search_service(
         retryable: bool,
         status_code: int | None = None,
     ) -> None:
-        raise RuntimeError(message)
+        raise ToolException(message)
 
     try:
         headers = {
@@ -460,4 +459,3 @@ async def crossref_search_tool(
 
 
 CROSSREF_SEARCH_TOOL = crossref_search_tool
-CROSSREF_SEARCH_TOOL.metadata = {"requires_confirmation": False}

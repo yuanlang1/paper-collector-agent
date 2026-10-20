@@ -3,7 +3,7 @@ import unittest
 from langchain_core.documents import Document
 from pydantic import ValidationError
 
-from app.llm.tools.registry import build_tool_registry
+from app.llm.agent_build import build_tools
 from app.llm.tools.search_tools.search_paper_index import (
     MAX_CHUNK_CHARS,
     MAX_RESULT_CHARS,
@@ -95,7 +95,7 @@ class SearchPaperIndexTests(unittest.IsolatedAsyncioTestCase):
             })
 
     def test_is_not_registered_for_the_main_agent(self):
-        self.assertIsNone(build_tool_registry().get("search_paper_index"))
+        self.assertNotIn("search_paper_index", {tool.name for tool in build_tools(None, user_id=1).get_tools()})
 
 
 if __name__ == "__main__":

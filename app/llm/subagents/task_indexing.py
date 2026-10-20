@@ -121,6 +121,5 @@ async def task_indexing_agent(
 
 
 task_indexing_agent.metadata = {
-    "requires_confirmation": False, 
     "display_name": "知识库索引子代理"
 }

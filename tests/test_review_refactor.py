@@ -1734,7 +1734,7 @@ class ReviewRefactorTests(unittest.IsolatedAsyncioTestCase):
                 Settings.model_validate(settings.model_dump() | {name: value})
 
     def test_review_subagent_does_not_require_confirmation(self):
-        self.assertFalse(task_review_agent.metadata["requires_confirmation"])
+        self.assertNotIn("requires_confirmation", task_review_agent.metadata)
 
     def test_writing_revision_budget_default_and_bounds(self):
         name = "TASK_REVIEW_MAX_WRITING_REVISION_ROUNDS"

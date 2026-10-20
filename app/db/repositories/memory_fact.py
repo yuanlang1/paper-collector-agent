@@ -80,7 +80,7 @@ async def list_facts(
             MemoryFact.user_id == user_id,
             MemoryFact.status.in_(statuses),
         )
-        .order_by(MemoryFact.updated_at.desc(), MemoryFact.id.desc())
+        .order_by(MemoryFact.modification_time.desc(), MemoryFact.id.desc())
         .limit(limit)
     )
     return list(await db.scalars(statement))
@@ -101,7 +101,7 @@ async def list_by_subject(
             MemoryFact.subject == subject,
             MemoryFact.status.in_(statuses),
         )
-        .order_by(MemoryFact.updated_at.desc(), MemoryFact.id.desc())
+        .order_by(MemoryFact.modification_time.desc(), MemoryFact.id.desc())
         .limit(limit)
     )
     return list(await db.scalars(statement))
@@ -147,7 +147,7 @@ async def search_active(
                 MemoryFact.content.ilike(pattern, escape="\\"),
             ),
         )
-        .order_by(MemoryFact.updated_at.desc(), MemoryFact.id.desc())
+        .order_by(MemoryFact.modification_time.desc(), MemoryFact.id.desc())
         .limit(limit)
     )
     return list(await db.scalars(statement))

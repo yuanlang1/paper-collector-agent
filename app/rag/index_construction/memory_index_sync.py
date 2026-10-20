@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable, Iterable, Sequence
 from functools import lru_cache
 
 from app.config import settings
-from app.db.models import MemoryEpisode, MemoryFact, PREFERENCE_SUBJECT
+from app.db.models import PREFERENCE_SUBJECT, MemoryEpisode, MemoryFact
 from app.rag.index_construction.memory_episode_index_construction import (
     MemoryEpisodeIndexConstructionModule,
 )
@@ -28,15 +28,10 @@ class MemoryIndexSynchronizer:
         self.episode_index = episode_index
 
     async def upsert_facts(self, facts: Sequence[MemoryFact]) -> None:
-        facts = [
-            fact
-            for fact in facts
-            if fact.subject != PREFERENCE_SUBJECT
-        ]
+        facts = [fact for fact in facts if fact.subject != PREFERENCE_SUBJECT]
         if facts:
             await self._sync(
-                "upsert facts", 
-                lambda: self._fact_index().upsert_facts(facts)
+                "upsert facts", lambda: self._fact_index().upsert_facts(facts)
             )
 
     async def ensure_collections(self) -> None:

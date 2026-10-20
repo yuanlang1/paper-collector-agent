@@ -1,11 +1,12 @@
-import app.config as settings
+from app.config import settings
 from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
 
 def create_database():
     engine = create_engine(
-        settings.DATABASE_URL,
+        make_url(settings.DATABASE_POSTGRES_URL).set(drivername="postgresql+psycopg"),
         pool_pre_ping=True,
         pool_recycle=3600,
         echo=settings.SQL_ECHO,

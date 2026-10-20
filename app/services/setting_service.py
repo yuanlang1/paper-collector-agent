@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db.repositories import system_setting
 
-
 SOURCE_LIMITS_KEY = "source_limits"
 SOURCE_LIMIT_NAMES = ("arxiv", "dblp", "google_scholar")
 

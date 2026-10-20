@@ -2,7 +2,6 @@ from typing import Any, ClassVar, Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
-
 T = TypeVar("T")
 
 
@@ -48,10 +47,7 @@ class ServiceResponse(BaseModel, Generic[T]):
         )
 
     def is_success(self) -> bool:
-        return (
-            self.success
-            and self.code == self.SUCCESS_CODE
-        )
+        return self.success and self.code == self.SUCCESS_CODE
 
     def is_error(self) -> bool:
         return not self.is_success()
@@ -69,10 +65,7 @@ class ServiceResponse(BaseModel, Generic[T]):
         self,
         key: str,
     ) -> bool:
-        return (
-            self.other is not None
-            and key in self.other
-        )
+        return self.other is not None and key in self.other
 
     def get_extra(
         self,

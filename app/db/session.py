@@ -13,9 +13,7 @@ from app.config import settings
 
 
 def create_database() -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
-    url = make_url(settings.DATABASE_URL)
-    if url.drivername in {"mysql", "mysql+pymysql"}:
-        url = url.set(drivername="mysql+aiomysql")
+    url = make_url(settings.DATABASE_POSTGRES_URL).set(drivername="postgresql+psycopg")
     engine = create_async_engine(
         url,
         pool_pre_ping=True,

@@ -20,8 +20,6 @@ class Settings(BaseSettings):
     HOST: str
     PORT: int
 
-    DATABASE_URL: str 
-
     OPENAI_API_KEY: str
     OPENAI_BASE_URL: str
     LLM_PROVIDER: str
@@ -184,7 +182,6 @@ settings = Settings()
 os.environ["LANGSMITH_TRACING"] = str(settings.LANGSMITH_TRACING).lower()
 os.environ["LANGSMITH_API_KEY"] = settings.LANGSMITH_API_KEY
 os.environ["LANGSMITH_PROJECT"] = settings.LANGSMITH_PROJECT
-DATABASE_URL = settings.DATABASE_URL
 DEBUG = settings.DEBUG
 SQL_ECHO = settings.SQL_ECHO
 OPENAI_API_KEY = settings.OPENAI_API_KEY

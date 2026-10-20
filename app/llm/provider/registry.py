@@ -3,11 +3,11 @@ from __future__ import annotations
 from app.config import settings
 from app.llm.provider.base import ChatProvider, ProviderConfig
 from app.llm.provider.provider import DeepSeekProvider, OpenAICompatibleProvider
-from app.services.llm_profile_service import LlmRuntimeConfig
+from app.services.llm_setting_service import LlmConfig
 
 
 def resolve_provider_config(
-    runtime_config: LlmRuntimeConfig | None,
+    runtime_config: LlmConfig | None,
 ) -> ProviderConfig:
     if runtime_config is not None:
         return ProviderConfig(

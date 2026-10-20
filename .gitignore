@@ -54,6 +54,9 @@ tests/*
 !tests/test_grpc_logging_and_deletion.py
 !tests/test_paper_search_single_source.py
 !tests/test_async_database.py
+!tests/test_postgres_models.py
+!tests/test_agent_runs.py
+!tests/test_tool_node.py
 !app/db/models/
 !app/db/models/*.py
 scripts/

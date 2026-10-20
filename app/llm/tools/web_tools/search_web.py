@@ -7,17 +7,15 @@ from collections.abc import Mapping
 from typing import Any
 
 import httpx
+from langchain_core.tools import ToolException, tool
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.config import settings
-from langchain_core.tools import tool
-from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.common import (
     RETRYABLE_STATUS_CODES,
     clean_text,
     elapsed_ms,
 )
-
 
 MAX_MARKDOWN_CHARACTERS = 6_000
 DOMAIN_PATTERN = re.compile(
@@ -57,9 +55,11 @@ class SearchWebArgs(BaseModel):
         return list(dict.fromkeys(domains))
 
     @model_validator(mode="after")
-    def validate_domain_filters(self) -> "SearchWebArgs":
+    def validate_domain_filters(self) -> SearchWebArgs:
         if self.include_domains and self.exclude_domains:
-            raise ValueError("include_domains and exclude_domains are mutually exclusive")
+            raise ValueError(
+                "include_domains and exclude_domains are mutually exclusive"
+            )
         return self
 
 
@@ -98,19 +98,14 @@ async def _post_search(
                 settings.FIRECRAWL_SEARCH_URL,
                 json=payload,
             )
-            if (
-                response.status_code in RETRYABLE_STATUS_CODES
-                and attempt == 0
-            ):
+            if response.status_code in RETRYABLE_STATUS_CODES and attempt == 0:
                 await asyncio.sleep(1)
                 continue
             response.raise_for_status()
             try:
                 data = response.json()
             except ValueError as exc:
-                raise FirecrawlResponseError(
-                    "Firecrawl returned invalid JSON"
-                ) from exc
+                raise FirecrawlResponseError("Firecrawl returned invalid JSON") from exc
             if not isinstance(data, Mapping):
                 raise FirecrawlResponseError("Firecrawl response must be an object")
             return dict(data)
@@ -165,14 +160,12 @@ def _failure(
     retryable: bool,
     status_code: int | None = None,
 ) -> None:
-    raise RuntimeError(message)
+    raise ToolException(message)
 
 
 async def search_web_handler(
     params: dict[str, Any],
-    context: ToolExecutionContext,
 ) -> dict[str, Any]:
-    del context
     args = SearchWebArgs.model_validate(params)
     started_at = time.perf_counter()
     if not settings.FIRECRAWL_API_KEY:
@@ -214,7 +207,8 @@ async def search_web_handler(
                     item,
                     include_markdown=args.include_markdown,
                 )
-            ) is not None
+            )
+            is not None
         ]
         return {
             "ok": True,
@@ -303,7 +297,6 @@ async def search_web_tool(
     tbs: str | None = None,
     include_markdown: bool = False,
 ) -> dict[str, Any]:
-    """通过 Firecrawl 搜索实时网页、官网文档或新闻。默认只返回标题、链接和摘要；仅在需要阅读页面内容时设置 include_markdown=true。完整论文检索仍应使用 paper_search_agent。"""
     params = {
         "query": query,
         "limit": limit,
@@ -314,8 +307,7 @@ async def search_web_tool(
         params["include_domains"] = include_domains
     if exclude_domains is not None:
         params["exclude_domains"] = exclude_domains
-    return await search_web_handler(params, None)
+    return await search_web_handler(params)
 
 
 SEARCH_WEB_TOOL = search_web_tool
-SEARCH_WEB_TOOL.metadata = {"requires_confirmation": False}

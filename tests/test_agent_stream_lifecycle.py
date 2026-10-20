@@ -44,7 +44,7 @@ from app.llm.subagents.registry import (
 from app.llm.tools.registry import ToolRegistry
 from app.runtime.agent_runtime import AgentRuntime
 from app.runtime.session import Session
-from app.db.base import Base
+from app.database import Base
 from app.models.agent_history import AgentConversation, AgentMessage, AgentRun
 
 

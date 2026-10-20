@@ -7,7 +7,6 @@ from typing import Any, Dict, Literal
 from pydantic import BaseModel, Field
 
 from langchain_core.tools import tool
-from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.arxiv.search_arxiv import arxiv_search_service
 
 
@@ -161,7 +160,7 @@ async def _search_arxiv_by_doi(
     *,
     doi: str,
     max_candidates: int,
-    context: ToolExecutionContext,
+    context: object | None = None,
 ) -> list[dict[str, Any]]:
     """
     用 DOI 搜 arXiv。
@@ -214,7 +213,7 @@ async def _search_arxiv_by_title(
     *,
     title: str,
     max_candidates: int,
-    context: ToolExecutionContext,
+    context: object | None = None,
 ) -> list[dict[str, Any]]:
     title = _clean_text(title)
 
@@ -301,7 +300,7 @@ def _pick_best_candidate(
 
 async def arxiv_supplement_handler(
     params: Dict[str, Any],
-    context: ToolExecutionContext,
+    context: object | None = None,
 ) -> Dict[str, Any]:
     args = ArxivSupplementArgs(**params)
 
@@ -432,4 +431,3 @@ async def arxiv_supplement_tool(
 
 
 ARXIV_SUPPLEMENT_TOOL = arxiv_supplement_tool
-ARXIV_SUPPLEMENT_TOOL.metadata = {"requires_confirmation": False}

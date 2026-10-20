@@ -9,8 +9,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import settings
-from langchain_core.tools import tool
-from app.llm.tools.registry import ToolExecutionContext
+from langchain_core.tools import ToolException, tool
 from app.llm.tools.search_tools.common import RETRYABLE_STATUS_CODES, clean_text, elapsed_ms, ensure_list, parse_year
 
 DBLP_API_URL = settings.DBLP_API_URL
@@ -302,7 +301,7 @@ def _parse_dblp_result(
 
 async def dblp_search_service(
     params: Dict[str, Any],
-    context: ToolExecutionContext,
+    context: object | None = None,
 ) -> Dict[str, Any]:
     del context
 
@@ -318,7 +317,7 @@ async def dblp_search_service(
         status_code: int | None = None,
         content_type: str | None = None,
     ) -> None:
-        raise RuntimeError(message)
+        raise ToolException(message)
 
     try:
         if not query:
@@ -534,4 +533,3 @@ async def dblp_search_tool(
 
 
 DBLP_SEARCH_TOOL = dblp_search_tool
-DBLP_SEARCH_TOOL.metadata = {"requires_confirmation": False}

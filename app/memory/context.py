@@ -17,7 +17,7 @@ from app.memory.schemas import (
 from app.memory.semantic.service import FactService
 from app.db.models import MemoryEpisode, MemoryFact
 from app.rag.retrieval.memory_retrieval import MemoryHybridRetrieval
-from app.services.llm_profile_service import LlmRuntimeConfig
+from app.services.llm_setting_service import LlmConfig
 
 
 MemoryEventCallback = Callable[[dict[str, Any]], Awaitable[None]]
@@ -46,7 +46,7 @@ class MemoryContextService:
         *,
         user_message: str,
         conversation_id: str,
-        llm_config: LlmRuntimeConfig | None,
+        llm_config: LlmConfig | None,
         on_event: MemoryEventCallback | None = None,
     ) -> MemoryContextResult:
         decision = await self.retrieval_gate.decide(

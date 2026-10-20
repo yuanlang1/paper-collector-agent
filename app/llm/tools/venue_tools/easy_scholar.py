@@ -9,8 +9,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import settings
-from langchain_core.tools import tool
-from app.llm.tools.registry import ToolExecutionContext
+from langchain_core.tools import ToolException, tool
 from app.llm.tools.search_tools.common import (
     elapsed_ms,
 )
@@ -168,7 +167,7 @@ def _to_result(
 
 async def easy_scholar_venue_handler(
     params: Dict[str, Any],
-    context: ToolExecutionContext,
+    context: object | None = None,
 ) -> Dict[str, Any]:
     del context
 
@@ -176,7 +175,7 @@ async def easy_scholar_venue_handler(
     started_at = time.perf_counter()
 
     if not settings.EASY_SCHOLAR_SECRET_KEY:
-        raise RuntimeError("EasyScholar 密钥未配置。")
+        raise ToolException("EasyScholar 密钥未配置。")
 
     await _wait_for_rate_limit()
 
@@ -195,11 +194,11 @@ async def easy_scholar_venue_handler(
     payload = response.json()
 
     if payload.get("code") != 200:
-        raise RuntimeError(str(payload.get("msg") or "查询失败"))
+        raise ToolException(str(payload.get("msg") or "查询失败"))
 
     data = payload.get("data")
     if not isinstance(data, Mapping):
-        raise RuntimeError("未找到该期刊的等级信息。")
+        raise ToolException("未找到该期刊的等级信息。")
 
     return {
         "ok": True,
@@ -236,4 +235,3 @@ async def get_venue_info_tool(
 
 
 EASY_SCHOLAR_VENUE_TOOL = get_venue_info_tool
-EASY_SCHOLAR_VENUE_TOOL.metadata = {"requires_confirmation": False}

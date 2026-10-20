@@ -6,7 +6,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.llm.provider import ChatClient, ModelOptions, ValidatedJsonInvoker
-from app.services.llm_profile_service import LlmRuntimeConfig
+from app.services.llm_setting_service import LlmConfig
 
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ class MemoryRetrievalGate:
         self,
         *,
         user_message: str,
-        llm_config: LlmRuntimeConfig | None,
+        llm_config: LlmConfig | None,
     ) -> RetrievalDecision:
         message = user_message.strip()
         if not message:

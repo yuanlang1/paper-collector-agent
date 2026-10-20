@@ -8,8 +8,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import settings
-from langchain_core.tools import tool
-from app.llm.tools.registry import ToolExecutionContext
+from langchain_core.tools import ToolException, tool
 from app.llm.tools.search_tools.common import RETRYABLE_STATUS_CODES, clean_text, elapsed_ms, parse_year
 
 SERPAPI_SEARCH_URL = settings.SERPAPI_SEARCH_URL
@@ -38,15 +37,15 @@ class GoogleScholarSearchArgs(BaseModel):
         return self
 
 
-class SerpApiResponseParseError(Exception):
+class SerpApiResponseParseError(ToolException):
     """SerpApi 响应无法解析为有效 JSON。"""
 
 
-class SerpApiSearchError(Exception):
+class SerpApiSearchError(ToolException):
     """SerpApi 返回了业务错误。"""
 
 
-class SerpApiConfigurationError(Exception):
+class SerpApiConfigurationError(ToolException):
     """SerpApi 配置缺失或无效。"""
 
 
@@ -279,7 +278,7 @@ def _validate_serpapi_result(
 
 async def google_scholar_search_service(
     params: dict[str, Any],
-    context: ToolExecutionContext,
+    context: object | None = None,
 ) -> dict[str, Any]:
     del context
     args = GoogleScholarSearchArgs.model_validate(params)
@@ -472,4 +471,3 @@ async def google_scholar_search_tool(
 
 
 GOOGLE_SCHOLAR_SEARCH_TOOL = google_scholar_search_tool
-GOOGLE_SCHOLAR_SEARCH_TOOL.metadata = {"requires_confirmation": False}

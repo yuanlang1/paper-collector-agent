@@ -1,15 +1,16 @@
-
 import hashlib
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import replace
-from typing import Any, Sequence
+from typing import Any
+
+from app.schemas.file_parser import PdfSourceBlock
 from langchain_core.documents import Document
 from langchain_text_splitters import (
     MarkdownHeaderTextSplitter,
     RecursiveCharacterTextSplitter,
 )
-from app.schemas.file_parser import PdfSourceBlock
 
 logger = logging.getLogger(__name__)
 
@@ -40,34 +41,37 @@ TEXT_SEPARATOR = [
     "",
 ]
 
-PDF_ATOMIC_BLOCK_TYPES = frozenset({
-    "equation",
-    "table",
-    "image",
-    "chart",
-    "code",
-    "algorithm",
-})
+PDF_ATOMIC_BLOCK_TYPES = frozenset(
+    {
+        "equation",
+        "table",
+        "image",
+        "chart",
+        "code",
+        "algorithm",
+    }
+)
+
 
 class DataPreparationModule:
     def __init__(
         self,
         *,
-        chunk_size: int = 1200, 
+        chunk_size: int = 1200,
         chunk_overlap: int = 200,
     ) -> None:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.header_splitter = MarkdownHeaderTextSplitter(
-            headers_to_split_on = HEADERS_TO_SPLIT_ON,
-            strip_headers = False,
+            headers_to_split_on=HEADERS_TO_SPLIT_ON,
+            strip_headers=False,
         )
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size = chunk_size,
-            chunk_overlap = chunk_overlap,
-            separators = TEXT_SEPARATOR
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            separators=TEXT_SEPARATOR,
         )
-    
+
     def prepare_documents(
         self,
         documents: list[Document],
@@ -124,7 +128,7 @@ class DataPreparationModule:
         for source_block in source_blocks:
             block = replace(
                 source_block,
-                markdown = self._clean_markdown(source_block.markdown),
+                markdown=self._clean_markdown(source_block.markdown),
             )
             if not block.markdown:
                 continue
@@ -145,11 +149,7 @@ class DataPreparationModule:
                 headings[level - 1] = title
                 for index in range(level, len(headings)):
                     headings[index] = ""
-                section_path = " > ".join(
-                    heading
-                    for heading in headings
-                    if heading
-                )
+                section_path = " > ".join(heading for heading in headings if heading)
 
             section_blocks.append(block)
 
@@ -185,7 +185,10 @@ class DataPreparationModule:
                     )
                     current = self._overlap_tail(current)
 
-                    if current and self._blocks_length(current + [block]) > self.chunk_size:
+                    if (
+                        current
+                        and self._blocks_length(current + [block]) > self.chunk_size
+                    ):
                         current = []
 
                 current.append(block)
@@ -212,7 +215,7 @@ class DataPreparationModule:
             return [source_block]
 
         return [
-            replace(source_block, markdown = fragment)
+            replace(source_block, markdown=fragment)
             for fragment in self.text_splitter.split_text(source_block.markdown)
             if fragment.strip()
         ]
@@ -265,8 +268,8 @@ class DataPreparationModule:
             source_spans.append(span)
 
         return Document(
-            page_content = "\n\n".join(parts),
-            metadata = {
+            page_content="\n\n".join(parts),
+            metadata={
                 **document.metadata,
                 "section_path": section_path,
                 "page_start": page_numbers[0],
@@ -307,9 +310,9 @@ class DataPreparationModule:
                     "paper_id": paper_id,
                     "parent_id": parent_id,
                     "chunk_id": self._build_chunk_id(
-                        paper_id = paper_id,
-                        chunk_index = chunk_index,
-                        content = content,
+                        paper_id=paper_id,
+                        chunk_index=chunk_index,
+                        content=content,
                     ),
                     "chunk_index": chunk_index,
                     "doc_type": "child",
@@ -322,10 +325,7 @@ class DataPreparationModule:
     def _clean_markdown(
         markdown: str,
     ) -> str:
-        cleaned = "\n".join(
-            line.rstrip()
-            for line in markdown.splitlines()
-        )
+        cleaned = "\n".join(line.rstrip() for line in markdown.splitlines())
 
         return re.sub(
             r"\n{3,}",
@@ -339,9 +339,7 @@ class DataPreparationModule:
         metadata: dict[str, Any],
     ) -> str:
         return " > ".join(
-            str(metadata[key])
-            for key in HEADER_KEYS
-            if metadata.get(key)
+            str(metadata[key]) for key in HEADER_KEYS if metadata.get(key)
         )
 
     @staticmethod
@@ -351,12 +349,6 @@ class DataPreparationModule:
         chunk_index: int,
         content: str,
     ) -> str:
-        value = (
-            f"{paper_id}:"
-            f"{chunk_index}:"
-            f"{content}"
-        )
+        value = f"{paper_id}:{chunk_index}:{content}"
 
-        return hashlib.sha256(
-            value.encode("utf-8")
-        ).hexdigest()
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()

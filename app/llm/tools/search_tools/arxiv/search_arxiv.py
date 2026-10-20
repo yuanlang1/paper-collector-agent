@@ -4,15 +4,18 @@ import asyncio
 import re
 import time
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, Literal
+from typing import Any, Literal
 
 import httpx
+from langchain_core.tools import ToolException, tool
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import settings
-from langchain_core.tools import tool
-from app.llm.tools.registry import ToolExecutionContext
-from app.llm.tools.search_tools.common import RETRYABLE_STATUS_CODES, clean_text, elapsed_ms
+from app.llm.tools.search_tools.common import (
+    RETRYABLE_STATUS_CODES,
+    clean_text,
+    elapsed_ms,
+)
 
 ARXIV_API_URL = settings.ARXIV_API_URL
 
@@ -22,9 +25,7 @@ ATOM_NS = {
     "arxiv": "http://arxiv.org/schemas/atom",
 }
 
-ARXIV_CATEGORY_PATTERN = re.compile(
-    r"^[a-zA-Z-]+(?:\.[a-zA-Z-]+)?$"
-)
+ARXIV_CATEGORY_PATTERN = re.compile(r"^[a-zA-Z-]+(?:\.[a-zA-Z-]+)?$")
 
 
 class ArxivSearchArgs(BaseModel):
@@ -32,9 +33,7 @@ class ArxivSearchArgs(BaseModel):
 
     query: str | None = Field(None, min_length=1, max_length=500)
     arxiv_ids: list[str] = Field(default_factory=list, max_length=20)
-    search_type: Literal[
-        "topic", "title", "author", "abstract", "category"
-    ] = "topic"
+    search_type: Literal["topic", "title", "author", "abstract", "category"] = "topic"
     category: str | None = Field(None, max_length=200)
     year_from: int | None = Field(None, ge=1991, le=2100)
     year_to: int | None = Field(None, ge=1991, le=2100)
@@ -46,7 +45,7 @@ class ArxivSearchArgs(BaseModel):
     include_abstract: bool = True
 
     @model_validator(mode="after")
-    def validate_request(self) -> "ArxivSearchArgs":
+    def validate_request(self) -> ArxivSearchArgs:
         if not self.query and not self.arxiv_ids:
             raise ValueError("query or arxiv_ids must be provided")
         if self.query and self.arxiv_ids:
@@ -77,19 +76,13 @@ def _build_category_clause(
     if not category:
         return None
 
-    categories = [
-        item.strip()
-        for item in category.split(",")
-        if item.strip()
-    ]
+    categories = [item.strip() for item in category.split(",") if item.strip()]
 
     if not categories:
         return None
 
     invalid_categories = [
-        item
-        for item in categories
-        if not ARXIV_CATEGORY_PATTERN.fullmatch(item)
+        item for item in categories if not ARXIV_CATEGORY_PATTERN.fullmatch(item)
     ]
     if invalid_categories:
         raise ValueError(f"invalid arXiv category: {invalid_categories[0]}")
@@ -293,7 +286,10 @@ def _parse_arxiv_feed(
         ]
         authors = [author for author in authors if author]
 
-        primary_category_element = entry.find("arxiv:primary_category", ATOM_NS,)
+        primary_category_element = entry.find(
+            "arxiv:primary_category",
+            ATOM_NS,
+        )
         primary_category = (
             primary_category_element.attrib.get("term")
             if primary_category_element is not None
@@ -318,7 +314,7 @@ def _parse_arxiv_feed(
             if href and rel == "alternate":
                 abstract_url = href
 
-            if href and ( title_attr == "pdf" or link_type == "application/pdf"):
+            if href and (title_attr == "pdf" or link_type == "application/pdf"):
                 pdf_url = href
 
         doi = clean_text(
@@ -358,14 +354,16 @@ def _parse_arxiv_feed(
                         default="",
                         namespaces=ATOM_NS,
                     )
-                ) or None,
+                )
+                or None,
                 "updated": clean_text(
                     entry.findtext(
                         "atom:updated",
                         default="",
                         namespaces=ATOM_NS,
                     )
-                ) or None,
+                )
+                or None,
                 "primary_category": primary_category,
                 "categories": categories,
                 "doi": doi or None,
@@ -403,10 +401,7 @@ async def _fetch_arxiv_page(
                 },
             )
 
-            if (
-                response.status_code in retryable_status_codes
-                and attempt < retries
-            ):
+            if response.status_code in retryable_status_codes and attempt < retries:
                 await asyncio.sleep(retry_delay_seconds)
                 continue
 
@@ -429,9 +424,9 @@ async def _fetch_arxiv_page(
 
 
 async def arxiv_search_service(
-    params: Dict[str, Any],
-    context: ToolExecutionContext,
-) -> Dict[str, Any]:
+    params: dict[str, Any],
+    context: object | None = None,
+) -> dict[str, Any]:
     del context
 
     args = ArxivSearchArgs.model_validate(params)
@@ -445,7 +440,7 @@ async def arxiv_search_service(
         retryable: bool,
         status_code: int | None = None,
     ) -> None:
-        raise RuntimeError(message)
+        raise ToolException(message)
 
     try:
         papers: list[dict[str, Any]] = []
@@ -458,10 +453,7 @@ async def arxiv_search_service(
         page_warning: str | None = None
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            while (
-                len(papers) < args.total_limit
-                and pages_fetched < args.max_pages
-            ):
+            while len(papers) < args.total_limit and pages_fetched < args.max_pages:
                 page_size = min(
                     args.max_results,
                     args.total_limit - len(papers),
@@ -623,7 +615,7 @@ async def arxiv_search_tool(
     *,
     query: str | None = None,
     arxiv_ids: list[str] | None = None,
-    search_type: Literal['topic', 'title', 'author', 'abstract', 'category'] = 'topic',
+    search_type: Literal["topic", "title", "author", "abstract", "category"] = "topic",
     category: str | None = None,
     year_from: int | None = None,
     year_to: int | None = None,
@@ -631,10 +623,9 @@ async def arxiv_search_tool(
     max_results: int = 5,
     total_limit: int = 5,
     max_pages: int = 1,
-    sort: Literal['relevance', 'newest', 'updated'] = 'relevance',
+    sort: Literal["relevance", "newest", "updated"] = "relevance",
     include_abstract: bool = True,
 ) -> dict[str, Any]:
-    """从 arXiv 少量检索论文并直接返回论文信息。支持主题、标题、作者、摘要、分类和 arXiv ID 精确查询。单次默认返回 5 篇，最多 20 篇。不用于批量检索、分页、文件导出或跨来源去重。"""
     params = {
         "query": query,
         "search_type": search_type,
@@ -654,4 +645,3 @@ async def arxiv_search_tool(
 
 
 ARXIV_SEARCH_TOOL = arxiv_search_tool
-ARXIV_SEARCH_TOOL.metadata = {"requires_confirmation": False}

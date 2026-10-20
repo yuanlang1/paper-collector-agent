@@ -1,26 +1,15 @@
-"""
-系统设置模型
-用于持久化存储运行时配置（如 API Key、模型选择等）
-"""
-from sqlalchemy import BigInteger, Column, DateTime, String, Text, text
-from app.db.base import Base
+from sqlalchemy import String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
-class SystemSetting(Base):
-    """系统设置表"""
+from app.database import Base
+from app.db.models.entity_base import EntityBase
+
+
+class SystemSetting(EntityBase, Base):
     __tablename__ = "config_setting"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    key = Column(String(500), nullable=False, unique=True, index=True)
-    value = Column(Text, nullable=True)
-    creator_id = Column(BigInteger, nullable=False, server_default=text("0"))
-    creation_time = Column(DateTime, nullable=True, server_default=text("CURRENT_TIMESTAMP"))
-    modifier_id = Column(BigInteger, nullable=False, server_default=text("0"))
-    modification_time = Column(
-        DateTime,
-        nullable=True,
-        server_default=text("CURRENT_TIMESTAMP"),
-        server_onupdate=text("CURRENT_TIMESTAMP"),
-    )
+    key: Mapped[str] = mapped_column(String(500), unique=True, index=True)
+    value: Mapped[str | None] = mapped_column(Text)
 
     def __repr__(self):
-        return f"<SystemSetting(key='{self.key}', value='{self.value[:20]}...')>"
+        return f"<SystemSetting(key={self.key!r})>"

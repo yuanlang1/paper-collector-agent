@@ -14,8 +14,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
-from langchain_core.tools import tool
-from app.llm.tools.registry import ToolExecutionContext
+from langchain_core.tools import ToolException, tool
 from app.llm.tools.search_tools.common import (
     RETRYABLE_STATUS_CODES,
     elapsed_ms,
@@ -94,7 +93,7 @@ def _failure(
     retryable: bool = False,
     status_code: int | None = None,
 ) -> None:
-    raise RuntimeError(message)
+    raise ToolException(message)
 
 
 def _target_path(
@@ -311,12 +310,12 @@ async def _download_with_retry(**kwargs: Any) -> dict[str, Any]:
         # 第 1、2 次失败后，分别等待 1 秒和 2 秒。
         await asyncio.sleep(2**attempt)
 
-    raise RuntimeError("下载失败，已超过最大重试次数。")
+    raise ToolException("下载失败，已超过最大重试次数。")
 
 
 async def download_file_handler(
     params: Dict[str, Any],
-    context: ToolExecutionContext,
+    context: object | None = None,
 ) -> Dict[str, Any]:
     del context
 
@@ -457,4 +456,3 @@ async def download_file_tool(
 
 
 DOWNLOAD_FILE_TOOL = download_file_tool
-DOWNLOAD_FILE_TOOL.metadata = {"requires_confirmation": True}
