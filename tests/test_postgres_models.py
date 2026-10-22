@@ -12,13 +12,13 @@ from sqlalchemy.schema import CreateIndex, CreateSchema, CreateTable, DropSchema
 from app.config import settings
 from app.database import Base, create_database
 from app.db.models import (
-    AgentThread, AgentRun, LlmSetting, SystemSetting,
+    AgentThread, AgentRun, LlmSetting, MemoryJob, SystemSetting,
 )
 from app.db.models.entity_base import EntityBase
 
 
 MODELS = (
-    AgentThread, SystemSetting, LlmSetting, AgentRun,
+    AgentThread, SystemSetting, LlmSetting, AgentRun, MemoryJob,
 )
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_POSTGRES_URL")
 
@@ -58,7 +58,7 @@ class PostgresModelTests(unittest.TestCase):
 
     def test_all_tables_share_entity_fields_and_compile_for_postgres(self):
         dialect = postgresql.dialect()
-        self.assertEqual(len(Base.metadata.tables), 4)
+        self.assertEqual(len(Base.metadata.tables), 5)
         for model in MODELS:
             with self.subTest(table=model.__tablename__):
                 self.assertTrue(issubclass(model, EntityBase))

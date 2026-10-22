@@ -25,7 +25,7 @@ from tests.test_postgres_models import PostgresDatabaseTestCase
 class AsyncDatabaseTests(PostgresDatabaseTestCase):
     async def test_all_business_tables_are_created(self):
         expected = {
-            "config_setting", "agent_thread", "llm_setting", "agent_run",
+            "config_setting", "agent_thread", "llm_setting", "agent_run", "memory_job",
         }
         self.assertEqual(set(Base.metadata.tables), expected)
         async with self.engine.connect() as connection:

@@ -3,7 +3,6 @@ from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from langgraph.store.postgres import AsyncPostgresStore
 
 from app.api import run_router, setting_router, thread_router
 from app.common.exceptions import register_exception_handlers
@@ -12,6 +11,7 @@ from app.database import Base, create_database
 from app.grpc.server import InternalGrpcServer
 from app.infrastructure.grpc.grpc_channel_pool import paper_service_grpc_channel_pool
 from app.infrastructure.nacos_registry import nacos_registry
+from app.memory.store import open_memory_store
 from app.rag.index_construction.base import close_index_resources
 from app.rag.processing.task_rag_batch_runner import close_task_rag_batch_runner
 
@@ -37,12 +37,7 @@ async def lifespan(app: FastAPI):
         )
         await checkpointer.setup()
 
-        store = await resources.enter_async_context(
-            AsyncPostgresStore.from_conn_string(
-                settings.DATABASE_POSTGRES_URL,
-            )
-        )
-        await store.setup()
+        store = await resources.enter_async_context(open_memory_store())
 
         app.state.checkpointer = checkpointer
         app.state.store = store

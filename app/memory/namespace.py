@@ -6,6 +6,10 @@ def fact_namespace(user_id: str) -> tuple[str, ...]:
     return ("users", str(user_id), "facts")
 
 
+def episode_user_prefix(user_id: str) -> tuple[str, ...]:
+    return ("users", str(user_id), "episodes")
+
+
 def episode_prefix(
     user_id: str,
     thread_id: str,
