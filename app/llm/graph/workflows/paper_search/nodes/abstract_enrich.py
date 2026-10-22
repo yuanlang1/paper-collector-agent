@@ -7,11 +7,12 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.provider import ChatClient, ModelOptions
+from app.llm.provider import ValidatedJsonInvoker
 from pypdf import PdfReader
 
 
@@ -119,14 +120,14 @@ class AbstractEnrichNode:
     def __init__(
         self,
         artifact_store: LocalArtifactStore | None = None,
-        model: Any | None = None,
-        chat: ChatClient | None = None,
+        *,
+        model: BaseChatModel,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        client = chat or ChatClient()
-        self.model = model or client.structured(
-            PdfFrontPageEnrichmentResult,
-            options=ModelOptions(temperature=0),
+        self.model: BaseChatModel = model
+        self.invoker = ValidatedJsonInvoker(
+            model=self.model,
+            schema=PdfFrontPageEnrichmentResult,
         )
 
     async def _enrich_from_pdf_front_pages(
@@ -135,7 +136,7 @@ class AbstractEnrichNode:
         source_abstract: str | None,
         abstract_source: str | None,
     ) -> PdfFrontPageEnrichmentResult:
-        result = await self.model.ainvoke(
+        result = await self.invoker.ainvoke(
             [
                 SystemMessage(content=PDF_FRONT_PAGE_ENRICHMENT_SYSTEM_PROMPT),
                 HumanMessage(

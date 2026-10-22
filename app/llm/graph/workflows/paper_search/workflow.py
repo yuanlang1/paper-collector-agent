@@ -1,31 +1,48 @@
+from langchain_core.language_models import BaseChatModel
 from langgraph.graph import END, START, StateGraph
 
-from app.llm.graph.workflows.paper_search.nodes.abstract_enrich import AbstractEnrichNode
-from app.llm.graph.workflows.paper_search.nodes.create_task import CreatePaperSearchTaskNode
-from app.llm.graph.workflows.paper_search.nodes.crossref_enrich import CrossrefMetadataEnrichmentNode
+from app.llm.graph.workflows.paper_search.nodes.abstract_enrich import (
+    AbstractEnrichNode,
+)
+from app.llm.graph.workflows.paper_search.nodes.create_task import (
+    CreatePaperSearchTaskNode,
+)
+from app.llm.graph.workflows.paper_search.nodes.crossref_enrich import (
+    CrossrefMetadataEnrichmentNode,
+)
 from app.llm.graph.workflows.paper_search.nodes.dowload_pdf import PdfDownloadNode
 from app.llm.graph.workflows.paper_search.nodes.enrich import PaperEnrichmentNode
+from app.llm.graph.workflows.paper_search.nodes.filter import (
+    NormalizeDeduplicateFilterNode,
+)
+from app.llm.graph.workflows.paper_search.nodes.finalize import (
+    finalize_paper_search_node,
+)
 from app.llm.graph.workflows.paper_search.nodes.finalize_pdfs import FinalizePdfsNode
-from app.llm.graph.workflows.paper_search.nodes.filter import NormalizeDeduplicateFilterNode
-from app.llm.graph.workflows.paper_search.nodes.initialize import initialize_paper_search_node
-from app.llm.graph.workflows.paper_search.nodes.finalize import finalize_paper_search_node
+from app.llm.graph.workflows.paper_search.nodes.initialize import (
+    initialize_paper_search_node,
+)
+from app.llm.graph.workflows.paper_search.nodes.persist import (
+    PersistRecommendedPapersNode,
+)
 from app.llm.graph.workflows.paper_search.nodes.plan_search import PlanSearchNode
-from app.llm.graph.workflows.paper_search.nodes.persist import PersistRecommendedPapersNode
 from app.llm.graph.workflows.paper_search.nodes.recommend import RecommendationNode
 from app.llm.graph.workflows.paper_search.nodes.review import ReviewNode
 from app.llm.graph.workflows.paper_search.nodes.search import SearchNode
-from app.llm.graph.workflows.paper_search.nodes.update_task_status import UpdatePaperSearchTaskStatusNode
+from app.llm.graph.workflows.paper_search.nodes.update_task_status import (
+    UpdatePaperSearchTaskStatusNode,
+)
 from app.llm.graph.workflows.paper_search.nodes.venue import VenueResolutionNode
-from app.llm.graph.workflows.paper_search.state import PaperSearchOutputState, PaperSearchWorkflowState
-from app.llm.provider import ChatClient
 from app.llm.graph.workflows.paper_search.progress import instrument_paper_search_node
+from app.llm.graph.workflows.paper_search.state import (
+    PaperSearchOutputState,
+    PaperSearchWorkflowState,
+)
 
 
 def _route(stage: str, target: str):
     return lambda state: (
-        target
-        if state.get("stage") == stage
-        else _terminal_target(state)
+        target if state.get("stage") == stage else _terminal_target(state)
     )
 
 
@@ -47,12 +64,14 @@ def _terminal_target(state: PaperSearchWorkflowState) -> str:
         and not isinstance(task_id, bool)
         and task_id > 0
         and (
-            state.get("stage") in {
+            state.get("stage")
+            in {
                 "completed",
                 "failed",
                 "blocked",
             }
-            or state.get("status") in {
+            or state.get("status")
+            in {
                 "completed",
                 "failed",
                 "blocked",
@@ -94,13 +113,12 @@ def _route_after_task_status(state: PaperSearchWorkflowState) -> str:
 
 def build_paper_search_workflow(
     *,
+    model: BaseChatModel,
     task_client=None,
-    chat: ChatClient | None = None,
     checkpointer=None,
     node_overrides: dict[str, object] | None = None,
 ):
     node_overrides = node_overrides or {}
-    chat = chat or ChatClient()
 
     def node(name, default):
         return instrument_paper_search_node(
@@ -117,19 +135,26 @@ def build_paper_search_workflow(
         "plan_search",
         node(
             "plan_search",
-            PlanSearchNode(chat=chat),
+            PlanSearchNode(model=model),
         ),
     )
-    builder.add_node("create_task", node("create_task", CreatePaperSearchTaskNode(client=task_client)))
+    builder.add_node(
+        "create_task",
+        node("create_task", CreatePaperSearchTaskNode(client=task_client)),
+    )
     builder.add_node("search", node("search", SearchNode()))
     builder.add_node("filter", node("filter", NormalizeDeduplicateFilterNode()))
-    builder.add_node("review", node("review", ReviewNode(chat=chat)))
+    builder.add_node("review", node("review", ReviewNode(model=model)))
     builder.add_node("enrich", node("enrich", PaperEnrichmentNode()))
-    builder.add_node("crossref_enrich", node("crossref_enrich", CrossrefMetadataEnrichmentNode()))
-    builder.add_node("venue", node("venue", VenueResolutionNode(chat=chat)))
+    builder.add_node(
+        "crossref_enrich", node("crossref_enrich", CrossrefMetadataEnrichmentNode())
+    )
+    builder.add_node("venue", node("venue", VenueResolutionNode(model=model)))
     builder.add_node("download_pdf", node("download_pdf", PdfDownloadNode()))
-    builder.add_node("abstract_enrich", node("abstract_enrich", AbstractEnrichNode(chat=chat)))
-    builder.add_node("recommend", node("recommend", RecommendationNode(chat=chat)))
+    builder.add_node(
+        "abstract_enrich", node("abstract_enrich", AbstractEnrichNode(model=model))
+    )
+    builder.add_node("recommend", node("recommend", RecommendationNode(model=model)))
     builder.add_node("persist", node("persist", PersistRecommendedPapersNode()))
     builder.add_node(
         "finalize_pdfs",

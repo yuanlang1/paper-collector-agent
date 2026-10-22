@@ -15,7 +15,7 @@ from app.runtime.agent_runtime import AgentRuntime
 
 
 class DeletionTests(unittest.IsolatedAsyncioTestCase):
-    async def test_scoped_deletion_and_retry(self):
+    async def test_scoped_deletion(self):
         with tempfile.TemporaryDirectory() as directory:
             events = HistoryDatabase(Path(directory) / "events.db")
             events.initialize()
@@ -34,13 +34,7 @@ class DeletionTests(unittest.IsolatedAsyncioTestCase):
             runtime.agent_service = SimpleNamespace(checkpointer=SimpleNamespace(adelete_thread=AsyncMock()))
             runtime._active_stream_tasks = {}
             runtime._active_stream_conversations = {}
-            runtime._delete_conversation_memory = AsyncMock(side_effect=[RuntimeError("cleanup failed"), None])
             with sessions() as db:
-                with self.assertLogs("app.runtime.agent_runtime", level="ERROR"):
-                    with self.assertRaises(RuntimeError):
-                        await runtime.delete_conversation(user_id="1", conversation_id="target", db=db)
-                with sessions() as check:
-                    self.assertEqual(check.scalar(select(AgentConversation)).status, "DELETED")
                 await runtime.delete_conversation(user_id="1", conversation_id="target", db=db)
             await events.run(stream_events.delete_conversation, user_id="1", conversation_id="target")
             for user, run, expected in [("1", "run", 0), ("2", "other-user", 1), ("1", "other-conversation", 1)]:

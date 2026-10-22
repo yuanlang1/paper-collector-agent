@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import re
 import time
 from collections.abc import Mapping
@@ -92,29 +91,15 @@ async def _post_search(
     *,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    for attempt in range(2):
-        try:
-            response = await client.post(
-                settings.FIRECRAWL_SEARCH_URL,
-                json=payload,
-            )
-            if response.status_code in RETRYABLE_STATUS_CODES and attempt == 0:
-                await asyncio.sleep(1)
-                continue
-            response.raise_for_status()
-            try:
-                data = response.json()
-            except ValueError as exc:
-                raise FirecrawlResponseError("Firecrawl returned invalid JSON") from exc
-            if not isinstance(data, Mapping):
-                raise FirecrawlResponseError("Firecrawl response must be an object")
-            return dict(data)
-        except httpx.RequestError:
-            if attempt == 1:
-                raise
-            await asyncio.sleep(1)
-
-    raise RuntimeError("Firecrawl search retry loop ended unexpectedly")
+    response = await client.post(settings.FIRECRAWL_SEARCH_URL, json=payload)
+    response.raise_for_status()
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise FirecrawlResponseError("Firecrawl returned invalid JSON") from exc
+    if not isinstance(data, Mapping):
+        raise FirecrawlResponseError("Firecrawl response must be an object")
+    return dict(data)
 
 
 def _markdown(value: Any) -> str | None:
@@ -159,8 +144,9 @@ def _failure(
     message: str,
     retryable: bool,
     status_code: int | None = None,
+    cause: Exception | None = None,
 ) -> None:
-    raise ToolException(message)
+    raise ToolException(message) from cause
 
 
 async def search_web_handler(
@@ -258,14 +244,16 @@ async def search_web_handler(
             message=message,
             retryable=retryable,
             status_code=status_code,
+            cause=exc,
         )
-    except httpx.RequestError:
+    except httpx.RequestError as exc:
         return _failure(
             args=args,
             started_at=started_at,
             code="FIRECRAWL_REQUEST_ERROR",
             message="无法连接 Firecrawl。",
             retryable=True,
+            cause=exc,
         )
     except FirecrawlResponseError as exc:
         return _failure(

@@ -5,16 +5,15 @@ import hashlib
 import os
 import tempfile
 import time
-from pathlib import Path
-from pathlib import PurePosixPath
-from typing import Any, Dict, Literal
+from pathlib import Path, PurePosixPath
+from typing import Any, Literal
 from urllib.parse import urljoin
 
 import httpx
+from langchain_core.tools import ToolException, tool
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
-from langchain_core.tools import ToolException, tool
 from app.llm.tools.search_tools.common import (
     RETRYABLE_STATUS_CODES,
     elapsed_ms,
@@ -73,13 +72,7 @@ class DownloadFileArgs(BaseModel):
     @classmethod
     def validate_file_name(cls, value: str) -> str:
         name = value.strip()
-        if (
-            not name
-            or "/" in name
-            or "\\" in name
-            or ".." in name
-            or ":" in name
-        ):
+        if not name or "/" in name or "\\" in name or ".." in name or ":" in name:
             raise ValueError("file_name 只能是文件名，不能包含路径。")
         return name
 
@@ -128,18 +121,13 @@ def _is_pdf(
     content_type: str | None,
     prefix: bytes,
 ) -> bool:
-    normalized_content_type = (
-        (content_type or "").split(";")[0].strip().lower()
-    )
+    normalized_content_type = (content_type or "").split(";")[0].strip().lower()
 
-    return (
-        prefix.startswith(b"%PDF-")
-        and normalized_content_type in {
-            "",
-            "application/pdf",
-            "application/octet-stream",
-        }
-    )
+    return prefix.startswith(b"%PDF-") and normalized_content_type in {
+        "",
+        "application/pdf",
+        "application/octet-stream",
+    }
 
 
 def _inspect_existing_file(
@@ -222,10 +210,7 @@ async def _download(
                 response.raise_for_status()
 
                 content_length = response.headers.get("content-length")
-                if (
-                    content_length
-                    and int(content_length) > MAX_FILE_SIZE_BYTES
-                ):
+                if content_length and int(content_length) > MAX_FILE_SIZE_BYTES:
                     raise ValueError("文件大小超过 50 MB 限制。")
 
                 temp_path: Path | None = None
@@ -250,9 +235,7 @@ async def _download(
                             size_bytes += len(chunk)
 
                             if size_bytes > MAX_FILE_SIZE_BYTES:
-                                raise ValueError(
-                                    "文件大小超过 50 MB 限制。"
-                                )
+                                raise ValueError("文件大小超过 50 MB 限制。")
 
                             if len(prefix) < 8:
                                 prefix += chunk[: 8 - len(prefix)]
@@ -273,9 +256,7 @@ async def _download(
                     return {
                         "final_url": str(response.url),
                         "redirect_count": redirect_count,
-                        "content_type": response.headers.get(
-                            "content-type"
-                        ),
+                        "content_type": response.headers.get("content-type"),
                         "size_bytes": size_bytes,
                         "sha256": sha256.hexdigest(),
                     }
@@ -283,11 +264,7 @@ async def _download(
                 finally:
                     # 无论超时、网络断开、文件过大、校验失败或取消任务，
                     # 均清理本次尝试产生的临时文件。
-                    if (
-                        not committed
-                        and temp_path is not None
-                        and temp_path.exists()
-                    ):
+                    if not committed and temp_path is not None and temp_path.exists():
                         temp_path.unlink()
 
 
@@ -297,9 +274,7 @@ async def _download_with_retry(**kwargs: Any) -> dict[str, Any]:
             return await _download(**kwargs)
 
         except httpx.HTTPStatusError as exc:
-            retryable = (
-                exc.response.status_code in RETRYABLE_STATUS_CODES
-            )
+            retryable = exc.response.status_code in RETRYABLE_STATUS_CODES
             if not retryable or attempt == MAX_DOWNLOAD_ATTEMPTS - 1:
                 raise
 
@@ -314,9 +289,9 @@ async def _download_with_retry(**kwargs: Any) -> dict[str, Any]:
 
 
 async def download_file_handler(
-    params: Dict[str, Any],
+    params: dict[str, Any],
     context: object | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     del context
 
     args = DownloadFileArgs.model_validate(params)
@@ -394,9 +369,7 @@ async def download_file_handler(
             started_at=started_at,
             code="UPSTREAM_HTTP_ERROR",
             message=f"下载站点返回 HTTP {exc.response.status_code}。",
-            retryable=(
-                exc.response.status_code in RETRYABLE_STATUS_CODES
-            ),
+            retryable=(exc.response.status_code in RETRYABLE_STATUS_CODES),
             status_code=exc.response.status_code,
         )
 
@@ -441,7 +414,7 @@ async def download_file_tool(
     url: str,
     save_dir: str,
     file_name: str,
-    expected_type: Literal['pdf', 'any'] = 'pdf',
+    expected_type: Literal["pdf", "any"] = "pdf",
     overwrite: bool = False,
 ) -> dict[str, Any]:
     """根据 HTTP 或 HTTPS 下载链接下载文件。必须提供保存目录 save_dir 和文件名 file_name。默认仅下载并校验 PDF，单个文件最大 50 MB。"""

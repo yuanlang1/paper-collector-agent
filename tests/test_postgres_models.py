@@ -5,22 +5,20 @@ import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
-from sqlalchemy import BigInteger, UniqueConstraint, inspect
+from sqlalchemy import BigInteger, inspect
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateIndex, CreateSchema, CreateTable, DropSchema
 
 from app.config import settings
 from app.database import Base, create_database
 from app.db.models import (
-    AgentThread, AgentRun, LlmSetting,
-    MemoryConsolidationCursor, MemoryEpisode, MemoryFact, SystemSetting,
+    AgentThread, AgentRun, LlmSetting, SystemSetting,
 )
 from app.db.models.entity_base import EntityBase
 
 
 MODELS = (
-    AgentThread, SystemSetting,
-    MemoryFact, MemoryEpisode, MemoryConsolidationCursor, LlmSetting, AgentRun,
+    AgentThread, SystemSetting, LlmSetting, AgentRun,
 )
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_POSTGRES_URL")
 
@@ -60,7 +58,7 @@ class PostgresModelTests(unittest.TestCase):
 
     def test_all_tables_share_entity_fields_and_compile_for_postgres(self):
         dialect = postgresql.dialect()
-        self.assertEqual(len(Base.metadata.tables), 7)
+        self.assertEqual(len(Base.metadata.tables), 4)
         for model in MODELS:
             with self.subTest(table=model.__tablename__):
                 self.assertTrue(issubclass(model, EntityBase))
@@ -79,14 +77,6 @@ class PostgresModelTests(unittest.TestCase):
                 self.assertNotIn("utf8mb4", ddl)
                 for index in table.indexes:
                     str(CreateIndex(index).compile(dialect=dialect))
-        cursor = MemoryConsolidationCursor.__table__
-        self.assertTrue(any(
-            isinstance(c, UniqueConstraint)
-            and list(c.columns.keys()) == ["user_id", "conversation_id"]
-            for c in cursor.constraints
-        ))
-        self.assertIsInstance(MemoryEpisode.__table__.c.source_assistant_message_id.type, BigInteger)
-        self.assertIsInstance(cursor.c.last_assistant_message_id.type, BigInteger)
         owner = LlmSetting.__table__.c.user_id
         self.assertIsInstance(owner.type, BigInteger)
         self.assertFalse(owner.nullable)

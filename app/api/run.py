@@ -13,7 +13,7 @@ from app.db.models import AgentRun, RunStatus
 from app.schemas.ai import ChatRequest, RunInfo
 from app.services import agent_run_service, thread_service
 
-router = APIRouter(prefix="/api/agent", tags=["agent"])
+router = APIRouter(prefix="/api/thread", tags=["run"])
 
 
 def _sse_line(payload: dict) -> str:
@@ -22,7 +22,13 @@ def _sse_line(payload: dict) -> str:
 
 class RunStreamingResponse(StreamingResponse):
     def __init__(
-        self, run: AgentRun, session_factory, checkpointer, store, *, input: dict[str, Any],
+        self,
+        run: AgentRun,
+        session_factory,
+        checkpointer,
+        store,
+        *,
+        input: dict[str, Any],
     ):
         self.run_record = run
         self.run_input = input
@@ -67,7 +73,7 @@ class RunStreamingResponse(StreamingResponse):
                         )
 
 
-@router.post("/run")
+@router.post("/runs/stream")
 async def chat(
     body: ChatRequest,
     request: Request,
@@ -84,9 +90,10 @@ async def chat(
         request.app.state.session_factory,
         request.app.state.checkpointer,
         request.app.state.store,
-        input=body.model_dump(
-            include={"message"} if body.message is not None else {"resume"},
-            exclude_unset=True,
+        input=(
+            body.input.model_dump()
+            if body.input is not None
+            else {"resume": body.resume}
         ),
     )
 

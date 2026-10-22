@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -10,21 +10,12 @@ import httpx
 from fastapi import Depends, FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, inspect, select
-from sqlalchemy.exc import IntegrityError
 
 from app.common.exceptions import NotFoundException
 from app.database import Base, get_db
 from app.grpc.services import add_services
-from app.db.models import MemoryConsolidationCursor, MemoryEpisode, MemoryFact
 from app.db.models import LlmSetting, SystemSetting
-from app.db.repositories import (
-    llm_setting,
-    memory_consolidation_cursor, memory_fact, system_setting,
-)
-from app.memory.episodic.service import EpisodeService
-from app.memory.errors import MemoryNotFoundError
-from app.memory.schemas import EpisodeCandidate, FactCandidate
-from app.memory.semantic.service import FactService
+from app.db.repositories import llm_setting, system_setting
 from app.protos.agent.v1 import agent_pb2, agent_pb2_grpc
 from app.services import llm_setting_service
 from app.services.llm_setting_service import LlmConfig
@@ -34,9 +25,7 @@ from tests.test_postgres_models import PostgresDatabaseTestCase
 class AsyncDatabaseTests(PostgresDatabaseTestCase):
     async def test_all_business_tables_are_created(self):
         expected = {
-            "config_setting", "memory_facts",
-            "memory_episodes", "memory_consolidation_cursors",
-            "agent_thread", "llm_setting", "agent_run",
+            "config_setting", "agent_thread", "llm_setting", "agent_run",
         }
         self.assertEqual(set(Base.metadata.tables), expected)
         async with self.engine.connect() as connection:
@@ -219,41 +208,15 @@ class AsyncDatabaseTests(PostgresDatabaseTestCase):
             self.assertFalse(llm.is_small_model)
             self.assertEqual((llm.creator_id, llm.modifier_id), (0, 0))
 
-    async def test_memory_constraints_bigint_links_and_cursor_advance(self):
-        large_id = 2**40
-        async with self.factory.begin() as db:
-            db.add(MemoryFact(user_id="owner", subject="topic", content="fact", dedupe_key="key", source="explicit"))
-            db.add(MemoryEpisode(user_id="owner", happened_at=date.today(), summary="episode",
-                                 source_conversation_id="chat", source_assistant_message_id=large_id))
-            await memory_consolidation_cursor.advance(db, user_id="owner", conversation_id="chat", last_assistant_message_id=large_id)
-            cursor = await memory_consolidation_cursor.get(db, user_id="owner", conversation_id="chat")
-            cursor_id = cursor.id
-            await memory_consolidation_cursor.advance(db, user_id="owner", conversation_id="chat", last_assistant_message_id=large_id + 1)
-            self.assertEqual(cursor.id, cursor_id)
-            self.assertEqual(cursor.last_assistant_message_id, large_id + 1)
-        duplicates = [
-            MemoryFact(user_id="owner", subject="topic", content="duplicate", dedupe_key="key", source="explicit"),
-            MemoryEpisode(user_id="owner", happened_at=date.today(), summary="duplicate",
-                          source_conversation_id="chat", source_assistant_message_id=large_id),
-            MemoryConsolidationCursor(user_id="owner", conversation_id="chat"),
-        ]
-        for row in duplicates:
-            with self.subTest(table=row.__tablename__), self.assertRaises(IntegrityError):
-                async with self.factory.begin() as db:
-                    db.add(row)
-
     async def test_commit_keeps_loaded_attributes_and_sessions_are_independent(self):
         async with self.factory() as first, self.factory() as second:
             self.assertIsNot(first, second)
-            fact = MemoryFact(
-                user_id="1", subject="topic", content="saved",
-                dedupe_key="saved", source="explicit",
-            )
-            first.add(fact)
+            setting = SystemSetting(key="saved", value="saved")
+            first.add(setting)
             await first.commit()
-            self.assertEqual(fact.content, "saved")
-            stored = await second.scalar(select(MemoryFact))
-            self.assertEqual(stored.content, "saved")
+            self.assertEqual(setting.value, "saved")
+            stored = await second.scalar(select(SystemSetting))
+            self.assertEqual(stored.value, "saved")
 
     async def test_http_dependency_rolls_back_uncommitted_changes(self):
         request = SimpleNamespace(app=SimpleNamespace(
@@ -261,148 +224,11 @@ class AsyncDatabaseTests(PostgresDatabaseTestCase):
         ))
         dependency = get_db(request)
         session = await anext(dependency)
-        session.add(MemoryFact(
-            user_id="1", subject="topic", content="uncommitted",
-            dedupe_key="uncommitted", source="explicit",
-        ))
+        session.add(SystemSetting(key="uncommitted", value="uncommitted"))
         await session.flush()
         await dependency.aclose()
         async with self.factory() as check:
-            self.assertIsNone(await check.scalar(select(MemoryFact)))
-
-    async def test_memory_crud_preserves_deduplication_and_user_scope(self):
-        async with self.factory() as session:
-            owner = FactService(session, user_id="owner")
-            other = FactService(session, user_id="other")
-            fact, created = await owner.remember_explicit(
-                subject="Topic", content="original", source_conversation_id="chat",
-            )
-            fact_id = fact.id
-            self.assertTrue(created)
-            duplicate, created = await owner.remember_explicit(
-                subject="topic", content="ORIGINAL", source_conversation_id="chat",
-            )
-            self.assertEqual(duplicate.id, fact_id)
-            self.assertFalse(created)
-            self.assertEqual(await other.search_active(query="original"), [])
-            with self.assertRaises(MemoryNotFoundError):
-                await other.correct(fact_id=fact_id, subject="topic", content="foreign")
-            changed = await owner.correct(
-                fact_id=fact_id, subject="topic", content="updated",
-            )
-            self.assertIsNotNone(changed.modification_time)
-            self.assertEqual((await owner.search_active(query="updated"))[0].id, fact_id)
-            await owner.forget(fact_id=fact_id)
-            self.assertEqual(await owner.get_active_by_ids([fact_id]), [])
-            restored, created = await owner.remember_explicit(
-                subject="topic", content="updated", source_conversation_id="chat",
-            )
-            self.assertTrue(created)
-            self.assertEqual(restored.id, fact_id)
-
-    async def test_service_rolls_back_failed_write_and_session_remains_usable(self):
-        original_update = memory_fact.update
-
-        async def fail_after_update(
-            db,
-            fact,
-            **fields,
-        ):
-            await original_update(
-                db,
-                fact,
-                **fields,
-            )
-            raise RuntimeError("write failed")
-
-        async with self.factory() as session:
-            service = FactService(session, user_id="owner")
-            fact, _ = await service.remember_explicit(
-                subject="topic",
-                content="original",
-                source_conversation_id=None,
-            )
-            fact_id = fact.id
-            with patch.object(
-                memory_fact,
-                "update",
-                side_effect=fail_after_update,
-            ):
-                with self.assertRaisesRegex(RuntimeError, "write failed"):
-                    await service.correct(
-                        fact_id=fact_id,
-                        subject="topic",
-                        content="changed",
-                    )
-            self.assertFalse(session.in_transaction())
-            self.assertEqual(
-                (await service.get_active_by_ids([fact_id]))[0].content, "original"
-            )
-
-    async def test_staged_memories_and_cursor_share_one_transaction(self):
-        async with self.factory() as session:
-            facts = FactService(session, user_id="owner")
-            episodes = EpisodeService(session, user_id="owner")
-            with self.assertRaisesRegex(RuntimeError, "abort"):
-                async with session.begin():
-                    await facts.stage_consolidated_candidate(
-                        candidate=FactCandidate(subject="topic", content="pending"),
-                        source_conversation_id="chat",
-                        source_message_ids=[1],
-                    )
-                    await memory_consolidation_cursor.advance(
-                        session,
-                        user_id="owner",
-                        conversation_id="chat",
-                        last_assistant_message_id=1,
-                    )
-                    raise RuntimeError("abort")
-            async with session.begin():
-                self.assertIsNone(await session.scalar(select(MemoryFact)))
-                self.assertIsNone(
-                    await memory_consolidation_cursor.get(
-                        session,
-                        user_id="owner",
-                        conversation_id="chat",
-                    )
-                )
-                episode = await episodes.stage_consolidated_candidate(
-                    candidate=EpisodeCandidate(
-                        happened_at=date(
-                            2026,
-                            10,
-                            15,
-                        ),
-                        summary="summary",
-                        source_assistant_message_id=2,
-                    ),
-                    source_conversation_id="chat",
-                )
-                episode_id = episode.id
-                await memory_consolidation_cursor.advance(
-                    session,
-                    user_id="owner",
-                    conversation_id="chat",
-                    last_assistant_message_id=2,
-                )
-            self.assertEqual(
-                await episodes.get_active_by_ids_for_conversation(
-                    episode_ids=[episode_id],
-                    conversation_id="another-chat",
-                ),
-                [],
-            )
-            self.assertEqual(
-                (await episodes.list_active_for_conversation(conversation_id="chat"))[0].id,
-                episode_id,
-            )
-            async with session.begin():
-                cursor = await memory_consolidation_cursor.get(
-                    session,
-                    user_id="owner",
-                    conversation_id="chat",
-                )
-                self.assertEqual(cursor.last_assistant_message_id, 2)
+            self.assertIsNone(await check.scalar(select(SystemSetting)))
 
     async def test_settings_grpc_persists_limits_and_retires_old_rpcs(self):
         async with self.factory() as session:
@@ -465,13 +291,13 @@ class AsyncDatabaseTests(PostgresDatabaseTestCase):
 
         engine_spy = Mock(wraps=self.engine)
         engine_spy.dispose = AsyncMock(wraps=self.engine.dispose)
-        index = Mock(ensure_collections=AsyncMock(side_effect=RuntimeError("index unavailable")))
+        server = Mock(start=AsyncMock(side_effect=RuntimeError("grpc unavailable")), stop=AsyncMock())
         with patch.object(main, "create_database", return_value=(engine_spy, self.factory)), patch.object(
-            main, "get_memory_index_synchronizer", return_value=index,
+            main, "InternalGrpcServer", return_value=server,
         ), patch.object(main, "close_index_resources", new_callable=AsyncMock) as close_index, patch.object(
             main.AsyncPostgresSaver, "from_conn_string", return_value=AsyncMock(),
         ), patch.object(main.AsyncPostgresStore, "from_conn_string", return_value=AsyncMock()):
-            with self.assertRaisesRegex(RuntimeError, "index unavailable"):
+            with self.assertRaisesRegex(RuntimeError, "grpc unavailable"):
                 async with main.lifespan(FastAPI()):
                     self.fail("startup should fail")
         engine_spy.dispose.assert_awaited_once()
@@ -484,11 +310,10 @@ class AsyncDatabaseTests(PostgresDatabaseTestCase):
         engine_spy.dispose = AsyncMock(wraps=self.engine.dispose)
         server = Mock(start=AsyncMock(), stop=AsyncMock())
         nacos = Mock(start=AsyncMock(), stop=AsyncMock())
-        index = Mock(ensure_collections=AsyncMock())
         app = FastAPI()
         with patch.object(main, "create_database", return_value=(engine_spy, self.factory)), patch.object(
-            main, "get_memory_index_synchronizer", return_value=index,
-        ), patch.object(main, "InternalGrpcServer", return_value=server), patch.object(
+            main, "InternalGrpcServer", return_value=server,
+        ), patch.object(
             main, "nacos_registry", nacos,
         ), patch.object(main, "close_index_resources", new_callable=AsyncMock), patch.object(
             main, "close_task_rag_batch_runner", new_callable=AsyncMock,

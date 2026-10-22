@@ -4,12 +4,13 @@ import json
 from collections.abc import Mapping
 from typing import Any, Literal
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.provider import ChatClient, ModelOptions
+from app.llm.provider import ValidatedJsonInvoker
 
 
 SEARCH_REVIEW_SYSTEM_PROMPT = """
@@ -73,14 +74,14 @@ class ReviewNode:
     def __init__(
         self,
         artifact_store: LocalArtifactStore | None = None,
-        model: Any | None = None,
-        chat: ChatClient | None = None,
+        *,
+        model: BaseChatModel,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        client = chat or ChatClient()
-        self.model = model or client.structured(
-            SearchReviewDecision,
-            options=ModelOptions(temperature=0),
+        self.model: BaseChatModel = model
+        self.invoker = ValidatedJsonInvoker(
+            model=self.model,
+            schema=SearchReviewDecision,
         )
 
     async def __call__(self, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -112,7 +113,7 @@ class ReviewNode:
                 ),
             }
             try:
-                result = await self.model.ainvoke([
+                result = await self.invoker.ainvoke([
                     SystemMessage(content=SEARCH_REVIEW_SYSTEM_PROMPT),
                     HumanMessage(
                         content=json.dumps(prompt, ensure_ascii=False, default=str)

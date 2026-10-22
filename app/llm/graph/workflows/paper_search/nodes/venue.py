@@ -7,13 +7,13 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, model_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.provider import ChatClient, ModelOptions
+from app.llm.provider import ValidatedJsonInvoker
 from app.llm.tools.venue_tools.easy_scholar import easy_scholar_venue_handler
-
 
 VENUE_FALLBACK_SYSTEM_PROMPT = """
 你是学术 venue 信息规范化员，负责根据论文标题和来源提供的候选名称生成标准期刊或会议记录。
@@ -51,7 +51,7 @@ class VenueInfoDraft(BaseModel):
 
     sci_rank: str | None = Field(default=None, max_length=50)
     ccf_rank: str | None = Field(default=None, max_length=50)
-    sci_if: Decimal = Decimal("0")
+    sci_if: Decimal = Decimal(0)
     sci_up: str | None = Field(default=None, max_length=100)
     sci_up_small: str | None = Field(default=None, max_length=200)
     core_rank: str | None = Field(default=None, max_length=20)
@@ -61,7 +61,7 @@ class ModelVenueInfoDraft(VenueInfoDraft):
     """Normalize model fallback output before it enters the venue cache."""
 
     @model_validator(mode="after")
-    def fill_empty_acronym(self) -> "ModelVenueInfoDraft":
+    def fill_empty_acronym(self) -> ModelVenueInfoDraft:
         if _text(self.acronym) is None:
             self.acronym = self.standard_name
         return self
@@ -78,14 +78,14 @@ def _text(value: Any) -> str | None:
 def _decimal(value: Any) -> Decimal:
     normalized = _text(value)
     if normalized is None:
-        return Decimal("0")
+        return Decimal(0)
 
     try:
         result = Decimal(normalized)
     except InvalidOperation:
-        return Decimal("0")
+        return Decimal(0)
 
-    return result if result.is_finite() else Decimal("0")
+    return result if result.is_finite() else Decimal(0)
 
 
 def _custom_rank_value(
@@ -124,16 +124,12 @@ def _crossref_paper_type_code(paper: Mapping[str, Any]) -> int:
     value = metadata.get("paper_type_code")
     return (
         value
-        if isinstance(value, int)
-        and not isinstance(value, bool)
-        and value > 0
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0
         else 0
     )
 
 
 class VenueCacheStore:
-    """缓存已解析的 venue 草稿，避免重复调用外部检索服务。"""
-
     def __init__(self, path: Path) -> None:
         self.path = path
         self._lock = asyncio.Lock()
@@ -212,9 +208,8 @@ class VenueCacheStore:
                     value.get("venue_id")
                     for value in venues.values()
                     if isinstance(value, dict)
-                    and value.get("venue_draft", value).get(
-                        "standard_name"
-                    ) == venue.standard_name
+                    and value.get("venue_draft", value).get("standard_name")
+                    == venue.standard_name
                     and isinstance(value.get("venue_id"), int)
                 ),
                 None,
@@ -235,9 +230,11 @@ class VenueCacheStore:
             draft = value.get("venue_draft", value)
             venue_id = value.get("venue_id")
             if (
-                (key == normalized_name or _cache_key(
-                    str(draft.get("standard_name") or "")
-                ) == normalized_name)
+                (
+                    key == normalized_name
+                    or _cache_key(str(draft.get("standard_name") or ""))
+                    == normalized_name
+                )
                 and isinstance(venue_id, int)
                 and not isinstance(venue_id, bool)
                 and venue_id > 0
@@ -260,11 +257,10 @@ class VenueCacheStore:
             matching_keys = [
                 key
                 for key, value in venues.items()
-                if _cache_key(str(
-                    value.get("venue_draft", value).get(
-                        "standard_name"
-                    ) or ""
-                )) == normalized_name
+                if _cache_key(
+                    str(value.get("venue_draft", value).get("standard_name") or "")
+                )
+                == normalized_name
             ]
             if not matching_keys:
                 matching_keys = [normalized_name]
@@ -281,11 +277,7 @@ def _build_easy_scholar_venue(
     data: Mapping[str, Any],
 ) -> VenueInfoDraft:
     official_rank = data.get("official_rank")
-    official_rank = (
-        official_rank
-        if isinstance(official_rank, Mapping)
-        else {}
-    )
+    official_rank = official_rank if isinstance(official_rank, Mapping) else {}
 
     publication_name = _text(data.get("publication_name"))
     custom_ccf_rank = _custom_rank_value(
@@ -302,14 +294,9 @@ def _build_easy_scholar_venue(
         type=0,
         sci_rank=_text(official_rank.get("sci")),
         ccf_rank=custom_ccf_rank or _text(official_rank.get("ccf")),
-        sci_if=_decimal(
-            official_rank.get("sciif")
-            or official_rank.get("sciIf")
-        ),
+        sci_if=_decimal(official_rank.get("sciif") or official_rank.get("sciIf")),
         sci_up=_text(official_rank.get("sciUp")),
-        sci_up_small=_text(
-            official_rank.get("sciUpSmall")
-        ),
+        sci_up_small=_text(official_rank.get("sciUpSmall")),
         core_rank=_text(official_rank.get("pku")),
     )
 
@@ -319,8 +306,7 @@ class VenueResolutionNode:
         self,
         *,
         artifact_store: LocalArtifactStore | None = None,
-        model: Any | None = None,
-        chat: ChatClient | None = None,
+        model: BaseChatModel,
         easy_scholar_handler: Any | None = None,
         cache_store: VenueCacheStore | None = None,
     ) -> None:
@@ -328,13 +314,13 @@ class VenueResolutionNode:
         self.cache_store = cache_store or VenueCacheStore(
             self.artifact_store.base_dir.parent / "venue_cache.json"
         )
-        client = chat or ChatClient()
-        self.model = model or client.structured(
-            ModelVenueInfoDraft,
-            options=ModelOptions(temperature=0),
+        self.model: BaseChatModel = model
+        self.invoker = ValidatedJsonInvoker(
+            model=self.model,
+            schema=ModelVenueInfoDraft,
         )
         self.easy_scholar_handler = easy_scholar_handler or easy_scholar_venue_handler
-    
+
     async def _query_easy_scholar(
         self,
         publication_name: str,
@@ -383,7 +369,7 @@ class VenueResolutionNode:
             await self.cache_store.put(venue, candidates)
             return venue, "easy_scholar"
 
-        result = await self.model.ainvoke(
+        result = await self.invoker.ainvoke(
             [
                 SystemMessage(
                     content=VENUE_FALLBACK_SYSTEM_PROMPT,
@@ -401,9 +387,7 @@ class VenueResolutionNode:
         )
 
         model_venue = ModelVenueInfoDraft.model_validate(
-            result.model_dump(mode="json")
-            if isinstance(result, BaseModel)
-            else result
+            result.model_dump(mode="json") if isinstance(result, BaseModel) else result
         )
         venue = VenueInfoDraft.model_validate(model_venue)
         await self.cache_store.put(venue, candidates)
@@ -416,24 +400,31 @@ class VenueResolutionNode:
         title = paper_info["title"]
         try:
             venue, source = await self.resolve_venue(
-                title=title, venue_candidates=paper.get("venue_candidates", []),
+                title=title,
+                venue_candidates=paper.get("venue_candidates", []),
             )
             if venue is None:
                 paper["venue_resolution"] = {
-                    "status": "missing", "source": source, "venue_id": None,
+                    "status": "missing",
+                    "source": source,
+                    "venue_id": None,
                 }
                 return "missing", None
             paper_type_code = _crossref_paper_type_code(paper)
             if paper_type_code:
                 venue = venue.model_copy(update={"type": paper_type_code})
             paper["venue_resolution"] = {
-                "status": "resolved", "source": source, "venue_id": None,
+                "status": "resolved",
+                "source": source,
+                "venue_id": None,
                 "venue_draft": venue.model_dump(mode="json"),
             }
             return "resolved", None
         except Exception as exc:
             paper["venue_resolution"] = {
-                "status": "failed", "source": None, "venue_id": None,
+                "status": "failed",
+                "source": None,
+                "venue_id": None,
             }
             return "failed", f"{title} 的 venue 解析失败：{exc}"
 

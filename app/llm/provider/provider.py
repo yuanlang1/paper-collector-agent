@@ -35,14 +35,13 @@ class DeepSeekProvider:
         config: ProviderConfig,
         options: ModelOptions,
     ) -> ReasoningPreservingChatDeepSeek:
-        thinking_type = "disabled" if options.purpose == "memory" else settings.THINKING_TYPE
-        reasoning_effort = "low" if options.purpose == "memory" else settings.REASONING_EFFORT
+        thinking_type = settings.THINKING_TYPE
         kwargs: dict[str, Any] = {
             "model": config.model,
             "api_key": config.api_key,
             "api_base": config.base_url,
             "streaming": options.streaming,
-            "reasoning_effort": reasoning_effort,
+            "reasoning_effort": settings.REASONING_EFFORT,
             "extra_body": {
                 "thinking": {"type": thinking_type}
             },

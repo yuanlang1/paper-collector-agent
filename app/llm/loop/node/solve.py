@@ -1,11 +1,12 @@
-
 from collections.abc import Sequence
 from typing import Any
+
 from langchain.tools import BaseTool
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.graph import MessagesState
+
+from app.llm.loop.node.compact import model_messages
+from app.llm.loop.state import LoopState
 
 
 class SolveNode:
@@ -14,26 +15,13 @@ class SolveNode:
         *,
         model: BaseChatModel,
         tools: Sequence[BaseTool] | None = None,
-        system_prompt: str | None = None
+        system_prompt: str | None = None,
     ) -> None:
         self.model = model.bind_tools(tools) if tools else model
         self.system_prompt = system_prompt
 
-    async def __call__(
-        self, 
-        state: MessagesState,
-        config: RunnableConfig
-    ) -> Any:
-        messages = state["messages"]
-
-        if self.system_prompt:
-            messages = [
-                SystemMessage(content = self.system_prompt),
-                *messages
-            ]
-        
-        response = await self.model.ainvoke(messages, config = config)
+    async def __call__(self, state: LoopState, config: RunnableConfig) -> Any:
+        messages = model_messages(state, self.system_prompt)
+        response = await self.model.ainvoke(messages, config=config)
 
         return {"messages": [response]}
-
-    

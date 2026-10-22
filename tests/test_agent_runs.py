@@ -1,6 +1,7 @@
 import asyncio
 import json
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -8,7 +9,8 @@ from unittest.mock import AsyncMock, Mock, patch
 import httpx
 from fastapi import FastAPI
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.types import interrupt
@@ -24,10 +26,12 @@ from starlette.requests import ClientDisconnect
 from app.api.run import RunStreamingResponse, router as run_router
 from app.api.thread import router as thread_router
 from app.common.exceptions import ConflictException, register_exception_handlers
+from app.database import get_db
 from app.db.models import AgentRun, AgentThread, RunStatus
 from app.db.repositories import agent_run, agent_thread
 from app.llm import agent_build
-from app.llm.agent_runner import AgentRunContext, AgentRunner
+from app.llm.agent_runner import AgentRunner
+from app.llm.context import AgentRunContext
 from app.llm.loop.agent_loop import AgentLoop
 from app.llm.tools.registry import ToolRegistry
 from app.schemas.ai import ChatRequest
@@ -37,12 +41,15 @@ from tests.test_postgres_models import PostgresDatabaseTestCase, TEST_DATABASE_U
 
 
 def events(response):
-    return [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    output = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    for event in output:
+        assert "thread_id" not in event and "run_id" not in event
+    return output
 
 
 class RunInputTests(unittest.TestCase):
     def test_empty_thread_id_is_normalized_for_new_messages(self):
-        fields = {"user_id": 1, "metadata": {"model_id": 7}, "message": "hi"}
+        fields = {"user_id": 1, "metadata": {"model_id": 7}, "input": {"message": "hi"}}
         for values in ({}, {"thread_id": None}, {"thread_id": ""}):
             with self.subTest(values=values):
                 self.assertIsNone(ChatRequest(**fields, **values).thread_id)
@@ -54,18 +61,23 @@ class RunInputTests(unittest.TestCase):
                 with self.subTest(values=values, resume=resume), self.assertRaises(ValidationError):
                     ChatRequest(**fields, **values, resume=resume)
 
-    def test_exactly_one_message_or_resume_is_required(self):
+    def test_exactly_one_input_or_resume_is_required(self):
         fields = {"user_id": 1, "metadata": {"model_id": 7}, "thread_id": "thread"}
-        for input in ({}, {"message": ""}, {"message": "hi", "resume": True}, {"user_id": 0}, {"message": "hi", "metadata": {"model_id": 0}}):
+        for input in (
+            {}, {"input": None}, {"input": {}}, {"input": {"message": ""}},
+            {"input": {"message": "hi"}, "resume": True}, {"user_id": 0},
+            {"input": {"message": "hi"}, "metadata": {"model_id": 0}},
+            {"message": "hi"},
+        ):
             with self.subTest(input=input), self.assertRaises(ValidationError):
                 ChatRequest(**(fields | input))
-        self.assertEqual(ChatRequest(**fields, message="hi").message, "hi")
+        self.assertEqual(ChatRequest(**fields, input={"message": "hi"}).input.message, "hi")
         self.assertIn("resume", ChatRequest(**fields, resume=None).model_fields_set)
         with self.assertRaises(ValidationError):
-            ChatRequest(user_id=1, model_id=7, thread_id="thread", message="hi")
+            ChatRequest(user_id=1, model_id=7, thread_id="thread", input={"message": "hi"})
 
     def test_metadata_requires_model_id_and_validates_effort(self):
-        fields = {"user_id": 1, "thread_id": "thread", "message": "hi"}
+        fields = {"user_id": 1, "thread_id": "thread", "input": {"message": "hi"}}
         for metadata in (None, {}, {"model_id": -1}, {"model_id": 7, "think_effort": "invalid"}):
             with self.subTest(metadata=metadata), self.assertRaises(ValidationError):
                 ChatRequest(**fields, metadata=metadata)
@@ -75,6 +87,88 @@ class RunInputTests(unittest.TestCase):
         self.assertEqual(resumed.model_dump(include={"metadata", "resume"}, exclude_unset=True), {
             "metadata": {"model_id": 7}, "resume": None,
         })
+
+
+class RunStreamInputTests(unittest.IsolatedAsyncioTestCase):
+    async def test_nested_input_and_hitl_resume_reach_the_graph(self):
+        self.enterContext(tracing_context(enabled=False))
+        hitl_request = {
+            "action_requests": [{
+                "name": "review_text", "args": {"content": "draft"},
+                "description": "Review and edit the draft",
+            }],
+            "review_configs": [{
+                "action_name": "review_text", "allowed_decisions": ["approve", "edit", "reject"],
+            }],
+        }
+        answer = {"decisions": [{
+            "type": "edit", "edited_action": {"name": "review_text", "args": {"content": "edited"}},
+        }]}
+        observed = []
+
+        def work(state):
+            observed.append(state["messages"][0].content)
+            response = interrupt(hitl_request)
+            return {"messages": [AIMessage(content=response["decisions"][0]["edited_action"]["args"]["content"])]}
+
+        saver = InMemorySaver()
+        builder = StateGraph(MessagesState)
+        builder.add_node("work", work)
+        builder.add_edge(START, "work")
+        builder.add_edge("work", END)
+        graph = builder.compile(checkpointer=saver)
+
+        def build_loop(*, context, **kwargs):
+            loop = object.__new__(AgentLoop)
+            loop.context, loop.graph = context, graph
+            return loop
+
+        async def get_test_db():
+            yield None
+
+        app = FastAPI()
+        app.include_router(run_router)
+        app.dependency_overrides[get_db] = get_test_db
+        app.state.session_factory = lambda: nullcontext(None)
+        app.state.checkpointer, app.state.store = saver, None
+        run = SimpleNamespace(user_id=1, thread_id="thread", run_id="run", run_metadata={"model_id": 7})
+        fields = {"user_id": 1, "thread_id": "thread", "metadata": {"model_id": 7}}
+        with patch.object(
+            agent_run_service, "create_run", new=AsyncMock(return_value=run),
+        ) as create_run, patch.object(
+            agent_run_service, "update_status", new=AsyncMock(return_value=run),
+        ), patch.object(
+            agent_build, "get_model", new=AsyncMock(return_value=object()),
+        ), patch.object(agent_build, "build_tools", return_value=ToolRegistry()), patch(
+            "app.llm.agent_runner.AgentLoop", side_effect=build_loop,
+        ):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                for invalid_input in (
+                    {}, {"message": "review"}, {"input": {}},
+                    {"input": {"message": "review"}, "resume": answer},
+                ):
+                    invalid = await client.post("/api/thread/runs/stream", json={**fields, **invalid_input})
+                    self.assertEqual(invalid.status_code, 422)
+                create_run.assert_not_awaited()
+                paused = await client.post("/api/thread/runs/stream", json={**fields, "input": {"message": "review"}})
+                self.assertEqual(paused.status_code, 200)
+                paused_events = events(paused)
+                self.assertEqual(paused_events[:2], [
+                    {"type": "status", "status": "running"},
+                    {"type": "status", "message": "正在思考…"},
+                ])
+                pending = paused_events[-1]["interrupts"][0]
+                self.assertEqual(pending["value"], hitl_request)
+                self.assertEqual(paused_events[-2], {**paused_events[-1], "type": "interrupt"})
+                self.assertEqual(paused_events[-1]["status"], "interrupted")
+                resumed = await client.post("/api/thread/runs/stream", json={
+                    **fields, "resume": {pending["id"]: answer},
+                })
+        self.assertEqual(resumed.status_code, 200)
+        self.assertEqual(events(resumed), [{"type": "done", "status": "completed", "interrupts": []}])
+        snapshot = await graph.aget_state({"configurable": {"thread_id": "thread"}})
+        self.assertEqual([message.content for message in snapshot.values["messages"]], ["review", "edited"])
+        self.assertEqual(observed, ["review", "review"])
 
 
 class AgentBuildTests(unittest.IsolatedAsyncioTestCase):
@@ -93,21 +187,25 @@ class AgentBuildTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIs(model, constructor.return_value)
 
     async def test_runner_uses_injected_model_and_tool_preview_names(self):
-        registry = agent_build.build_tools(Mock(), user_id=1)
         model = FakeListChatModel(responses=["unused"])
+        registry = agent_build.build_tools(Mock(), user_id=1, model=model)
         async def stream(**kwargs):
-            yield {"event": "on_tool_start", "name": "paper_search_agent"}
-            yield {"event": "on_tool_end", "name": "paper_search_agent", "data": {
-                "output": ToolMessage(content="found", tool_call_id="call-1"),
+            yield {"type": "custom", "ns": (), "data": {
+                "type": "tool_start", "name": "paper_search_agent", "tool_call_id": "call-1",
+            }}
+            yield {"type": "custom", "ns": (), "data": {
+                "type": "tool_end", "name": "paper_search_agent", "preview": "found", "tool_call_id": "call-1",
             }}
         loop = SimpleNamespace(
             graph=SimpleNamespace(aget_state=AsyncMock(return_value=SimpleNamespace(interrupts=()))),
             stream=stream,
         )
-        runner = AgentRunner(thread_id="thread", run_id="run", user_id="1", model=model, tool_registry=registry, checkpointer=None, store=None)
+        context = AgentRunContext(thread_id="thread", run_id="run", user_id="1")
+        runner = AgentRunner(context=context, model=model, tool_registry=registry, checkpointer=None, store=None)
         with patch("app.llm.agent_runner.AgentLoop", return_value=loop) as build_loop:
             output = [event async for event in runner.run({"message": "hi"})]
         self.assertIs(build_loop.call_args.kwargs["model"], model)
+        self.assertIs(build_loop.call_args.kwargs["context"], context)
         self.assertEqual(list(build_loop.call_args.kwargs["tools"]), list(registry.get_tools()))
         self.assertEqual([event["label"] for event in output if event["type"].startswith("tool_")], ["论文检索子代理", "论文检索子代理"])
         self.assertEqual(output[-1]["preview"], "found")
@@ -155,9 +253,13 @@ class AgentRunTests(PostgresDatabaseTestCase):
         builder.add_node("work", node)
         builder.add_edge(START, "work")
         builder.add_edge("work", END)
-        loop = object.__new__(AgentLoop)
-        loop.graph = builder.compile(checkpointer=self.saver)
-        return patch("app.llm.agent_runner.AgentLoop", return_value=loop)
+        graph = builder.compile(checkpointer=self.saver)
+        def build_loop(*, context, **kwargs):
+            loop = object.__new__(AgentLoop)
+            loop.context = context
+            loop.graph = graph
+            return loop
+        return patch("app.llm.agent_runner.AgentLoop", side_effect=build_loop)
 
     async def create_run(self):
         async with self.factory() as db:
@@ -169,26 +271,30 @@ class AgentRunTests(PostgresDatabaseTestCase):
         async with self.factory() as db:
             return await agent_run_service.get_run(db, user_id=1, thread_id=self.thread.thread_id, run_id=run_id)
 
+    async def latest_run(self):
+        async with self.factory() as db:
+            return await db.scalar(select(AgentRun).where(AgentRun.user_id == 1).order_by(AgentRun.id.desc()).limit(1))
+
     async def post(self, **input):
-        return await self.client.post("/api/agent/run", json={
-            "user_id": 1, "thread_id": self.thread.thread_id, "metadata": {"model_id": self.model_id}, **(input or {"message": "hi"}),
+        return await self.client.post("/api/thread/runs/stream", json={
+            "user_id": 1, "thread_id": self.thread.thread_id, "metadata": {"model_id": self.model_id}, **(input or {"input": {"message": "hi"}}),
         })
 
     async def test_empty_thread_id_creates_thread_and_run(self):
         thread_ids = set()
         for values in ({}, {"thread_id": None}, {"thread_id": ""}):
             with self.subTest(values=values):
-                response = await self.client.post("/api/agent/run", json={
-                    "user_id": 1, "metadata": {"model_id": self.model_id}, "message": "hi", **values,
+                response = await self.client.post("/api/thread/runs/stream", json={
+                    "user_id": 1, "metadata": {"model_id": self.model_id}, "input": {"message": "hi"}, **values,
                 })
                 self.assertEqual(response.status_code, 200)
                 output = events(response)
-                thread_id, run_id = output[0]["thread_id"], output[0]["run_id"]
+                latest = await self.latest_run()
+                thread_id, run_id = latest.thread_id, latest.run_id
                 self.assertTrue(thread_id)
                 self.assertNotEqual(thread_id, self.thread.thread_id)
                 thread_ids.add(thread_id)
                 self.assertEqual(output[-1]["status"], "completed")
-                self.assertTrue(all(event["thread_id"] == thread_id and event["run_id"] == run_id for event in output))
                 async with self.factory() as db:
                     thread = await agent_thread.get_by_thread_id(db, user_id=1, thread_id=thread_id)
                     self.assertIsNotNone(thread)
@@ -203,10 +309,10 @@ class AgentRunTests(PostgresDatabaseTestCase):
 
     async def test_invalid_new_thread_requests_do_not_create_records(self):
         invalid = [{**values, "resume": None} for values in ({}, {"thread_id": None}, {"thread_id": ""})]
-        invalid += [{"message": "hi", "metadata": {}}, {"message": "hi", "user_id": 0}]
+        invalid += [{"input": {"message": "hi"}, "metadata": {}}, {"input": {"message": "hi"}, "user_id": 0}]
         for values in invalid:
             with self.subTest(values=values):
-                response = await self.client.post("/api/agent/run", json={
+                response = await self.client.post("/api/thread/runs/stream", json={
                     "user_id": 1, "metadata": {"model_id": self.model_id}, **values,
                 })
                 self.assertEqual(response.status_code, 400)
@@ -233,13 +339,14 @@ class AgentRunTests(PostgresDatabaseTestCase):
         def fail(state):
             raise RuntimeError("node failed")
         with self.graph_patch(fail), self.assertLogs("app.services.agent_run_service", level="ERROR"):
-            response = await self.post(thread_id=None, message="hi")
+            response = await self.post(thread_id=None, input={"message": "hi"})
         terminal = events(response)[-1]
         self.assertEqual(terminal["status"], "failed")
+        latest = await self.latest_run()
         async with self.factory() as db:
-            thread = await agent_thread.get_by_thread_id(db, user_id=1, thread_id=terminal["thread_id"])
+            thread = await agent_thread.get_by_thread_id(db, user_id=1, thread_id=latest.thread_id)
             self.assertIsNotNone(thread)
-            stored = await agent_run.get_by_run_id(db, user_id=1, thread_id=thread.thread_id, run_id=terminal["run_id"])
+            stored = await agent_run.get_by_run_id(db, user_id=1, thread_id=thread.thread_id, run_id=latest.run_id)
             self.assertEqual(stored.status, "failed")
             self.assertEqual(stored.error_message, "node failed")
 
@@ -293,11 +400,11 @@ class AgentRunTests(PostgresDatabaseTestCase):
         ):
             response = await self.client.get(path, params={"user_id": 2})
             self.assertEqual(response.status_code, 404)
-        response = await self.client.post("/api/agent/run", json={
-            "user_id": 2, "metadata": {"model_id": self.model_id}, "thread_id": run.thread_id, "message": "hi",
+        response = await self.client.post("/api/thread/runs/stream", json={
+            "user_id": 2, "metadata": {"model_id": self.model_id}, "thread_id": run.thread_id, "input": {"message": "hi"},
         })
         self.assertEqual(response.status_code, 404)
-        response = await self.post(thread_id="nonexistent", message="hi")
+        response = await self.post(thread_id="nonexistent", input={"message": "hi"})
         self.assertEqual(response.status_code, 404)
         async with self.factory() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(AgentThread)), 1)
@@ -309,11 +416,11 @@ class AgentRunTests(PostgresDatabaseTestCase):
 
     async def test_http_input_validation_and_thread_routes(self):
         for input in (
-            {}, {"message": "hi", "resume": True},
-            {"message": "hi", "metadata": {"model_id": 0}},
-            {"message": "hi", "metadata": {"model_id": self.model_id, "think_effort": "invalid"}},
+            {}, {"input": {"message": "hi"}, "resume": True},
+            {"input": {"message": "hi"}, "metadata": {"model_id": 0}},
+            {"input": {"message": "hi"}, "metadata": {"model_id": self.model_id, "think_effort": "invalid"}},
         ):
-            response = await self.client.post("/api/agent/run", json={
+            response = await self.client.post("/api/thread/runs/stream", json={
                 "user_id": 1, "metadata": {"model_id": self.model_id}, "thread_id": self.thread.thread_id, **input,
             })
             self.assertEqual(response.status_code, 400)
@@ -349,13 +456,13 @@ class AgentRunTests(PostgresDatabaseTestCase):
             return {"messages": [AIMessage(content="done")]}
         with self.graph_patch(work):
             first = await self.post()
-            second = await self.post(message="again")
+            first_id = (await self.latest_run()).run_id
+            second = await self.post(input={"message": "again"})
+            second_id = (await self.latest_run()).run_id
         first_events, second_events = events(first), events(second)
         self.assertEqual(first_events[-1]["status"], "completed")
         self.assertNotIn("interrupt", [event["type"] for event in first_events + second_events])
-        first_id, second_id = first_events[-1]["run_id"], second_events[-1]["run_id"]
         self.assertNotEqual(first_id, second_id)
-        self.assertTrue(all(event["run_id"] == first_id and event["thread_id"] == self.thread.thread_id for event in first_events))
         response = await self.client.get(f"/api/agent/threads/{self.thread.thread_id}/runs", params={"user_id": 1})
         self.assertEqual([row["run_id"] for row in response.json()["data"]], [second_id, first_id])
         response = await self.client.get(f"/api/agent/threads/{self.thread.thread_id}/runs", params={"user_id": 1, "limit": 1, "offset": 1})
@@ -374,7 +481,7 @@ class AgentRunTests(PostgresDatabaseTestCase):
         self.assertEqual(output[-1]["status"], "failed")
         self.assertNotIn("done", [event["type"] for event in output])
         self.assertNotIn("interrupt", [event["type"] for event in output])
-        stored = await self.get_run(output[-1]["run_id"])
+        stored = await self.latest_run()
         self.assertEqual(stored.error_message, "node failed")
         self.assertIsNotNone(stored.finished_at)
 
@@ -385,7 +492,7 @@ class AgentRunTests(PostgresDatabaseTestCase):
                 reasoning_effort=None,
             )
             self.tools_builder.assert_called_once()
-            self.assertEqual(self.tools_builder.call_args.kwargs, {"user_id": 1})
+            self.assertEqual(self.tools_builder.call_args.kwargs, {"user_id": 1, "model": self.model_constructor.return_value})
             self.assertIs(kwargs["model"], self.model_constructor.return_value)
             self.assertIs(kwargs["tool_registry"], self.tool_registry)
             return AgentRunner(**kwargs)
@@ -394,21 +501,21 @@ class AgentRunTests(PostgresDatabaseTestCase):
         output = events(response)
         self.assertEqual("".join(event["content"] for event in output if event["type"] == "token"), "hello")
         self.assertEqual(output[-1]["status"], "completed")
-        self.assertEqual((await self.get_run(output[-1]["run_id"])).run_metadata, {"model_id": self.model_id})
+        self.assertEqual((await self.latest_run()).run_metadata, {"model_id": self.model_id})
 
     async def test_metadata_is_saved_and_effort_reaches_model_constructor(self):
         for effort in ("high", None):
             with self.subTest(effort=effort):
                 self.model_constructor.reset_mock()
                 metadata = {"model_id": self.model_id, "think_effort": effort}
-                response = await self.post(message="hi", metadata=metadata)
+                response = await self.post(input={"message": "hi"}, metadata=metadata)
                 output = events(response)
                 self.assertEqual(output[-1]["status"], "completed")
                 self.model_constructor.assert_called_once_with(
                     model="test-model", base_url="https://example.test/v1", api_key="test-key",
                     streaming=True, reasoning_effort=effort,
                 )
-                stored = await self.get_run(output[-1]["run_id"])
+                stored = await self.latest_run()
                 self.assertEqual(stored.run_metadata, metadata)
                 detail = await self.client.get(
                     f"/api/agent/threads/{stored.thread_id}/runs/{stored.run_id}", params={"user_id": 1},
@@ -458,12 +565,12 @@ class AgentRunTests(PostgresDatabaseTestCase):
                 with patch("app.services.agent_run_service.AgentRunner") as runner, self.assertLogs(
                     "app.services.agent_run_service", level="ERROR",
                 ):
-                    response = await self.post(message="hi", metadata={"model_id": model_id})
+                    response = await self.post(input={"message": "hi"}, metadata={"model_id": model_id})
                 runner.assert_not_called()
                 output = events(response)
                 self.assertEqual(output[-1]["status"], "failed")
                 self.assertNotIn("done", [event["type"] for event in output])
-                stored = await self.get_run(output[-1]["run_id"])
+                stored = await self.latest_run()
                 self.assertEqual(stored.status, "failed")
                 self.assertEqual(stored.error_message, expected_error)
 
@@ -485,6 +592,7 @@ class AgentRunTests(PostgresDatabaseTestCase):
             return {"messages": [AIMessage(content=str(answer))]}
         with self.graph_patch(approval):
             paused_events = events(await self.post())
+            paused_run = await self.latest_run()
             self.assertEqual(
                 [event["type"] for event in paused_events if event["type"] in {"interrupt", "done"}],
                 ["interrupt", "done"],
@@ -495,13 +603,14 @@ class AgentRunTests(PostgresDatabaseTestCase):
             self.assertTrue(paused["interrupts"][0]["id"])
             self.assertEqual(paused["interrupts"][0]["value"], {"question": "approve?"})
             resumed_events = events(await self.post(resume=True, metadata={"model_id": self.model_id, "think_effort": "low"}))
+            resumed_run = await self.latest_run()
             self.assertNotIn("interrupt", [event["type"] for event in resumed_events])
             resumed = resumed_events[-1]
             self.assertEqual(self.model_constructor.call_args.kwargs["reasoning_effort"], "low")
         self.assertEqual(resumed["status"], "completed")
-        self.assertNotEqual(paused["run_id"], resumed["run_id"])
-        self.assertEqual((await self.get_run(paused["run_id"])).status, "interrupted")
-        self.assertEqual((await self.get_run(resumed["run_id"])).run_metadata, {
+        self.assertNotEqual(paused_run.run_id, resumed_run.run_id)
+        self.assertEqual(paused_run.status, "interrupted")
+        self.assertEqual(resumed_run.run_metadata, {
             "model_id": self.model_id, "think_effort": "low",
         })
 

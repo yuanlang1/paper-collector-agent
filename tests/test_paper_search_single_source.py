@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from langchain_core.messages import HumanMessage
 from langgraph.errors import GraphInterrupt
 from pydantic import ValidationError
 
@@ -71,6 +72,7 @@ from app.llm.tools.search_tools.crossref.search_crossref import _published_date
 from app.llm.tools.search_tools.google_scholar.search_google_scholar import (
     _parse_google_scholar_item, google_scholar_search_service, SerpApiSearchError,
 )
+from tests.chat_model_stub import as_chat_model
 
 
 class _PlanningModel:
@@ -227,7 +229,7 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
     async def test_plan_search_writes_intent_tag_and_plan_in_one_call(self) -> None:
         model = _PlanningModel()
         result = await PlanSearchNode(
-            model=model,
+            model=as_chat_model(model),
         )(
             {
                 "original_prompt": "检索 RAG 方法论文",
@@ -255,7 +257,7 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_plan_search_uses_default_types_and_pagination(self) -> None:
         result = await PlanSearchNode(
-            model=_PlanningModel(),
+            model=as_chat_model(_PlanningModel()),
             pagination_settings={
                 "google_max_pages": 2,
                 "google_page_size": 10,
@@ -300,7 +302,7 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
                 }
 
         result = await PlanSearchNode(
-            model=_DatedPlanningModel(),
+            model=as_chat_model(_DatedPlanningModel()),
             pagination_settings={
                 "google_max_pages": 1,
                 "google_page_size": 10,
@@ -313,7 +315,7 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(arguments["year_to"], 2021)
 
     async def test_plan_search_fails_when_model_output_is_unavailable(self) -> None:
-        result = await PlanSearchNode(model=_FailingPlanningModel())(
+        result = await PlanSearchNode(model=as_chat_model(_FailingPlanningModel()))(
             {"original_prompt": "检索 RAG 方法论文"}
         )
 
@@ -322,7 +324,7 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("model unavailable", result["intent_error"])
 
     async def test_plan_search_fails_for_invalid_query_arguments(self) -> None:
-        result = await PlanSearchNode(model=_InvalidPlanningModel())(
+        result = await PlanSearchNode(model=as_chat_model(_InvalidPlanningModel()))(
             {"original_prompt": "检索 RAG 方法论文"}
         )
 
@@ -509,7 +511,7 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
         model = _ReviewModel(RuntimeError("model should not run"))
         with TemporaryDirectory() as directory:
             result = await ReviewNode(
-                model=model,
+                model=as_chat_model(model),
                 artifact_store=LocalArtifactStore(directory),
             )({
                 "run_id": "review-target",
@@ -538,7 +540,7 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
         })
         with TemporaryDirectory() as directory:
             result = await ReviewNode(
-                model=model,
+                model=as_chat_model(model),
                 artifact_store=LocalArtifactStore(directory),
             )({
                 "run_id": "review-supplement",
@@ -566,7 +568,7 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
         model = _ReviewModel(RuntimeError("model unavailable"))
         with TemporaryDirectory() as directory:
             result = await ReviewNode(
-                model=model,
+                model=as_chat_model(model),
                 artifact_store=LocalArtifactStore(directory),
             )({
                 "run_id": "review-fallback",
@@ -603,7 +605,7 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
         })
         with TemporaryDirectory() as directory:
             result = await ReviewNode(
-                model=model,
+                model=as_chat_model(model),
                 artifact_store=LocalArtifactStore(directory),
             )({
                 "run_id": "review-unavailable",
@@ -624,11 +626,11 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_review_fails_when_decision_artifact_cannot_be_saved(self) -> None:
         result = await ReviewNode(
-            model=_ReviewModel({
+            model=as_chat_model(_ReviewModel({
                 "action": "finish",
                 "required_additional_count": 0,
                 "reasoning": "结束检索。",
-            }),
+            })),
             artifact_store=_FailingArtifactStore(),
         )({
             "run_id": "review-artifact-failure",
@@ -1042,7 +1044,7 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
                     finally:
                         self.active -= 1
 
-                    title = json.loads(messages[1].content)["paper"]["title"]
+                    title = json.loads(next(message.content for message in messages if isinstance(message, HumanMessage)))["paper"]["title"]
                     if title == "Paper 2":
                         raise RuntimeError("model unavailable")
                     return PaperRecommendationResult(
@@ -1054,7 +1056,7 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
 
             model = Model()
             task = asyncio.create_task(
-                RecommendationNode(artifact_store=store, model=model)(
+                RecommendationNode(artifact_store=store, model=as_chat_model(model))(
                     {
                         "child_run_id": child_run_id,
                         "abstract_manifest_artifact_ref": artifact.artifact_uri,
@@ -1128,7 +1130,7 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
 
             model = Model()
             task = asyncio.create_task(
-                RecommendationNode(artifact_store=store, model=model)(
+                RecommendationNode(artifact_store=store, model=as_chat_model(model))(
                     {
                         "child_run_id": child_run_id,
                         "abstract_manifest_artifact_ref": artifact.artifact_uri,
@@ -1433,7 +1435,7 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
 
             recommendation_update = await RecommendationNode(
                 artifact_store=store,
-                model=Model(),
+                model=as_chat_model(Model()),
             )(
                 {
                     "child_run_id": child_run_id,
@@ -1511,7 +1513,7 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
                     cache_store=VenueCacheStore(
                         Path(directory) / "venue_cache.json"
                     ),
-                    model=object(),
+                    model=as_chat_model(object()),
                 )
                 venue, source = await node.resolve_venue(
                     title="A Paper",
@@ -1529,7 +1531,7 @@ class PaperSearchSingleSourceTests(unittest.IsolatedAsyncioTestCase):
 
 class PaperSearchSingleSourceValidationTests(unittest.TestCase):
     def test_workflow_has_search_and_review_nodes(self) -> None:
-        nodes = build_paper_search_workflow().get_graph().nodes
+        nodes = build_paper_search_workflow(model=as_chat_model(object())).get_graph().nodes
         self.assertIn("plan_search", nodes)
         self.assertIn("finalize_pdfs", nodes)
         self.assertNotIn("prepare_search", nodes)
@@ -1547,7 +1549,7 @@ class PaperSearchSingleSourceValidationTests(unittest.TestCase):
         self.assertNotIn("supplemental_search", nodes)
 
     def test_plan_search_routes_directly_to_search(self) -> None:
-        graph = build_paper_search_workflow().get_graph()
+        graph = build_paper_search_workflow(model=as_chat_model(object())).get_graph()
         targets = {
             edge.target
             for edge in graph.edges
@@ -1558,7 +1560,7 @@ class PaperSearchSingleSourceValidationTests(unittest.TestCase):
         self.assertNotIn("confirm", targets)
 
     def test_existing_task_routes_through_status_update_before_planning(self) -> None:
-        graph = build_paper_search_workflow().get_graph()
+        graph = build_paper_search_workflow(model=as_chat_model(object())).get_graph()
         initialize_targets = {
             edge.target for edge in graph.edges if edge.source == "initialize"
         }
@@ -1574,7 +1576,7 @@ class PaperSearchSingleSourceValidationTests(unittest.TestCase):
         self.assertIn("finalize_result", status_targets)
 
     def test_review_routes_to_search_or_enrichment(self) -> None:
-        graph = build_paper_search_workflow().get_graph()
+        graph = build_paper_search_workflow(model=as_chat_model(object())).get_graph()
         review_targets = {
             edge.target for edge in graph.edges if edge.source == "review"
         }

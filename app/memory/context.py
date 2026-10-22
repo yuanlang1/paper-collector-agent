@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.db.models import MemoryEpisode, MemoryFact
 from app.memory.episodic.service import EpisodeService
 from app.memory.retrieval_gate import MemoryRetrievalGate
 from app.memory.schemas import (
@@ -15,10 +16,8 @@ from app.memory.schemas import (
     MemoryUsage,
 )
 from app.memory.semantic.service import FactService
-from app.db.models import MemoryEpisode, MemoryFact
 from app.rag.retrieval.memory_retrieval import MemoryHybridRetrieval
 from app.services.llm_setting_service import LlmConfig
-
 
 MemoryEventCallback = Callable[[dict[str, Any]], Awaitable[None]]
 logger = logging.getLogger(__name__)
@@ -79,10 +78,7 @@ class MemoryContextService:
         if facts:
             sections.append(
                 "[已确认的长期偏好与研究背景]\n"
-                + "\n".join(
-                    f"- {fact.subject}：{fact.content}"
-                    for fact in facts
-                )
+                + "\n".join(f"- {fact.subject}：{fact.content}" for fact in facts)
             )
 
         if episodes:
@@ -165,9 +161,7 @@ class MemoryContextService:
     ) -> list[Any]:
         records_by_id = {record.id: record for record in records}
         return [
-            records_by_id[record_id]
-            for record_id in ids
-            if record_id in records_by_id
+            records_by_id[record_id] for record_id in ids if record_id in records_by_id
         ][:limit]
 
     @staticmethod

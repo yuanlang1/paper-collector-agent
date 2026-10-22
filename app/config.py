@@ -1,15 +1,14 @@
 import os
 from pathlib import Path
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, model_validator
-from typing import List, Literal
 
-from sqlalchemy import false
+from pydantic import Field, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = BACKEND_DIR.parent
 DEFAULT_ENV_FILE = BACKEND_DIR / ".env"
 DEFAULT_SQLITE_DB_PATH = BACKEND_DIR / "literature.db"
+
 
 class Settings(BaseSettings):
     # 应用基本配置
@@ -60,18 +59,17 @@ class Settings(BaseSettings):
     CROSSREF_MAILTO: str = ""
     CROSSREF_TIMEOUT_SECONDS: float = 15.0
 
-
     FIRECRAWL_API_KEY: str = ""
     FIRECRAWL_SEARCH_URL: str = "https://api.firecrawl.dev/v2/search"
     FIRECRAWL_TIMEOUT_SECONDS: float = 30.0
 
     EASY_SCHOLAR_URL: str
-    EASY_SCHOLAR_SECRET_KEY: str 
+    EASY_SCHOLAR_SECRET_KEY: str
     EASY_SCHOLAR_TIMEOUT_SECONDS: float
 
     ARTIFACT_BASE_DIR: str
 
-    OSS_ENABLED: bool = True    
+    OSS_ENABLED: bool = True
     OSS_BUCKET: str
     OSS_REGION: str
     OSS_ENDPOINT: str
@@ -91,7 +89,7 @@ class Settings(BaseSettings):
     PAPER_SEARCH_DBLP_MAX_PAGES: int = 20
     PAPER_SEARCH_DBLP_PAGE_SIZE: int = 50
     PAPER_SEARCH_DBLP_TOTAL_LIMIT: int = 10
-    
+
     PAPER_SEARCH_GOOGLE_SCHOLAR_MAX_PAGES: int = 100
     PAPER_SEARCH_GOOGLE_SCHOLAR_PAGE_SIZE: int = 10
     PAPER_SEARCH_GOOGLE_SCHOLAR_TOTAL_LIMIT: int = 20
@@ -125,16 +123,13 @@ class Settings(BaseSettings):
     PAPER_COLLECTION_NAME: str
     PAPER_READING_COLLECTION_NAME: str = "paper_reading"
     PAPER_CONTENT_COLLECTION_NAME: str
-    MEMORY_FACT_COLLECTION_NAME: str = "memory_facts"
-    MEMORY_EPISODE_COLLECTION_NAME: str = "memory_episodes"
-    MEMORY_RETRIEVAL_MODE: Literal["sql", "hybrid"] = "hybrid"
     MODEL_DIR: str = "models"
     SPARSE_EMBEDDING_MODEL_NAME: str = "Qdrant/bm25"
     EMBEDDING_DEVICE: str = "cpu"
 
     EMBEDDING_PROVIDER: str = "siliconflow"
     SILICONFLOW_API_KEY: str
-    SILICONFLOW_EMBEDDING_BASE_URL: str =  "https://api.siliconflow.cn/v1"
+    SILICONFLOW_EMBEDDING_BASE_URL: str = "https://api.siliconflow.cn/v1"
     SILICONFLOW_EMBEDDING_MODEL: str = "BAAI/bge-m3"
     SILICONFLOW_EMBEDDING_TIMEOUT_SECONDS: float = 30.0
     SILICONFLOW_EMBEDDING_BATCH_SIZE: int = 32
@@ -152,9 +147,14 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_task_rag_timeout(self) -> "Settings":
-        minimum = self.MINERU_PARSE_TIMEOUT_SECONDS + self.TASK_RAG_POST_PROCESSING_GRACE_SECONDS
+        minimum = (
+            self.MINERU_PARSE_TIMEOUT_SECONDS
+            + self.TASK_RAG_POST_PROCESSING_GRACE_SECONDS
+        )
         if self.TASK_RAG_WORKFLOW_TIMEOUT_SECONDS < minimum:
-            raise ValueError("TASK_RAG_WORKFLOW_TIMEOUT_SECONDS must cover parsing and post-processing")
+            raise ValueError(
+                "TASK_RAG_WORKFLOW_TIMEOUT_SECONDS must cover parsing and post-processing"
+            )
         return self
 
     @model_validator(mode="after")
@@ -177,6 +177,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
 
 settings = Settings()
 os.environ["LANGSMITH_TRACING"] = str(settings.LANGSMITH_TRACING).lower()

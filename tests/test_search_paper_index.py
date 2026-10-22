@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import Mock
 
 from langchain_core.documents import Document
 from pydantic import ValidationError
@@ -95,7 +96,7 @@ class SearchPaperIndexTests(unittest.IsolatedAsyncioTestCase):
             })
 
     def test_is_not_registered_for_the_main_agent(self):
-        self.assertNotIn("search_paper_index", {tool.name for tool in build_tools(None, user_id=1).get_tools()})
+        self.assertNotIn("search_paper_index", {tool.name for tool in build_tools(None, user_id=1, model=Mock()).get_tools()})
 
 
 if __name__ == "__main__":

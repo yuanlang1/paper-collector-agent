@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, SystemMessage
 from pydantic import BaseModel
 
@@ -19,12 +20,12 @@ class ChatClient:
     ) -> None:
         self._config = resolve_provider_config(runtime_config)
         self._provider = get_provider(self._config.provider)
-        self._models: dict[ModelOptions, Any] = {}
+        self._models: dict[ModelOptions, BaseChatModel] = {}
 
     def model(
         self, 
         options: ModelOptions | None = None
-    ) -> Any:
+    ) -> BaseChatModel:
         options = options or ModelOptions()
         if options not in self._models:
             self._models[options] = self._provider.create_model(self._config, options)

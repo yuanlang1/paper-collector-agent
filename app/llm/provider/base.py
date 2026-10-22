@@ -1,19 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Protocol
 
 from langchain_core.language_models.chat_models import BaseChatModel
-
-
-ModelPurpose = Literal["agent", "memory"]
 
 
 @dataclass(frozen=True)
 class ModelOptions:
     temperature: float = 0.7
     streaming: bool = True
-    purpose: ModelPurpose = "agent"
 
 
 @dataclass(frozen=True)

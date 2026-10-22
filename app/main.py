@@ -13,9 +13,6 @@ from app.grpc.server import InternalGrpcServer
 from app.infrastructure.grpc.grpc_channel_pool import paper_service_grpc_channel_pool
 from app.infrastructure.nacos_registry import nacos_registry
 from app.rag.index_construction.base import close_index_resources
-from app.rag.index_construction.memory_index_sync import (
-    get_memory_index_synchronizer,
-)
 from app.rag.processing.task_rag_batch_runner import close_task_rag_batch_runner
 
 logging.basicConfig(
@@ -54,7 +51,6 @@ async def lifespan(app: FastAPI):
             await connection.run_sync(Base.metadata.create_all)
 
         resources.push_async_callback(close_index_resources)
-        await get_memory_index_synchronizer().ensure_collections()
         resources.push_async_callback(paper_service_grpc_channel_pool.close)
         resources.push_async_callback(close_task_rag_batch_runner)
 

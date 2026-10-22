@@ -32,13 +32,77 @@ docker compose -f compose.nacos.yml down
 
 ## 安装 Python 依赖
 
-本项目以 Python 3.11 为基准。请使用锁定文件安装完整的直接与传递依赖：
+本项目使用 Python 3.11 和 uv。`pyproject.toml` 声明依赖，`uv.lock` 锁定
+Windows/Linux 的解析结果。默认安装 `app` 依赖组，保留当前应用运行环境；
+不安装该组时，仅安装后台 Worker 所需的依赖。
 
 ```powershell
-python -m pip install -r requirements.venv311.lock.txt
+$env:UV_PROJECT_ENVIRONMENT = ".venv311"
+uv sync --locked --inexact
+uv pip check --python .\.venv311\Scripts\python.exe
 ```
 
-该文件包含 CUDA 12.8 版 PyTorch 的官方 wheel 源；没有 NVIDIA/CUDA 环境时，请按目标环境重新生成锁定文件。
+`--inexact` 保留现有环境中额外安装的工具。`app` 组沿用 CUDA 12.8 版
+PyTorch，uv 已为 `torch` 和 `torchvision` 配置独立官方源；Windows 专有包
+包含平台标记。依赖配置统一维护在 `pyproject.toml` 与 `uv.lock`，
+后续依赖更新使用 `uv add`，并提交这两个文件。
+
+## PostgreSQL 与 Redis
+
+记忆存储复用 PostgreSQL 17 的 `agent_db` 和现有数据卷
+`paper_agent_pgdata`。`Dockerfile.postgres` 基于原镜像安装 pgvector 0.8.7、
+SCWS 和固定提交的 zhparser；Compose 将该数据卷声明为 external，不新建空库。
+首次接管独立启动的 `paper-agent-postgres` 容器时，须先备份、停止并重命名
+原容器，再由 Compose 启动；同一数据卷不可同时运行两个 PostgreSQL 实例。
+
+在本机 `.env` 配置以下变量，数据库凭据沿用现有配置，宿主机地址为
+`127.0.0.1:5432`：
+
+```dotenv
+DATABASE_POSTGRES_URL='postgresql://yl:URL编码后的原密码@127.0.0.1:5432/agent_db'
+SILICONFLOW_API_KEY='你的密钥'
+SILICONFLOW_EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
+DENSE_EMBEDDING_MODEL_NAME=BAAI/bge-m3
+```
+
+在 Docker Desktop 的 Linux 容器模式下启动 PostgreSQL 和 Redis：
+
+```powershell
+docker compose -f compose.memory.yml up -d --build
+docker compose -f compose.memory.yml exec redis redis-cli ping
+```
+
+Redis 使用 `127.0.0.1:6380`，与已有的 6379 实例分开；AOF 文件保存在
+`memory-redis-data` 命名卷中。本地 Celery 默认连接 `redis://127.0.0.1:6380/0`。
+可用环境变量 `CELERY_BROKER_URL` 和 `CELERY_RESULT_BACKEND` 覆盖地址。
+任务结果保存在 Redis 的 DB 1，保留一小时。
+
+FastAPI 和 Celery Worker 将分别作为本地独立进程运行，Compose 仅管理
+PostgreSQL 和 Redis。当前尚未接入 Profile/Fact/Episode 提取或主图调度。
+
+从项目根目录在本地初始化记忆存储：
+
+```powershell
+$env:UV_PROJECT_ENVIRONMENT = ".venv311"
+uv run --locked --inexact --env-file .env python -m app.memory.init_store --check-embedding
+```
+
+记忆数据库初始化命令可重复执行：启用扩展、建立中文 `memory_zh` 配置，
+由原生 LangGraph Store 创建 `vector(1024)` 表和 cosine HNSW 索引，再创建
+`content` 的全文 GIN 索引。`--check-embedding` 会调用一次 SiliconFlow；
+不带此参数时只初始化数据库。现有其他维度或不同类型的索引须单独迁移。
+PostgreSQL 设置 `hnsw.ef_search=100`、`hnsw.iterative_scan=strict_order`；
+RRF 查询和 LangMem 业务维护将在后续接入，本文命令不会启动记忆提取。
+原有论文 RAG 的 Qdrant 配置保留。
+
+切换前备份保存在 Git 忽略的 `data/backups/postgres/`；不要删除原数据卷。
+
+查看日志或停止服务并保留数据：
+
+```powershell
+docker compose -f compose.memory.yml logs --tail 100 postgres redis
+docker compose -f compose.memory.yml down
+```
 
 ## 内部 gRPC 接口
 
@@ -119,12 +183,17 @@ python -m app.rag.evaluation run --dataset paper-content-v1 --top-k 20
 Ragas 指标使用独立 Python 3.11 虚拟环境，避免升级服务运行时的 LangChain 依赖：
 
 ```powershell
-python -m venv .venv-rag-eval
-.\.venv-rag-eval\Scripts\python.exe -m pip install -r requirements.venv311.lock.txt
-.\.venv-rag-eval\Scripts\python.exe -m pip install -r requirements.rag-eval.venv311.txt
+$env:UV_PROJECT_ENVIRONMENT = ".venv-rag-eval"
+uv sync --locked --inexact
+uv pip install --python .\.venv-rag-eval\Scripts\python.exe ragas
+$env:UV_PROJECT_ENVIRONMENT = ".venv311"
 ```
 
-随后使用该环境执行 `python -m app.rag.evaluation run --metrics deterministic ragas`。
+评测附加依赖只安装到独立环境，不修改主服务的锁定文件。随后执行：
+
+```powershell
+.\.venv-rag-eval\Scripts\python.exe -m app.rag.evaluation run --metrics deterministic ragas
+```
 
 ## 综述生成流程
 

@@ -12,6 +12,7 @@ from app.db.models import AgentRun, RunStatus
 from app.db.repositories import agent_run, agent_thread
 from app.llm import agent_build
 from app.llm.agent_runner import AgentRunner
+from app.llm.context import AgentRunContext
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,9 @@ async def create_run(
                 await agent_thread.touch(db, user_id=user_id, thread_id=thread_id)
             else:
                 thread = await agent_thread.create(
-                    db, user_id=user_id, thread_id=uuid4().hex,
+                    db,
+                    user_id=user_id,
+                    thread_id=uuid4().hex,
                 )
             run = await agent_run.create(
                 db,
@@ -64,9 +67,11 @@ async def update_status(
 ) -> AgentRun | None:
     if status == RunStatus.PENDING:
         raise ValueError("Cannot transition a run back to pending")
-    expected = (
+
+    expected: tuple[RunStatus, ...] = (
         (RunStatus.PENDING,) if status == RunStatus.RUNNING else (RunStatus.RUNNING,)
     )
+
     if status == RunStatus.CANCELLED:
         expected = (RunStatus.PENDING, RunStatus.RUNNING)
     async with db.begin():
@@ -143,15 +148,19 @@ async def run(
     checkpointer,
     store,
 ) -> AsyncIterator[dict[str, Any]]:
-    fields = {"thread_id": run.thread_id, "run_id": run.run_id}
-    identity = {**fields, "user_id": run.user_id}
+    identity = {
+        "thread_id": run.thread_id,
+        "run_id": run.run_id,
+        "user_id": run.user_id,
+    }
     started = await update_status(db, **identity, status=RunStatus.RUNNING)
 
     if started is None:
         raise ConflictException("该请求已结束或已开始执行")
 
     try:
-        yield {**fields, "type": "status", "status": RunStatus.RUNNING}
+        if "resume" not in input:
+            yield {"type": "status", "status": RunStatus.RUNNING}
 
         metadata = run.run_metadata
         model = await agent_build.get_model(
@@ -160,12 +169,14 @@ async def run(
             user_id=run.user_id,
             think_effort=metadata.get("think_effort"),
         )
-        tool_registry = agent_build.build_tools(db, user_id=run.user_id)
+        tool_registry = agent_build.build_tools(db, user_id=run.user_id, model=model)
 
         runner = AgentRunner(
-            thread_id=run.thread_id,
-            run_id=run.run_id,
-            user_id=str(run.user_id),
+            context=AgentRunContext(
+                thread_id=run.thread_id,
+                run_id=run.run_id,
+                user_id=str(run.user_id),
+            ),
             model=model,
             tool_registry=tool_registry,
             checkpointer=checkpointer,
@@ -174,7 +185,7 @@ async def run(
 
         async with aclosing(runner.run(input)) as stream:
             async for event in stream:
-                yield {**event, **fields}
+                yield event
         snapshot = await runner.get_state()
         errors = [task.error for task in snapshot.tasks if task.error]
         if errors:
@@ -194,7 +205,6 @@ async def run(
             error_message=str(exc) or type(exc).__name__,
         )
         yield {
-            **fields,
             "type": "error",
             "status": RunStatus.FAILED,
             "message": exc.message
@@ -206,18 +216,14 @@ async def run(
     finished = await update_status(db, **identity, status=status)
     if finished is None:
         raise ConflictException("该请求已结束")
-    interrupts = [
-        {"id": item.id, "value": item.value} for item in snapshot.interrupts
-    ]
+    interrupts = [{"id": item.id, "value": item.value} for item in snapshot.interrupts]
     if status == RunStatus.INTERRUPTED:
         yield {
-            **fields,
             "type": "interrupt",
             "status": status,
             "interrupts": interrupts,
         }
     yield {
-        **fields,
         "type": "done",
         "status": status,
         "interrupts": interrupts,

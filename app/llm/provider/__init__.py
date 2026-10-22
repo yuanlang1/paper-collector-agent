@@ -1,4 +1,4 @@
-from app.llm.provider.base import ModelOptions, ModelPurpose
+from app.llm.provider.base import ModelOptions
 from app.llm.provider.chat import ChatClient
 from app.llm.provider.structured_output import (
     StructuredOutputError,
@@ -9,7 +9,6 @@ from app.llm.provider.structured_output import (
 __all__ = [
     "ChatClient",
     "ModelOptions",
-    "ModelPurpose",
     "StructuredOutputError",
     "StructuredOutputT",
     "ValidatedJsonInvoker",

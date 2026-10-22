@@ -13,17 +13,21 @@ class RunMetadata(BaseModel):
     think_effort: ReasoningEffort = None
 
 
+class RunInput(BaseModel):
+    message: str = Field(min_length=1)
+
+
 class ChatRequest(BaseModel):
     user_id: int = Field(gt=0)
     metadata: RunMetadata
     thread_id: str | None = Field(default=None, max_length=128)
-    message: str | None = Field(default=None, min_length=1)
+    input: RunInput | None = None
     resume: Any = None
 
     @model_validator(mode="after")
     def validate_input(self):
-        if (self.message is not None) == ("resume" in self.model_fields_set):
-            raise PydanticCustomError("run_input", "message 和 resume 必须且只能提供一个")
+        if (self.input is not None) == ("resume" in self.model_fields_set):
+            raise PydanticCustomError("run_input", "input 和 resume 必须且只能提供一个")
         if self.thread_id == "":
             self.thread_id = None
         if "resume" in self.model_fields_set and self.thread_id is None:

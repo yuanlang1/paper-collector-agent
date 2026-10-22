@@ -367,7 +367,6 @@ class AgentStreamLifecycleTests(unittest.TestCase):
             history_store=self.history_store,
             db_factory=create_db,
         )
-        runtime._schedule_consolidation = Mock()
         return runtime
 
     async def _start_chat(
@@ -990,7 +989,6 @@ class NativeSseResponseTests(unittest.TestCase):
                     history_store=history_store,
                     db_factory=_TrackingDb,
                 )
-                runtime._schedule_consolidation = Mock()
                 app = FastAPI()
                 app.include_router(agent_api.router)
                 app.dependency_overrides[agent_api.get_db] = lambda: Mock()

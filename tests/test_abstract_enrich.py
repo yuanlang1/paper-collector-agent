@@ -5,11 +5,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from langchain_core.messages import HumanMessage
+
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.paper_search.nodes.abstract_enrich import (
     AbstractEnrichNode,
     PdfFrontPageEnrichmentResult,
 )
+from tests.chat_model_stub import as_chat_model
 
 
 RUN_ID = "abstract-enrich-test"
@@ -57,7 +60,7 @@ class AbstractEnrichNodeTests(unittest.IsolatedAsyncioTestCase):
                     ]
                 },
             )
-            node = AbstractEnrichNode(artifact_store=store, model=model)
+            node = AbstractEnrichNode(artifact_store=store, model=as_chat_model(model))
             patch_kwargs = (
                 {"side_effect": extract_side_effect}
                 if isinstance(extract_side_effect, Exception)
@@ -107,7 +110,7 @@ class AbstractEnrichNodeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(paper_info["ai_abstract"], "中文 AI 摘要")
         self.assertEqual(len(model.calls), 1)
         self.assertEqual(
-            json.loads(model.calls[0][1].content),
+            json.loads(next(message.content for message in model.calls[0] if isinstance(message, HumanMessage))),
             {"pdf_front_pages": front_pages, "source_abstract": "source abstract", "abstract_source": None},
         )
         self.assertEqual(update["stage"], "recommending")
@@ -134,7 +137,7 @@ class AbstractEnrichNodeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(paper["paper_info"]["paper_abstract"], "source abstract")
         self.assertEqual(paper["paper_info"]["ai_abstract"], "unused")
         self.assertEqual(len(model.calls), 1)
-        self.assertEqual(json.loads(model.calls[0][1].content)["pdf_front_pages"], "")
+        self.assertEqual(json.loads(next(message.content for message in model.calls[0] if isinstance(message, HumanMessage)))["pdf_front_pages"], "")
         self.assertEqual(paper["abstract_resolution"]["ai_summary_source"], "source_metadata")
         self.assertEqual(update["status"], "running")
 
@@ -214,7 +217,7 @@ class AbstractEnrichNodeTests(unittest.IsolatedAsyncioTestCase):
                     ai_abstract="未使用",
                 )
             )
-            node = AbstractEnrichNode(artifact_store=store, model=model)
+            node = AbstractEnrichNode(artifact_store=store, model=as_chat_model(model))
 
             with patch(
                 "app.llm.graph.workflows.paper_search.nodes.abstract_enrich."
@@ -286,7 +289,7 @@ class AbstractEnrichNodeTests(unittest.IsolatedAsyncioTestCase):
                 return_value=("PDF front pages", 1),
             ):
                 task = asyncio.create_task(
-                    AbstractEnrichNode(artifact_store=store, model=model)(
+                    AbstractEnrichNode(artifact_store=store, model=as_chat_model(model))(
                         {
                             "child_run_id": f"child-{RUN_ID}",
                             "pdf_manifest_artifact_ref": artifact.artifact_uri,
@@ -348,7 +351,7 @@ class AbstractEnrichNodeTests(unittest.IsolatedAsyncioTestCase):
                 return_value=("PDF front pages", 1),
             ):
                 task = asyncio.create_task(
-                    AbstractEnrichNode(artifact_store=store, model=model)(
+                    AbstractEnrichNode(artifact_store=store, model=as_chat_model(model))(
                         {
                             "child_run_id": f"child-{RUN_ID}",
                             "pdf_manifest_artifact_ref": artifact.artifact_uri,

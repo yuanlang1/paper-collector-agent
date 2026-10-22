@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 import json
-from typing import Any, Generic, TypeVar
+from typing import Generic, TypeVar
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
 
@@ -56,7 +57,7 @@ class ValidatedJsonInvoker(Generic[StructuredOutputT]):
     def __init__(
         self, 
         *, 
-        model: Any, 
+        model: BaseChatModel,
         schema: type[StructuredOutputT], 
         max_attempts: int = 4
     ) -> None:
@@ -64,7 +65,8 @@ class ValidatedJsonInvoker(Generic[StructuredOutputT]):
             raise ValueError("max_attempts must be at least 1")
         self.schema = schema
         self.max_attempts = max_attempts
-        self.model = model.with_structured_output(schema, method="json_mode", include_raw=True)
+        self.model: BaseChatModel = model
+        self._structured_model = model.with_structured_output(schema, method="json_mode", include_raw=True)
 
     async def ainvoke(
         self, 
@@ -85,7 +87,7 @@ class ValidatedJsonInvoker(Generic[StructuredOutputT]):
         ]
 
         for attempt in range(1, self.max_attempts + 1):
-            result = await self.model.ainvoke(current_messages)
+            result = await self._structured_model.ainvoke(current_messages)
             parsed = result["parsed"]
             if parsed is not None:
                 if not isinstance(parsed, self.schema):

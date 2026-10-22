@@ -1,1 +1,1 @@
-"""Tools for user preferences and reusable skills."""
+"""Tools for reusable skills."""

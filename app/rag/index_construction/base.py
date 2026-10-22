@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from abc import ABC, abstractmethod
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
-import logging
 from pathlib import Path
-from typing import Any, Iterator, Sequence
+from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from fastembed import SparseEmbedding, SparseTextEmbedding
@@ -31,36 +32,36 @@ def _model_dir() -> Path:
     return root
 
 
-@lru_cache(maxsize = 1)
+@lru_cache(maxsize=1)
 def get_qdrant_client() -> AsyncQdrantClient:
     return AsyncQdrantClient(
-        url = settings.QDRANT_URL,
-        api_key = settings.QDRANT_API_KEY or None,
+        url=settings.QDRANT_URL,
+        api_key=settings.QDRANT_API_KEY or None,
     )
 
 
-@lru_cache(maxsize = 1)
+@lru_cache(maxsize=1)
 def get_dense_embeddings() -> Embeddings:
     provider = settings.EMBEDDING_PROVIDER.strip().lower()
 
     if provider == "siliconflow":
         return SiliconFlowEmbeddings(
-            api_key = settings.SILICONFLOW_API_KEY,
-            model = settings.SILICONFLOW_EMBEDDING_MODEL,
-            base_url = settings.SILICONFLOW_EMBEDDING_BASE_URL,
-            timeout_seconds = settings.SILICONFLOW_EMBEDDING_TIMEOUT_SECONDS,
-            batch_size = settings.SILICONFLOW_EMBEDDING_BATCH_SIZE,
-            max_retries = settings.SILICONFLOW_EMBEDDING_MAX_RETRIES,
+            api_key=settings.SILICONFLOW_API_KEY,
+            model=settings.SILICONFLOW_EMBEDDING_MODEL,
+            base_url=settings.SILICONFLOW_EMBEDDING_BASE_URL,
+            timeout_seconds=settings.SILICONFLOW_EMBEDDING_TIMEOUT_SECONDS,
+            batch_size=settings.SILICONFLOW_EMBEDDING_BATCH_SIZE,
+            max_retries=settings.SILICONFLOW_EMBEDDING_MAX_RETRIES,
         )
 
     if provider == "local":
         return HuggingFaceEmbeddings(
-            model_name = str(_model_dir() / "bge-m3"),
-            model_kwargs = {
+            model_name=str(_model_dir() / "bge-m3"),
+            model_kwargs={
                 "device": settings.EMBEDDING_DEVICE,
                 "local_files_only": True,
             },
-            encode_kwargs = {
+            encode_kwargs={
                 "normalize_embeddings": True,
             },
         )
@@ -68,12 +69,12 @@ def get_dense_embeddings() -> Embeddings:
     raise ValueError("EMBEDDING_PROVIDER must be 'local' or 'siliconflow'")
 
 
-@lru_cache(maxsize = 1)
+@lru_cache(maxsize=1)
 def get_sparse_embeddings() -> SparseTextEmbedding:
     return SparseTextEmbedding(
-        model_name = settings.SPARSE_EMBEDDING_MODEL_NAME,
-        cache_dir = str(_model_dir() / "fastembed"),
-        local_files_only = True,
+        model_name=settings.SPARSE_EMBEDDING_MODEL_NAME,
+        cache_dir=str(_model_dir() / "fastembed"),
+        local_files_only=True,
     )
 
 
@@ -86,7 +87,7 @@ async def close_index_resources() -> None:
     get_sparse_embeddings.cache_clear()
 
 
-@dataclass(frozen = True, slots = True)
+@dataclass(frozen=True, slots=True)
 class IndexConstructionResult:
     collection_name: str
     indexed_count: int
@@ -114,7 +115,6 @@ class BaseQdrantIndexConstructionModule(ABC):
         self.client = client or get_qdrant_client()
         self.dense_embeddings = dense_embeddings or get_dense_embeddings()
         self.sparse_embeddings = sparse_embeddings or get_sparse_embeddings()
-        
 
     async def build_index(
         self,
@@ -124,23 +124,20 @@ class BaseQdrantIndexConstructionModule(ABC):
 
         if not documents:
             return IndexConstructionResult(
-                collection_name = self.collection_name,
-                indexed_count = 0,
-                embedding_dimension = 0,
+                collection_name=self.collection_name,
+                indexed_count=0,
+                embedding_dimension=0,
             )
 
         indexed_count = 0
         embedding_dimension = 0
 
         for batch in self._chunked(documents, self.batch_size):
-            texts = [
-                self._build_embedding_text(document)
-                for document in batch
-            ]
+            texts = [self._build_embedding_text(document) for document in batch]
 
             dense_vectors, sparse_vectors = await asyncio.gather(
                 self.dense_embeddings.aembed_documents(texts),
-                asyncio.to_thread(self._embed_sparse_documents, texts)
+                asyncio.to_thread(self._embed_sparse_documents, texts),
             )
 
             if embedding_dimension == 0:
@@ -150,38 +147,37 @@ class BaseQdrantIndexConstructionModule(ABC):
 
             points = [
                 models.PointStruct(
-                    id = self._build_point_id(self._get_business_id(document)),
-                    vector = {
+                    id=self._build_point_id(self._get_business_id(document)),
+                    vector={
                         DENSE_VECTOR_NAME: dense_vector,
                         SPARSE_VECTOR_NAME: sparse_vector,
                     },
-                    payload = self._build_payload(document),
+                    payload=self._build_payload(document),
                 )
-                for document, dense_vector, sparse_vector
-                in zip(
+                for document, dense_vector, sparse_vector in zip(
                     batch,
                     dense_vectors,
                     sparse_vectors,
-                    strict = True,
+                    strict=True,
                 )
             ]
 
             await self.client.upsert(
-                collection_name = self.collection_name,
-                points = points,
-                wait = True,
+                collection_name=self.collection_name,
+                points=points,
+                wait=True,
             )
 
             indexed_count += len(points)
 
         return IndexConstructionResult(
-            collection_name = self.collection_name,
-            indexed_count = indexed_count,
-            embedding_dimension = embedding_dimension,
+            collection_name=self.collection_name,
+            indexed_count=indexed_count,
+            embedding_dimension=embedding_dimension,
         )
 
     async def collection_exists(self) -> bool:
-        return await self.client.collection_exists(collection_name = self.collection_name)
+        return await self.client.collection_exists(collection_name=self.collection_name)
 
     async def ensure_collection(self) -> None:
         if await self.collection_exists():
@@ -203,14 +199,14 @@ class BaseQdrantIndexConstructionModule(ABC):
             return
 
         await self.client.delete(
-            collection_name = self.collection_name,
-            points_selector = models.PointIdsList(
-                points = [
+            collection_name=self.collection_name,
+            points_selector=models.PointIdsList(
+                points=[
                     self._build_point_id(str(business_id))
                     for business_id in business_ids
                 ]
             ),
-            wait = True,
+            wait=True,
         )
 
     async def _ensure_collection(
@@ -221,27 +217,26 @@ class BaseQdrantIndexConstructionModule(ABC):
             return
 
         await self.client.create_collection(
-            collection_name = self.collection_name,
-            vectors_config = {
+            collection_name=self.collection_name,
+            vectors_config={
                 DENSE_VECTOR_NAME: models.VectorParams(
-                    size = embedding_dimension,
-                    distance = self.distance,
+                    size=embedding_dimension,
+                    distance=self.distance,
                 )
             },
-            sparse_vectors_config = {
-                SPARSE_VECTOR_NAME:
-                    models.SparseVectorParams(
-                        modifier = models.Modifier.IDF,
-                    )
+            sparse_vectors_config={
+                SPARSE_VECTOR_NAME: models.SparseVectorParams(
+                    modifier=models.Modifier.IDF,
+                )
             },
         )
 
-        for (field_name, field_schema) in self._payload_indexes():
+        for field_name, field_schema in self._payload_indexes():
             await self.client.create_payload_index(
-                collection_name = self.collection_name,
-                field_name = field_name,
-                field_schema = field_schema,
-                wait = True,
+                collection_name=self.collection_name,
+                field_name=field_name,
+                field_schema=field_schema,
+                wait=True,
             )
 
     def _embed_sparse_documents(
@@ -249,21 +244,18 @@ class BaseQdrantIndexConstructionModule(ABC):
         texts: list[str],
     ) -> list[models.SparseVector]:
         embeddings = list(
-            self.sparse_embeddings.embed(texts, batch_size = self.batch_size)
+            self.sparse_embeddings.embed(texts, batch_size=self.batch_size)
         )
 
-        return [
-            self._to_qdrant_sparse_vector(embedding)
-            for embedding in embeddings
-        ]
+        return [self._to_qdrant_sparse_vector(embedding) for embedding in embeddings]
 
     @staticmethod
     def _to_qdrant_sparse_vector(
         embedding: SparseEmbedding,
     ) -> models.SparseVector:
         return models.SparseVector(
-            indices = [int(index) for index in embedding.indices],
-            values = [float(value) for value in embedding.values],
+            indices=[int(index) for index in embedding.indices],
+            values=[float(value) for value in embedding.values],
         )
 
     def _build_point_id(
@@ -273,11 +265,7 @@ class BaseQdrantIndexConstructionModule(ABC):
         return str(
             uuid5(
                 NAMESPACE_URL,
-                (
-                    f"qdrant://"
-                    f"{self.collection_name}/"
-                    f"{business_id}"
-                ),
+                (f"qdrant://{self.collection_name}/{business_id}"),
             )
         )
 
@@ -304,9 +292,7 @@ class BaseQdrantIndexConstructionModule(ABC):
 
     def _payload_indexes(
         self,
-    ) -> list[
-        tuple[str, models.PayloadSchemaType]
-    ]:
+    ) -> list[tuple[str, models.PayloadSchemaType]]:
         return []
 
     @staticmethod
@@ -315,4 +301,4 @@ class BaseQdrantIndexConstructionModule(ABC):
         size: int,
     ) -> Iterator[list[Document]]:
         for index in range(0, len(items), size):
-            yield items[index:index + size]
+            yield items[index : index + size]

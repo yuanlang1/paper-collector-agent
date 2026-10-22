@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from datetime import date
 from typing import Any
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.llm.graph.workflows.paper_search.state import SourceQueryPlan
@@ -13,7 +14,7 @@ from app.llm.graph.workflows.paper_search_schemas import (
     SearchTagArgs,
     SourceTypeValue,
 )
-from app.llm.provider import ChatClient, ModelOptions
+from app.llm.provider import ValidatedJsonInvoker
 from app.llm.tools.search_tools.google_scholar.search_google_scholar import (
     GoogleScholarSearchArgs,
 )
@@ -101,14 +102,13 @@ def _normalize_source_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
 class PlanSearchNode:
     def __init__(
         self,
-        model: Any | None = None,
-        chat: ChatClient | None = None,
+        model: BaseChatModel,
         pagination_settings: dict[str, int] | None = None,
     ) -> None:
-        client = chat or ChatClient()
-        self.model = model or client.structured(
-            SearchPlanningArgs,
-            options=ModelOptions(temperature=0),
+        self.model: BaseChatModel = model
+        self.invoker = ValidatedJsonInvoker(
+            model=self.model,
+            schema=SearchPlanningArgs,
         )
         self.pagination_settings = pagination_settings
 
@@ -135,7 +135,7 @@ class PlanSearchNode:
             if not isinstance(original_prompt, str) or not original_prompt.strip():
                 raise ValueError("paper search intent requires a non-empty original_prompt")
 
-            result = await self.model.ainvoke(
+            result = await self.invoker.ainvoke(
                 [
                     SystemMessage(content=PLAN_SEARCH_SYSTEM_PROMPT),
                     HumanMessage(content=original_prompt.strip()),

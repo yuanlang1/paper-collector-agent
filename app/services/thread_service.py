@@ -37,7 +37,7 @@ async def get_threads(
 
 async def create_thread(db, user_id: int, message: str | None = None) -> ThreadInfo:
     thread_id = uuid4().hex
-    topic = message
+    topic = message[:40]
 
     async with db.begin():
         thread = await agent_thread.create(
@@ -53,12 +53,16 @@ async def create_thread(db, user_id: int, message: str | None = None) -> ThreadI
 
 async def get_history(db, *, user_id: int, thread_id: str, checkpointer):
     async with db.begin():
-        thread = await agent_thread.get_by_thread_id(db, user_id=user_id, thread_id=thread_id)
+        thread = await agent_thread.get_by_thread_id(
+            db, user_id=user_id, thread_id=thread_id
+        )
         if thread is None:
             raise NotFoundException("会话不存在")
-    checkpoint = await checkpointer.aget_tuple({
-        "configurable": {"thread_id": thread_id, "checkpoint_ns": ""},
-    })
+    checkpoint = await checkpointer.aget_tuple(
+        {
+            "configurable": {"thread_id": thread_id, "checkpoint_ns": ""},
+        }
+    )
     return checkpoint.checkpoint["channel_values"] if checkpoint is not None else []
 
 

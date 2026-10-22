@@ -5,12 +5,13 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.paper_search_schemas import PromptUnderstandingArgs
-from app.llm.provider import ChatClient, ModelOptions
+from app.llm.provider import ValidatedJsonInvoker
 
 
 RECOMMENDATION_SYSTEM_PROMPT = """
@@ -64,14 +65,14 @@ class RecommendationNode:
     def __init__(
         self,
         artifact_store: LocalArtifactStore | None = None,
-        model: Any | None = None,
-        chat: ChatClient | None = None,
+        *,
+        model: BaseChatModel,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        client = chat or ChatClient()
-        self.model = model or client.structured(
-            PaperRecommendationResult,
-            options=ModelOptions(temperature=0),
+        self.model: BaseChatModel = model
+        self.invoker = ValidatedJsonInvoker(
+            model=self.model,
+            schema=PaperRecommendationResult,
         )
 
     async def _recommend_one(
@@ -99,7 +100,7 @@ class RecommendationNode:
             "venue": paper.get("venue_resolution"),
         }
 
-        result = await self.model.ainvoke(
+        result = await self.invoker.ainvoke(
             [
                 SystemMessage(
                     content=RECOMMENDATION_SYSTEM_PROMPT,
