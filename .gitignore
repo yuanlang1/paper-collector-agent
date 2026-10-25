@@ -30,6 +30,8 @@ AGENTS.md
 compose.*
 .python-version
 .dockerignore
+.gitattributes
+Dockerfile.*
 
 # OS
 .DS_Store
