@@ -10,7 +10,7 @@ from langgraph.runtime import Runtime
 
 from app.bus.events import SubagentProgressEvent
 from app.config import settings
-from app.infrastructure.grpc.task_service_grpc_client import TaskState
+from app.infrastructure.paper_service.types import TaskState
 from app.llm.graph.workflows.task_indexing.nodes.common import (
     failure,
     status_update,

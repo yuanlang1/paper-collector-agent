@@ -70,7 +70,6 @@ app = [
     "googleapis-common-protos==1.75.1",
     "greenlet==3.5.4",
     "grpcio==1.83.0",
-    "grpcio-tools==1.83.0",
     "h11==0.16.0",
     "h2==4.4.1",
     "hf-xet==1.6.0",

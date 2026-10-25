@@ -3,11 +3,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from app.infrastructure.grpc.task_service_grpc_client import (
-    TaskServiceGrpcClient,
-    TaskState,
-    task_service_grpc_client,
+from app.infrastructure.paper_service.task_client import (
+    TaskServiceClient,
+    task_service_client,
 )
+from app.infrastructure.paper_service.types import TaskState
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.tools.task_tools.search_task.search_task_create import AddQueryTaskArgs
 
@@ -23,10 +23,10 @@ def _is_valid_task_id(value: Any) -> bool:
 class CreatePaperSearchTaskNode:
     def __init__(
         self,
-        client: TaskServiceGrpcClient | None = None,
+        client: TaskServiceClient | None = None,
         artifact_store: LocalArtifactStore | None = None,
     ) -> None:
-        self.client = client or task_service_grpc_client
+        self.client = client or task_service_client
         self.artifact_store = artifact_store or LocalArtifactStore()
 
     async def _bind_recommendation_manifest(
@@ -130,7 +130,7 @@ class CreatePaperSearchTaskNode:
                 "stage": "failed",
                 "status": "failed",
                 "create_task_payload": payload,
-                "error": "task-service gRPC 创建搜索任务失败",
+                "error": "task-service HTTP 创建搜索任务失败",
             }
 
         return {"create_task_payload": payload, "paper_service_task_id": task_id}

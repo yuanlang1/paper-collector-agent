@@ -2,8 +2,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.infrastructure.grpc.task_service_grpc_client import (
-    task_service_grpc_client,
+from app.infrastructure.paper_service.task_client import (
+    task_service_client,
 )
 from app.llm.graph.workflows.paper_search_schemas import (
     NonBlankString,
@@ -33,7 +33,7 @@ async def add_query_task_handler(
         exclude_none=False,
     )
 
-    result = await task_service_grpc_client.add_query_task(payload)
+    result = await task_service_client.add_query_task(payload)
     if not result.get("ok"):
         raise ToolException(str(result.get("error") or "创建检索任务失败。"))
     return result

@@ -42,14 +42,11 @@ class Settings(BaseSettings):
     SERVICE_IP: str
     SERVICE_PORT: int
 
-    AGENT_GRPC_HOST: str = "0.0.0.0"
-    AGENT_GRPC_PORT: int = 50052
-    AGENT_GRPC_MAX_MESSAGE_LENGTH: int = 16 * 1024 * 1024
-
-    # paper-service-rpc
-    PAPER_SERVICE_GRPC_NAME: str
-    PAPER_SERVICE_GRPC_TIMEOUT_SECONDS: float
-    PAPER_SERVICE_GRPC_MAX_RECEIVE_MESSAGE_LENGTH: int
+    # paper-service internal HTTP API; an empty URL uses Nacos discovery.
+    PAPER_SERVICE_NAME: str = "paper-service"
+    PAPER_SERVICE_BASE_URL: str = ""
+    PAPER_SERVICE_CONNECT_TIMEOUT_SECONDS: float = Field(default=5.0, gt=0)
+    PAPER_SERVICE_TIMEOUT_SECONDS: float = Field(default=10.0, gt=0)
 
     SERPAPI_SEARCH_URL: str
     SERPAPI_API_KEY: str

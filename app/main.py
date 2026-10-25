@@ -4,12 +4,11 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from fastapi import FastAPI
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-from app.api import run_router, setting_router, thread_router
+from app.api import internal_settings_router, run_router, setting_router, thread_router
 from app.common.exceptions import register_exception_handlers
 from app.config import settings
 from app.database import Base, create_database
-from app.grpc.server import InternalGrpcServer
-from app.infrastructure.grpc.grpc_channel_pool import paper_service_grpc_channel_pool
+from app.infrastructure.paper_service.http_client import paper_service_http_client
 from app.infrastructure.nacos_registry import nacos_registry
 from app.memory.store import open_memory_store
 from app.rag.index_construction.base import close_index_resources
@@ -46,13 +45,10 @@ async def lifespan(app: FastAPI):
             await connection.run_sync(Base.metadata.create_all)
 
         resources.push_async_callback(close_index_resources)
-        resources.push_async_callback(paper_service_grpc_channel_pool.close)
-        resources.push_async_callback(close_task_rag_batch_runner)
-
-        grpc_server = InternalGrpcServer(session_factory)
-        resources.push_async_callback(grpc_server.stop)
-        await grpc_server.start()
+        await paper_service_http_client.start()
+        resources.push_async_callback(paper_service_http_client.close)
         resources.push_async_callback(nacos_registry.stop)
+        resources.push_async_callback(close_task_rag_batch_runner)
         await nacos_registry.start()
         yield
 
@@ -68,6 +64,7 @@ register_exception_handlers(app)
 app.include_router(run_router)
 app.include_router(thread_router)
 app.include_router(setting_router)
+app.include_router(internal_settings_router)
 
 
 @app.get("/")

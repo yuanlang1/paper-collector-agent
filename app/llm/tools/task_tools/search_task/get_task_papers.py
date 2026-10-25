@@ -4,8 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
-from app.infrastructure.grpc.paper_service_grpc_client import (
-    paper_service_grpc_client,
+from app.infrastructure.paper_service.paper_client import (
+    paper_service_client,
 )
 from langchain_core.tools import ToolException, tool
 
@@ -24,7 +24,7 @@ async def get_task_papers_handler(
 ) -> dict[str, Any]:
     del context
     request = GetTaskPapersArgs.model_validate(params)
-    result = await paper_service_grpc_client.get_task_review_papers(
+    result = await paper_service_client.get_task_review_papers(
         request.task_id
     )
     if not result.get("ok"):

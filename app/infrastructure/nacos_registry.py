@@ -57,7 +57,6 @@ class NacosRegistry:
                     "framework": "fastapi",
                     "version": settings.APP_VERSION,
                     "health": "/health",
-                    "grpc_port": str(settings.AGENT_GRPC_PORT),
                 },
                 enabled=True,
                 healthy=True,

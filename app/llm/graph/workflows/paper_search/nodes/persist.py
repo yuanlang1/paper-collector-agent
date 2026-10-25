@@ -4,14 +4,14 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from app.config import settings
-from app.infrastructure.grpc.paper_service_grpc_client import (
-    paper_service_grpc_client,
+from app.infrastructure.paper_service.paper_client import (
+    paper_service_client,
 )
-from app.infrastructure.grpc.task_service_grpc_client import (
-    task_service_grpc_client,
+from app.infrastructure.paper_service.task_client import (
+    task_service_client,
 )
-from app.infrastructure.grpc.venue_service_grpc_client import (
-    venue_service_grpc_client,
+from app.infrastructure.paper_service.venue_client import (
+    venue_service_client,
 )
 from app.infrastructure.oss import normalize_pdf_sha256
 from app.llm.artifacts.store import LocalArtifactStore
@@ -60,14 +60,14 @@ class PersistRecommendedPapersNode:
         self.artifact_store = artifact_store or LocalArtifactStore()
         cache_dir = self.artifact_store.base_dir.parent
         self.save_venues = (
-            save_venues or venue_service_grpc_client.batch_save_venues
+            save_venues or venue_service_client.batch_save_venues
         )
         self.save_papers = (
-            save_papers or paper_service_grpc_client.batch_save_papers
+            save_papers or paper_service_client.batch_save_papers
         )
         self.save_task_papers = (
             save_task_papers
-            or task_service_grpc_client.batch_save_task_paper_relations
+            or task_service_client.batch_save_task_paper_relations
         )
         self.venue_cache_store = venue_cache_store or VenueCacheStore(
             cache_dir / "venue_cache.json"

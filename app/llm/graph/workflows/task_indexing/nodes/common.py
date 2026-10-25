@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from app.infrastructure.grpc.task_service_grpc_client import TaskState
+from app.infrastructure.paper_service.types import TaskState
 from app.rag.processing.task_rag_status import rag_progress_percent, task_status_value
 
 

@@ -2,9 +2,9 @@ from collections import Counter
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-from app.infrastructure.grpc.paper_service_grpc_client import (
-    PaperServiceGrpcClient,
-    paper_service_grpc_client,
+from app.infrastructure.paper_service.paper_client import (
+    PaperServiceClient,
+    paper_service_client,
 )
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
@@ -32,10 +32,10 @@ class TaskReviewCorpus(BaseModel):
 class LoadTaskCorpusNode:
     def __init__(
         self,
-        client: PaperServiceGrpcClient | None = None,
+        client: PaperServiceClient | None = None,
         artifact_store: LocalArtifactStore | None = None,
     ) -> None:
-        self.client = client or paper_service_grpc_client
+        self.client = client or paper_service_client
         self.store = artifact_store or LocalArtifactStore()
 
     async def __call__(

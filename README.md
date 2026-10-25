@@ -159,25 +159,28 @@ docker compose -f compose.memory.yml logs --tail 100 postgres redis
 docker compose -f compose.memory.yml down
 ```
 
-## 内部 gRPC 接口
+## 内部 HTTP 接口
 
-HTTP 提供根路径 `/`、健康检查 `/health`、Agent SSE 与历史接口、thread 操作和 run 查询。主服务负责用户鉴权和权限判断；内部配置接口仍通过 gRPC 调用。Swagger、ReDoc 和 OpenAPI 均已关闭。
+HTTP 提供根路径 `/`、健康检查 `/health`、Agent SSE 与历史接口、thread 操作和 run 查询。主服务负责用户鉴权和权限判断。内部检索数量配置使用 `GET /internal/settings/source-limits` 和 `PUT /internal/settings/source-limits`；更新请求为 `{"arxiv": 20, "dblp": 20, "google_scholar": 20}`，返回 `ServiceResponse`，其中 `data` 包含 `limits`、`page_sizes` 和 `maximum_limits`。Swagger、ReDoc 和 OpenAPI 均已关闭。
 
-默认监听 `0.0.0.0:50052`，可通过 `.env` 配置以下值：
+Agent 仅监听原 HTTP 端口，并以 `SERVICE_NAME` 在 Nacos 注册。主服务通过实例 IP 和 HTTP 端口调用内部配置接口；网关不得对外转发 `/internal/**`，需通过网络策略限制内部接口只允许可信服务访问。旧配置调用方需同步切换到 HTTP，不再提供业务 gRPC 服务。
+
+访问 Java paper-service 时复用 `httpx.AsyncClient`，调用 `/internal/**` 接口。`.env` 配置如下：
 
 ```dotenv
-AGENT_GRPC_HOST=0.0.0.0
-AGENT_GRPC_PORT=50052
-AGENT_GRPC_MAX_MESSAGE_LENGTH=16777216
+PAPER_SERVICE_NAME=paper-service
+PAPER_SERVICE_BASE_URL=
+PAPER_SERVICE_CONNECT_TIMEOUT_SECONDS=5.0
+PAPER_SERVICE_TIMEOUT_SECONDS=10.0
 ```
 
-服务以 `SERVICE_NAME` 注册一次；注册 metadata 中的 `grpc_port` 表示内部 gRPC 端口。主服务发现 `paper-collector-agent` 实例后，使用实例 IP 和该 metadata 端口建立 gRPC 连接。必须通过网络策略限制该端口只允许主服务访问。
+`PAPER_SERVICE_BASE_URL` 留空时，从 Nacos 发现 `paper-service` 的 HTTP 实例；也可指定实际地址（如 `http://127.0.0.1:8080`）直连。客户端同时检查 HTTP 状态和响应体的 `success`、`code`，写操作不自动重试。Nacos 与 Qdrant SDK 及其底层依赖继续保留。
 
 协议位于 [app/protos/agent/v1/agent.proto](app/protos/agent/v1/agent.proto)。当前只注册 `SettingsService.GetSourceLimits` 和 `UpdateSourceLimits`。旧主 Agent 图、会话历史和 LLM 配置档案的运行入口已停用；保留协议定义，相关 RPC 返回 `UNIMPLEMENTED`。论文检索、RAG 索引和综述生成的业务工作流仍保留，等待新主架构接入。
 
 ## 数据库生命周期
 
-数据库引擎和异步会话工厂由 FastAPI `lifespan` 调用 `create_database()` 创建，关闭时释放连接池。会话工厂使用 `async_sessionmaker(bind=engine, expire_on_commit=False)`。HTTP 从 `app.state.session_factory` 取得工厂，gRPC 通过构造参数接收工厂；每次操作创建独立 `AsyncSession`。Celery Worker 创建自己的 AsyncEngine 和会话工厂，与 Web 服务分开管理。
+数据库引擎和异步会话工厂由 FastAPI `lifespan` 调用 `create_database()` 创建，关闭时释放连接池。会话工厂使用 `async_sessionmaker(bind=engine, expire_on_commit=False)`。HTTP 从 `app.state.session_factory` 取得工厂；每次操作创建独立 `AsyncSession`。Celery Worker 创建自己的 AsyncEngine 和会话工厂，与 Web 服务分开管理。
 
 `app/database.py` 统一定义 ORM 基类、数据库引擎工厂和异步会话依赖；`app/core/database.py`、`app/db/session.py` 复用同一工厂。`app/db/models/` 按表定义模型，`app/db/repositories/` 使用 `AsyncSession` 执行原生 SQL。业务服务负责校验和事务，仓储不自行 commit。
 

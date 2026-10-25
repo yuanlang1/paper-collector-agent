@@ -4,7 +4,7 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
-from app.infrastructure.grpc.paper_service_grpc_client import PaperServiceGrpcClient
+from app.infrastructure.paper_service.paper_client import PaperServiceClient
 from app.llm.graph.workflows.review_generate.nodes.assemble_review import AssembleReviewNode
 from app.llm.graph.workflows.review_generate.nodes.finalizing_handoff import FinalizingHandoffNode
 from app.llm.graph.workflows.review_generate.nodes.finalize import finalize_task_review_node
@@ -105,7 +105,7 @@ def _route_after_writing_review(state: TaskReviewWorkflowState,) -> str:
 
 def build_task_review_workflow(
     *,
-    paper_client: PaperServiceGrpcClient | None = None,
+    paper_client: PaperServiceClient | None = None,
     chat: ChatClient | None = None,
     checkpointer: Any | None = None,
     node_overrides: dict[str, object] | None = None,

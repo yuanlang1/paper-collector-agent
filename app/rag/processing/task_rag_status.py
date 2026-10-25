@@ -4,10 +4,10 @@ from collections.abc import Awaitable, Callable
 from time import monotonic
 from typing import Any
 
-from app.infrastructure.grpc.paper_service_grpc_client import (
-    paper_service_grpc_client,
+from app.infrastructure.paper_service.paper_client import (
+    paper_service_client,
 )
-from app.infrastructure.grpc.task_service_grpc_client import TaskState
+from app.infrastructure.paper_service.types import TaskState
 
 
 StatusListener = Callable[[dict[str, Any]], Awaitable[None]]
@@ -51,7 +51,7 @@ def rag_progress_percent(summary: dict[str, int]) -> int:
 
 
 async def get_task_rag_status(task_id: int) -> dict[str, Any]:
-    response = await paper_service_grpc_client.get_task_review_papers(task_id)
+    response = await paper_service_client.get_task_review_papers(task_id)
     if not response["ok"]:
         return response
 

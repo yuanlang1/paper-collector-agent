@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from app.infrastructure.grpc.review_service_grpc_client import (
-    ReviewServiceGrpcClient,
-    review_service_grpc_client,
+from app.infrastructure.paper_service.review_client import (
+    ReviewServiceClient,
+    review_service_client,
 )
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
@@ -16,10 +16,10 @@ class PersistReviewNode:
         self,
         *,
         artifact_store: LocalArtifactStore | None = None,
-        client: ReviewServiceGrpcClient | None = None,
+        client: ReviewServiceClient | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.client = client or review_service_grpc_client
+        self.client = client or review_service_client
 
     async def __call__(
         self,

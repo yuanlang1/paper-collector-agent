@@ -10,8 +10,8 @@ from typing import Any, Literal
 import uuid
 
 from app.config import settings
-from app.infrastructure.grpc.rag_grpc_client import RagGrpcClient, rag_grpc_client
-from app.infrastructure.grpc.task_service_grpc_client import TaskState
+from app.infrastructure.paper_service.rag_client import RagClient, rag_client
+from app.infrastructure.paper_service.types import TaskState
 from app.infrastructure.mineru.mineru_client import MinerUClient
 from app.rag.data_preparation.data_preparation import DataPreparationModule
 from app.rag.file_parser.file_parser import FileParser
@@ -154,14 +154,14 @@ class TaskRagBatchRunner:
         *,
         processor: PaperRagProcessor | None = None,
         processor_factory: Callable[[], PaperRagProcessor] | None = None,
-        client: RagGrpcClient | None = None,
+        client: RagClient | None = None,
     ) -> None:
         if processor is None and processor_factory is None:
             raise ValueError("processor or processor_factory is required")
 
         self.processor = processor
         self.processor_factory = processor_factory
-        self.client = client or rag_grpc_client
+        self.client = client or rag_client
         self._runs: dict[int, _TaskRagRun] = {}
         self._runs_lock = asyncio.Lock()
 
@@ -805,5 +805,11 @@ async def close_task_rag_batch_runner() -> None:
     runner = _default_task_rag_batch_runner
     _default_task_rag_batch_runner = None
 
-    if runner is not None and runner.processor is not None:
-        await runner.processor.file_parser.mineru_client.close()
+    if runner is not None:
+        async with runner._runs_lock:
+            tasks = [run.task for run in runner._runs.values() if run.task is not None]
+            for task in tasks:
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        if runner.processor is not None:
+            await runner.processor.file_parser.mineru_client.close()
