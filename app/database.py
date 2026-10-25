@@ -9,19 +9,23 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import declarative_base
+from sqlalchemy.pool import Pool
 
 from app.config import settings
 
 Base = declarative_base()
 
 
-def create_database() -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
+def create_database(
+    *, poolclass: type[Pool] | None = None,
+) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     url = make_url(settings.DATABASE_POSTGRES_URL).set(drivername="postgresql+psycopg")
     engine = create_async_engine(
         url,
         pool_pre_ping=True,
         pool_recycle=3600,
         echo=settings.SQL_ECHO,
+        **({"poolclass": poolclass} if poolclass is not None else {}),
     )
     session_factory = async_sessionmaker(
         bind=engine,

@@ -58,6 +58,9 @@ tests/*
 !tests/test_async_database.py
 !tests/test_postgres_models.py
 !tests/test_memory_jobs.py
+!tests/test_memory_tasks.py
+!tests/test_celery_runtime.py
+!tests/test_small_llm_config.py
 !tests/test_agent_runs.py
 !tests/test_agent_context.py
 !tests/test_agent_compact.py

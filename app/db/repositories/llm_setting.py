@@ -1,7 +1,23 @@
-from sqlalchemy import select
+from dataclasses import dataclass
+from datetime import datetime
+
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import LlmSetting
+
+@dataclass(frozen=True)
+class LlmSettingRow:
+    id: int
+    user_id: int
+    provider: str
+    base_url: str
+    model: str
+    api_key: str
+    is_small_model: bool
+    creator_id: int
+    creation_time: datetime
+    modifier_id: int
+    modification_time: datetime
 
 
 async def create(
@@ -13,18 +29,25 @@ async def create(
     model: str,
     api_key: str,
     is_small_model: bool = False,
-) -> LlmSetting:
-    setting = LlmSetting(
-        user_id=user_id,
-        provider=provider,
-        base_url=base_url,
-        model=model,
-        api_key=api_key,
-        is_small_model=is_small_model,
+) -> LlmSettingRow:
+    result = await db.execute(
+        text("""
+            INSERT INTO llm_setting
+                (user_id, provider, base_url, model, api_key, is_small_model)
+            VALUES
+                (:user_id, :provider, :base_url, :model, :api_key, :is_small_model)
+            RETURNING *
+        """),
+        {
+            "user_id": user_id,
+            "provider": provider,
+            "base_url": base_url,
+            "model": model,
+            "api_key": api_key,
+            "is_small_model": is_small_model,
+        },
     )
-    db.add(setting)
-    await db.flush()
-    return setting
+    return LlmSettingRow(**result.mappings().one())
 
 
 async def get_by_id(
@@ -32,13 +55,34 @@ async def get_by_id(
     model_id: int,
     *,
     user_id: int,
-) -> LlmSetting | None:
-    return await db.scalar(
-        select(LlmSetting).where(
-            LlmSetting.id == model_id,
-            LlmSetting.user_id == user_id,
-        )
+) -> LlmSettingRow | None:
+    result = await db.execute(
+        text("""
+            SELECT *
+            FROM llm_setting
+            WHERE id = :model_id
+              AND user_id = :user_id
+        """),
+        {"model_id": model_id, "user_id": user_id},
     )
+    row = result.mappings().first()
+    return LlmSettingRow(**row) if row is not None else None
+
+
+async def get_small_model(db: AsyncSession, *, user_id: int) -> LlmSettingRow | None:
+    result = await db.execute(
+        text("""
+            SELECT *
+            FROM llm_setting
+            WHERE user_id = :user_id
+              AND is_small_model = TRUE
+            ORDER BY id DESC
+            LIMIT 1
+        """),
+        {"user_id": user_id},
+    )
+    row = result.mappings().first()
+    return LlmSettingRow(**row) if row is not None else None
 
 
 async def list_settings(
@@ -48,15 +92,26 @@ async def list_settings(
     is_small_model: bool | None = None,
     limit: int = 50,
     offset: int = 0,
-) -> list[LlmSetting]:
-    statement = select(LlmSetting).where(LlmSetting.user_id == user_id)
-    if is_small_model is not None:
-        statement = statement.where(LlmSetting.is_small_model == is_small_model)
-    return list(
-        await db.scalars(
-            statement.order_by(LlmSetting.id.desc()).limit(limit).offset(offset)
-        )
+) -> list[LlmSettingRow]:
+    small_filter = "" if is_small_model is None else "AND is_small_model = :is_small_model"
+    result = await db.execute(
+        text(f"""
+            SELECT *
+            FROM llm_setting
+            WHERE user_id = :user_id
+              {small_filter}
+            ORDER BY id DESC
+            LIMIT :limit
+            OFFSET :offset
+        """),
+        {
+            "user_id": user_id,
+            "is_small_model": is_small_model,
+            "limit": limit,
+            "offset": offset,
+        },
     )
+    return [LlmSettingRow(**row) for row in result.mappings()]
 
 
 async def update(
@@ -69,23 +124,60 @@ async def update(
     model: str,
     api_key: str,
     is_small_model: bool,
-) -> LlmSetting:
-    setting = await get_by_id(db, model_id, user_id=user_id)
+) -> LlmSettingRow:
+    result = await db.execute(
+        text("""
+            UPDATE llm_setting
+            SET provider = :provider,
+                base_url = :base_url,
+                model = :model,
+                api_key = :api_key,
+                is_small_model = :is_small_model,
+                modification_time = CASE
+                    WHEN (
+                        provider,
+                        base_url,
+                        model,
+                        api_key,
+                        is_small_model
+                    ) IS DISTINCT FROM (
+                        CAST(:provider AS VARCHAR),
+                        CAST(:base_url AS VARCHAR),
+                        CAST(:model AS VARCHAR),
+                        CAST(:api_key AS TEXT),
+                        CAST(:is_small_model AS BOOLEAN)
+                    )
+                    THEN now()
+                    ELSE modification_time
+                END
+            WHERE id = :model_id
+              AND user_id = :user_id
+            RETURNING *
+        """),
+        {
+            "model_id": model_id,
+            "user_id": user_id,
+            "provider": provider,
+            "base_url": base_url,
+            "model": model,
+            "api_key": api_key,
+            "is_small_model": is_small_model,
+        },
+    )
+    setting = result.mappings().first()
     if setting is None:
         raise ValueError("LLM setting not found")
-    setting.provider = provider
-    setting.base_url = base_url
-    setting.model = model
-    setting.api_key = api_key
-    setting.is_small_model = is_small_model
-    await db.flush()
-    return setting
+    return LlmSettingRow(**setting)
 
 
 async def delete(db: AsyncSession, model_id: int, *, user_id: int) -> bool:
-    setting = await get_by_id(db, model_id, user_id=user_id)
-    if setting is None:
-        return False
-    await db.delete(setting)
-    await db.flush()
-    return True
+    result = await db.execute(
+        text("""
+            DELETE FROM llm_setting
+            WHERE id = :model_id
+              AND user_id = :user_id
+            RETURNING id
+        """),
+        {"model_id": model_id, "user_id": user_id},
+    )
+    return result.scalar_one_or_none() is not None

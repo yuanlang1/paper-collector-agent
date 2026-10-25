@@ -12,7 +12,7 @@ from app.llm.tools.web_tools.search_web import search_web_tool
 from app.services import llm_setting_service
 
 
-def build_tools(db: AsyncSession, user_id: int, *, model: BaseChatModel) -> ToolRegistry:
+def build_tools(db: AsyncSession | None, user_id: int, *, model: BaseChatModel) -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(build_paper_search_tool(model=model), "论文检索子代理")
     registry.register(task_indexing_agent, "索引子代理")

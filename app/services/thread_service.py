@@ -24,6 +24,7 @@ async def get_threads(
             limit=limit,
             offset=offset,
         )
+
         return [
             ThreadInfo(
                 thread_id=thread.thread_id,
@@ -37,12 +38,13 @@ async def get_threads(
 
 async def create_thread(db, user_id: int, message: str | None = None) -> ThreadInfo:
     thread_id = uuid4().hex
-    topic = message[:40]
+    topic = message[:40] if message is not None else None
 
     async with db.begin():
         thread = await agent_thread.create(
-            db, user_id=user_id, thread_id=thread_id, topic=message
+            db, user_id=user_id, thread_id=thread_id, topic=topic
         )
+
         return ThreadInfo(
             thread_id=thread_id,
             topic=topic,
@@ -54,15 +56,19 @@ async def create_thread(db, user_id: int, message: str | None = None) -> ThreadI
 async def get_history(db, *, user_id: int, thread_id: str, checkpointer):
     async with db.begin():
         thread = await agent_thread.get_by_thread_id(
-            db, user_id=user_id, thread_id=thread_id
+            db,
+            user_id=user_id,
+            thread_id=thread_id,
         )
         if thread is None:
             raise NotFoundException("会话不存在")
+
     checkpoint = await checkpointer.aget_tuple(
         {
             "configurable": {"thread_id": thread_id, "checkpoint_ns": ""},
         }
     )
+
     return checkpoint.checkpoint["channel_values"] if checkpoint is not None else []
 
 
@@ -74,6 +80,7 @@ async def delete_thread(db, user_id: int, thread_id: str) -> None:
             thread_id=thread_id,
             for_update=True,
         )
+
         if thread is None:
             raise NotFoundException("会话不存在")
 

@@ -1,10 +1,11 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 
 from app.db.models import AgentRun, AgentThread, MemoryJob, MemoryJobKind, MemoryJobStatus
 from app.db.repositories import memory_job
+from app.db.repositories.memory_job import MemoryJobRow
 from tests.test_postgres_models import PostgresDatabaseTestCase
 
 
@@ -46,7 +47,9 @@ class MemoryJobTests(PostgresDatabaseTestCase):
         async with self.factory() as db:
             jobs = await self.create_run_jobs(db)
             self.assertTrue(db.in_transaction())
+            self.assertIsInstance(jobs[0], MemoryJobRow)
             self.assertEqual({j.kind for j in jobs}, {"userprofile", "fact"})
+            self.assertEqual(await memory_job.list_dispatchable(db), jobs)
             again = await memory_job.create_run_jobs(
                 db, user_id=11, thread_id="thread", run_id="run",
                 checkpoint_id="later-checkpoint", end_id="later-answer",
@@ -56,6 +59,15 @@ class MemoryJobTests(PostgresDatabaseTestCase):
             await db.rollback()
         async with self.factory() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(MemoryJob)), 0)
+
+    async def test_concurrent_creation_returns_the_same_two_jobs(self):
+        async def create():
+            async with self.factory.begin() as db:
+                return await self.create_run_jobs(db)
+
+        first, second = await asyncio.gather(create(), create())
+        self.assertEqual(len(first), 2)
+        self.assertEqual([job.job_id for job in first], [job.job_id for job in second])
 
     async def test_creation_requires_an_owned_completed_run(self):
         async with self.factory.begin() as db:
@@ -67,9 +79,27 @@ class MemoryJobTests(PostgresDatabaseTestCase):
                     await memory_job.create_run_jobs(
                         db, **fields, checkpoint_id="checkpoint", end_id="answer",
                     )
+                with self.subTest(kind="episode", fields=fields), self.assertRaisesRegex(ValueError, "Completed run"):
+                    await memory_job.create_episode_job(
+                        db, **fields, checkpoint_id="checkpoint", end_id="answer",
+                        source_thread_update_time=self.thread_update_time,
+                    )
             await db.execute(update(AgentRun).values(status="running"))
             with self.assertRaisesRegex(ValueError, "Completed run"):
                 await self.create_run_jobs(db)
+            with self.assertRaisesRegex(ValueError, "Completed run"):
+                await self.create_episode(db)
+
+    async def test_run_owner_must_also_own_thread_even_when_jobs_already_exist(self):
+        async with self.factory.begin() as db:
+            await self.create_run_jobs(db)
+            await self.create_episode(db)
+            await db.execute(update(AgentThread).values(user_id=22))
+            with self.assertRaisesRegex(ValueError, "Completed run"):
+                await self.create_run_jobs(db)
+            with self.assertRaisesRegex(ValueError, "Completed run"):
+                await self.create_episode(db)
+            self.assertEqual(await db.scalar(select(func.count()).select_from(MemoryJob)), 3)
 
     async def test_only_one_worker_can_claim_and_finish_a_job(self):
         async with self.factory.begin() as db:
@@ -137,6 +167,37 @@ class MemoryJobTests(PostgresDatabaseTestCase):
             await self.expire(db, job_id)
             failed = (await memory_job.recover_expired_jobs(db, max_attempts=2))[0]
             self.assertEqual(failed.status, MemoryJobStatus.FAILED)
+
+    async def test_expired_recovery_skips_jobs_locked_by_another_worker(self):
+        async with self.factory.begin() as db:
+            jobs = await self.create_run_jobs(db)
+            job_ids = [job.job_id for job in jobs]
+            for job_id in job_ids:
+                await memory_job.claim(db, job_id=job_id, lease_seconds=60)
+                await self.expire(db, job_id)
+
+        async with self.factory.begin() as locked_db:
+            await locked_db.execute(text(
+                "SELECT id FROM memory_job WHERE job_id = :job_id FOR UPDATE"
+            ), {"job_id": job_ids[0]})
+            async with self.factory.begin() as other_db:
+                recovered = await memory_job.recover_expired_jobs(other_db, max_attempts=2)
+                self.assertEqual([job.job_id for job in recovered], [job_ids[1]])
+
+        async with self.factory.begin() as db:
+            recovered = await memory_job.recover_expired_jobs(db, max_attempts=2)
+            self.assertEqual([job.job_id for job in recovered], [job_ids[0]])
+
+    async def test_job_update_explicitly_maintains_modification_time(self):
+        old_time = datetime(2000, 1, 1, tzinfo=UTC)
+        async with self.factory.begin() as db:
+            job = (await self.create_run_jobs(db))[0]
+            await db.execute(text(
+                "UPDATE memory_job SET modification_time = :old_time WHERE job_id = :job_id"
+            ), {"old_time": old_time, "job_id": job.job_id})
+            claimed = await memory_job.claim(db, job_id=job.job_id, lease_seconds=60)
+            self.assertGreater(claimed.modification_time, old_time)
+            self.assertEqual(await db.scalar(select(AgentThread.modification_time)), self.thread_update_time)
 
     async def test_episode_deduplication_cursor_and_thread_time(self):
         async with self.factory.begin() as db:

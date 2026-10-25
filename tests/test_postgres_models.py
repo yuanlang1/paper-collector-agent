@@ -6,8 +6,10 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from sqlalchemy import BigInteger, inspect
+from sqlalchemy.engine import make_url
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateIndex, CreateSchema, CreateTable, DropSchema
+from sqlalchemy.pool import NullPool
 
 from app.config import settings
 from app.database import Base, create_database
@@ -30,16 +32,19 @@ class PostgresDatabaseTestCase(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         if not TEST_DATABASE_URL:
             self.skipTest("set TEST_DATABASE_POSTGRES_URL to an independent PostgreSQL test database")
-        with patch.object(settings, "DATABASE_POSTGRES_URL", TEST_DATABASE_URL), patch.object(
+        schema = self.schema = "test_" + uuid4().hex
+        url = make_url(TEST_DATABASE_URL)
+        options = url.query.get("options", "") + f" -c search_path={schema}"
+        url = url.update_query_dict({"options": options.strip()})
+        with patch.object(settings, "DATABASE_POSTGRES_URL", url.render_as_string(hide_password=False)), patch.object(
             settings, "SQL_ECHO", False,
         ):
             self.engine, self.factory = create_database()
         self.addAsyncCleanup(self.engine.dispose)
-        schema = self.schema = "test_" + uuid4().hex
         async with self.engine.begin() as connection:
             await connection.execute(CreateSchema(schema))
         self.addAsyncCleanup(self.drop_schema, schema)
-        # Every connection uses only the generated test schema, never public tables.
+        # text() ignores schema_translate_map; search_path also isolates native SQL.
         self.engine.update_execution_options(schema_translate_map={None: schema})
         async with self.engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
@@ -101,13 +106,18 @@ class PostgresDriverTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await engine.dispose()
 
-    async def test_sync_factory_uses_same_postgres_url_without_connecting(self):
-        from app.core.database import create_database as create_sync_database
+    async def test_database_aliases_share_the_async_factory(self):
+        from app.core.database import create_database as core_factory
+        from app.db.session import create_database as db_factory
+
+        self.assertIs(core_factory, create_database)
+        self.assertIs(db_factory, create_database)
 
         with patch.object(settings, "DATABASE_POSTGRES_URL", "postgresql://user:password@localhost/example"):
-            engine, _ = create_sync_database()
+            engine, _ = core_factory(poolclass=NullPool)
         try:
             self.assertEqual(engine.url.drivername, "postgresql+psycopg")
-            self.assertFalse(engine.dialect.is_async)
+            self.assertTrue(engine.dialect.is_async)
+            self.assertIsInstance(engine.pool, NullPool)
         finally:
-            engine.dispose()
+            await engine.dispose()

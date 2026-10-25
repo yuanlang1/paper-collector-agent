@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import aclosing
@@ -8,11 +9,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.exceptions import AppException, ConflictException, NotFoundException
-from app.db.models import AgentRun, RunStatus
-from app.db.repositories import agent_run, agent_thread
+from app.db.models import MemoryJobKind, RunStatus
+from app.db.repositories import agent_run, agent_thread, memory_job
+from app.db.repositories.agent_run import AgentRunRow
+from app.db.repositories.memory_job import MemoryJobRow
 from app.llm import agent_build
 from app.llm.agent_runner import AgentRunner
 from app.llm.context import AgentRunContext
+from app.tasks.modules.memory.extract_fact import extract_fact
+from app.tasks.modules.memory.extract_userprofile import extract_userprofile
 
 logger = logging.getLogger(__name__)
 
@@ -23,29 +28,28 @@ async def create_run(
     user_id: int,
     thread_id: str | None,
     metadata: dict[str, Any],
-) -> AgentRun:
+) -> AgentRunRow:
     try:
         async with db.begin():
             if thread_id:
-                thread = await agent_thread.get_by_thread_id(
+                touched = await agent_thread.touch(
                     db,
                     user_id=user_id,
                     thread_id=thread_id,
-                    for_update=True,
                 )
-                if thread is None:
+                if not touched:
                     raise NotFoundException("会话不存在")
-                await agent_thread.touch(db, user_id=user_id, thread_id=thread_id)
             else:
                 thread = await agent_thread.create(
                     db,
                     user_id=user_id,
                     thread_id=uuid4().hex,
                 )
+                thread_id = thread.thread_id
             run = await agent_run.create(
                 db,
                 user_id=user_id,
-                thread_id=thread.thread_id,
+                thread_id=thread_id,
                 run_id=f"run_{uuid4().hex}",
                 metadata=metadata,
             )
@@ -56,7 +60,7 @@ async def create_run(
         raise
 
 
-async def update_status(
+async def _update_status(
     db: AsyncSession,
     *,
     user_id: int,
@@ -64,7 +68,7 @@ async def update_status(
     run_id: str,
     status: RunStatus,
     error_message: str | None = None,
-) -> AgentRun | None:
+) -> AgentRunRow | None:
     if status == RunStatus.PENDING:
         raise ValueError("Cannot transition a run back to pending")
 
@@ -74,27 +78,78 @@ async def update_status(
 
     if status == RunStatus.CANCELLED:
         expected = (RunStatus.PENDING, RunStatus.RUNNING)
+    thread = await agent_thread.get_by_thread_id(
+        db,
+        user_id=user_id,
+        thread_id=thread_id,
+        for_update=True,
+    )
+    if thread is None:
+        return None
+    run = await agent_run.update_status(
+        db,
+        user_id=user_id,
+        thread_id=thread_id,
+        run_id=run_id,
+        status=status,
+        expected_status=expected,
+        error_message=error_message,
+    )
+    if run is not None:
+        await agent_thread.touch(db, user_id=user_id, thread_id=thread_id)
+    return run
+
+
+async def update_status(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    thread_id: str,
+    run_id: str,
+    status: RunStatus,
+    error_message: str | None = None,
+) -> AgentRunRow | None:
     async with db.begin():
-        thread = await agent_thread.get_by_thread_id(
-            db,
-            user_id=user_id,
-            thread_id=thread_id,
-            for_update=True,
-        )
-        if thread is None:
-            return None
-        run = await agent_run.update_status(
+        return await _update_status(
             db,
             user_id=user_id,
             thread_id=thread_id,
             run_id=run_id,
             status=status,
-            expected_status=expected,
             error_message=error_message,
         )
-        if run is not None:
-            await agent_thread.touch(db, user_id=user_id, thread_id=thread_id)
-        return run
+
+
+async def complete_run(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    thread_id: str,
+    run_id: str,
+    checkpoint_id: str,
+    end_id: str,
+) -> tuple[AgentRunRow | None, list[MemoryJobRow]]:
+    if not checkpoint_id or not end_id:
+        raise ValueError("Completed run requires a checkpoint and end message")
+    async with db.begin():
+        run = await _update_status(
+            db,
+            user_id=user_id,
+            thread_id=thread_id,
+            run_id=run_id,
+            status=RunStatus.COMPLETED,
+        )
+        if run is None:
+            return None, []
+        jobs = await memory_job.create_run_jobs(
+            db,
+            user_id=user_id,
+            thread_id=thread_id,
+            run_id=run_id,
+            checkpoint_id=checkpoint_id,
+            end_id=end_id,
+        )
+        return run, jobs
 
 
 async def get_run(
@@ -103,7 +158,7 @@ async def get_run(
     user_id: int,
     thread_id: str,
     run_id: str,
-) -> AgentRun:
+) -> AgentRunRow:
     async with db.begin():
         run = await agent_run.get_by_run_id(
             db,
@@ -123,27 +178,24 @@ async def list_runs(
     thread_id: str,
     limit: int = 20,
     offset: int = 0,
-) -> list[AgentRun]:
+) -> list[AgentRunRow]:
     async with db.begin():
-        thread = await agent_thread.get_by_thread_id(
-            db, user_id=user_id, thread_id=thread_id
-        )
-
-        if thread is None:
-            raise NotFoundException("会话不存在")
-        return await agent_run.list_by_thread(
+        runs = await agent_run.list_by_owned_thread(
             db,
             user_id=user_id,
             thread_id=thread_id,
             limit=limit,
             offset=offset,
         )
+        if runs is None:
+            raise NotFoundException("会话不存在")
+        return runs
 
 
 async def run(
     *,
     db: AsyncSession,
-    run: AgentRun,
+    run: AgentRunRow,
     input: dict[str, Any],
     checkpointer,
     store,
@@ -213,7 +265,26 @@ async def run(
         }
         return
 
-    finished = await update_status(db, **identity, status=status)
+    if status == RunStatus.COMPLETED:
+        finished, jobs = await complete_run(
+            db,
+            **identity,
+            checkpoint_id=snapshot.config["configurable"]["checkpoint_id"],
+            end_id=snapshot.values["messages"][-1].id,
+        )
+        for job in jobs:
+            try:
+                if job.kind == MemoryJobKind.USERPROFILE:
+                    await asyncio.to_thread(extract_userprofile.delay, job.job_id)
+                elif job.kind == MemoryJobKind.FACT:
+                    await asyncio.to_thread(extract_fact.delay, job.job_id)
+            except Exception:
+                logger.warning(
+                    "Memory dispatch failed; pending job will be retried: job_id=%s",
+                    job.job_id,
+                )
+    else:
+        finished = await update_status(db, **identity, status=status)
     if finished is None:
         raise ConflictException("该请求已结束")
     interrupts = [{"id": item.id, "value": item.value} for item in snapshot.interrupts]

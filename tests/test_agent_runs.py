@@ -20,7 +20,6 @@ from psycopg.conninfo import make_conninfo
 from pydantic import ValidationError
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from starlette.requests import ClientDisconnect
 
 from app.api.run import RunStreamingResponse, router as run_router
@@ -28,13 +27,14 @@ from app.api.thread import router as thread_router
 from app.common.exceptions import ConflictException, register_exception_handlers
 from app.database import get_db
 from app.db.models import AgentRun, AgentThread, RunStatus
-from app.db.repositories import agent_run, agent_thread
+from app.db.repositories import agent_run, agent_thread, memory_job
+from app.db.repositories.agent_run import AgentRunRow
 from app.llm import agent_build
 from app.llm.agent_runner import AgentRunner
 from app.llm.context import AgentRunContext
 from app.llm.loop.agent_loop import AgentLoop
 from app.llm.tools.registry import ToolRegistry
-from app.schemas.ai import ChatRequest
+from app.schemas.ai import ChatRequest, RunInfo
 from app.services import agent_run_service, llm_setting_service, thread_service
 from app.services.llm_setting_service import LlmConfig
 from tests.test_postgres_models import PostgresDatabaseTestCase, TEST_DATABASE_URL
@@ -138,6 +138,12 @@ class RunStreamInputTests(unittest.IsolatedAsyncioTestCase):
         ) as create_run, patch.object(
             agent_run_service, "update_status", new=AsyncMock(return_value=run),
         ), patch.object(
+            agent_run_service, "complete_run", new=AsyncMock(return_value=(run, [])),
+        ), patch.object(
+            agent_run_service.extract_userprofile, "delay",
+        ), patch.object(
+            agent_run_service.extract_fact, "delay",
+        ), patch.object(
             agent_build, "get_model", new=AsyncMock(return_value=object()),
         ), patch.object(agent_build, "build_tools", return_value=ToolRegistry()), patch(
             "app.llm.agent_runner.AgentLoop", side_effect=build_loop,
@@ -215,12 +221,6 @@ class AgentRunTests(PostgresDatabaseTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self.enterContext(tracing_context(enabled=False))
-        # Raw checkpoint SQL and ORM statements both stay in the isolated schema.
-        engine = create_async_engine(
-            self.engine.url, connect_args={"options": f"-csearch_path={self.schema}"},
-        )
-        self.addAsyncCleanup(engine.dispose)
-        self.factory = async_sessionmaker(engine, expire_on_commit=False)
         saver_context = AsyncPostgresSaver.from_conn_string(make_conninfo(
             TEST_DATABASE_URL, options=f"-csearch_path={self.schema}",
         ))
@@ -247,6 +247,8 @@ class AgentRunTests(PostgresDatabaseTestCase):
         self.model_constructor.return_value = FakeListChatModel(responses=["hello"])
         self.tool_registry = ToolRegistry()
         self.tools_builder = self.enterContext(patch("app.llm.agent_build.build_tools", return_value=self.tool_registry))
+        self.profile_delay = self.enterContext(patch.object(agent_run_service.extract_userprofile, "delay"))
+        self.fact_delay = self.enterContext(patch.object(agent_run_service.extract_fact, "delay"))
 
     def graph_patch(self, node):
         builder = StateGraph(MessagesState, context_schema=AgentRunContext)
@@ -395,8 +397,8 @@ class AgentRunTests(PostgresDatabaseTestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn("application/json", response.headers["content-type"])
         for path in (
-            f"/api/agent/threads/{run.thread_id}/runs",
-            f"/api/agent/threads/{run.thread_id}/runs/{run.run_id}",
+            f"/api/thread/threads/{run.thread_id}/runs",
+            f"/api/thread/threads/{run.thread_id}/runs/{run.run_id}",
         ):
             response = await self.client.get(path, params={"user_id": 2})
             self.assertEqual(response.status_code, 404)
@@ -432,14 +434,34 @@ class AgentRunTests(PostgresDatabaseTestCase):
         async with self.factory() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(AgentRun)), 0)
 
+    async def test_create_thread_with_optional_message(self):
+        for fields in ({}, {"topic": None}, {"topic": ""}, {"topic": "x" * 50}):
+            with self.subTest(fields=fields):
+                response = await self.client.post("/api/thread", json={"user_id": 1, **fields})
+                self.assertEqual(response.status_code, 200)
+                created = response.json()["data"]
+                message = fields.get("topic")
+                expected = message[:40] if message is not None else None
+                self.assertEqual(created["topic"], expected)
+                async with self.factory() as db:
+                    stored = await agent_thread.get_by_thread_id(
+                        db, user_id=1, thread_id=created["thread_id"],
+                    )
+                    self.assertIsInstance(stored, agent_thread.AgentThreadRow)
+                    self.assertEqual(stored.topic, expected)
+
     async def test_concurrent_requests_and_database_constraints(self):
         async def create():
             try:
-                return await self.create_run()
+                async with self.factory() as db:
+                    return await agent_run_service.create_run(
+                        db, user_id=1, thread_id=self.thread.thread_id,
+                        metadata={"model_id": self.model_id},
+                    )
             except ConflictException as exc:
                 return exc
         results = await asyncio.gather(create(), create())
-        self.assertEqual(sum(isinstance(result, AgentRun) for result in results), 1)
+        self.assertEqual(sum(isinstance(result, AgentRunRow) for result in results), 1)
         self.assertEqual(sum(isinstance(result, ConflictException) for result in results), 1)
         async with self.factory() as db:
             with self.assertRaises(IntegrityError):
@@ -463,14 +485,117 @@ class AgentRunTests(PostgresDatabaseTestCase):
         self.assertEqual(first_events[-1]["status"], "completed")
         self.assertNotIn("interrupt", [event["type"] for event in first_events + second_events])
         self.assertNotEqual(first_id, second_id)
-        response = await self.client.get(f"/api/agent/threads/{self.thread.thread_id}/runs", params={"user_id": 1})
+        response = await self.client.get(f"/api/thread/threads/{self.thread.thread_id}/runs", params={"user_id": 1})
         self.assertEqual([row["run_id"] for row in response.json()["data"]], [second_id, first_id])
-        response = await self.client.get(f"/api/agent/threads/{self.thread.thread_id}/runs", params={"user_id": 1, "limit": 1, "offset": 1})
+        response = await self.client.get(f"/api/thread/threads/{self.thread.thread_id}/runs", params={"user_id": 1, "limit": 1, "offset": 1})
         self.assertEqual([row["run_id"] for row in response.json()["data"]], [first_id])
-        response = await self.client.get(f"/api/agent/threads/{self.thread.thread_id}/runs/{first_id}", params={"user_id": 1})
+        response = await self.client.get(f"/api/thread/threads/{self.thread.thread_id}/runs/{first_id}", params={"user_id": 1})
         self.assertEqual(response.json()["data"]["status"], "completed")
         async with self.factory() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(AgentThread)), 1)
+
+    async def test_empty_and_out_of_range_run_pages_preserve_thread_ownership(self):
+        path = f"/api/thread/threads/{self.thread.thread_id}/runs"
+        empty = await self.client.get(path, params={"user_id": 1})
+        self.assertEqual((empty.status_code, empty.json()["data"]), (200, []))
+        await self.create_run()
+        beyond = await self.client.get(path, params={"user_id": 1, "offset": 100})
+        self.assertEqual((beyond.status_code, beyond.json()["data"]), (200, []))
+        foreign = await self.client.get(path, params={"user_id": 2})
+        self.assertEqual(foreign.status_code, 404)
+        missing = await self.client.get("/api/thread/threads/missing/runs", params={"user_id": 1})
+        self.assertEqual(missing.status_code, 404)
+
+    async def test_native_run_json_binding_and_returned_row(self):
+        metadata = {
+            "model_id": self.model_id,
+            "literal": "中文 '; DELETE FROM agent_run; --",
+            "values": [True, None, {"key": "value"}],
+        }
+        async with self.factory() as db:
+            run = await agent_run_service.create_run(
+                db, user_id=1, thread_id=self.thread.thread_id, metadata=metadata,
+            )
+            self.assertIsInstance(run, AgentRunRow)
+            stored = await agent_run_service.get_run(
+                db, user_id=1, thread_id=run.thread_id, run_id=run.run_id,
+            )
+            self.assertEqual(stored.run_metadata, metadata)
+            self.assertEqual(RunInfo.model_validate(stored).metadata, metadata)
+            self.assertEqual(run.status, "pending")
+            rows = await agent_run.list_by_thread(db, user_id=1, thread_id=run.thread_id)
+            self.assertEqual(rows, [run])
+
+    async def test_native_topic_update_preserves_noop_time_and_owner(self):
+        async with self.factory.begin() as db:
+            await agent_thread.update_topic(
+                db, user_id=1, thread_id=self.thread.thread_id, topic="first",
+            )
+            old_time = await db.scalar(text("""
+                UPDATE agent_thread SET modification_time = '2000-01-01T00:00:00Z'
+                WHERE thread_id = :thread_id RETURNING modification_time
+            """), {"thread_id": self.thread.thread_id})
+        async with self.factory.begin() as db:
+            same = await agent_thread.update_topic(
+                db, user_id=1, thread_id=self.thread.thread_id, topic="first",
+            )
+            self.assertEqual(same.modification_time, old_time)
+            changed = await agent_thread.update_topic(
+                db, user_id=1, thread_id=self.thread.thread_id, topic=None,
+            )
+            self.assertIsNone(changed.topic)
+            self.assertGreater(changed.modification_time, old_time)
+            with self.assertRaisesRegex(ValueError, "not found"):
+                await agent_thread.update_topic(
+                    db, user_id=2, thread_id=self.thread.thread_id, topic="foreign",
+                )
+
+    async def test_deletion_waits_for_creator_then_sees_committed_active_run(self):
+        entering = asyncio.Event()
+        getter = agent_thread.get_by_thread_id
+        deleting_pid = None
+
+        async def observed_get(db, **kwargs):
+            nonlocal deleting_pid
+            deleting_pid = await db.scalar(text("SELECT pg_backend_pid()"))
+            entering.set()
+            return await getter(db, **kwargs)
+
+        async def delete_thread():
+            async with self.factory() as db:
+                await thread_service.delete_thread(db, user_id=1, thread_id=self.thread.thread_id)
+
+        async def wait_until_blocked():
+            async with self.factory() as db:
+                while not await db.scalar(
+                    text("SELECT cardinality(pg_blocking_pids(:pid)) > 0"),
+                    {"pid": deleting_pid},
+                ):
+                    await asyncio.sleep(0.01)
+
+        with patch.object(agent_thread, "get_by_thread_id", side_effect=observed_get):
+            async with self.factory.begin() as creator:
+                await agent_thread.touch(creator, user_id=1, thread_id=self.thread.thread_id)
+                deletion = asyncio.create_task(delete_thread())
+                self.addAsyncCleanup(self.cancel_task, deletion)
+                self.assertTrue(await asyncio.wait_for(entering.wait(), 5))
+                await asyncio.wait_for(wait_until_blocked(), 5)
+                await agent_run.create(
+                    creator, user_id=1, thread_id=self.thread.thread_id,
+                    run_id="created-while-delete-waited", metadata={},
+                )
+            with self.assertRaises(ConflictException):
+                await asyncio.wait_for(deletion, 5)
+        async with self.factory() as db:
+            self.assertIsNotNone(await agent_thread.get_by_thread_id(
+                db, user_id=1, thread_id=self.thread.thread_id,
+            ))
+
+    @staticmethod
+    async def cancel_task(task):
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
     async def test_graph_exception_is_failed_and_does_not_emit_done(self):
         def fail(state):
@@ -503,6 +628,46 @@ class AgentRunTests(PostgresDatabaseTestCase):
         self.assertEqual(output[-1]["status"], "completed")
         self.assertEqual((await self.latest_run()).run_metadata, {"model_id": self.model_id})
 
+    async def test_memory_jobs_are_committed_before_dispatch_and_pin_the_checkpoint(self):
+        loop = asyncio.get_running_loop()
+        published_kinds = []
+        async def verify(job_id):
+            async with self.factory.begin() as db:
+                job = await memory_job.get_by_job_id(db, job_id=job_id)
+                self.assertIsNotNone(job)
+                stored = await agent_run.get_by_run_id(
+                    db, user_id=1, thread_id=self.thread.thread_id, run_id=job.run_id,
+                )
+                self.assertEqual(stored.status, "completed")
+            checkpoint = await self.saver.aget_tuple({"configurable": {
+                "thread_id": job.thread_id, "checkpoint_ns": "", "checkpoint_id": job.checkpoint_id,
+            }})
+            self.assertEqual(checkpoint.checkpoint["channel_values"]["messages"][-1].id, job.end_id)
+            published_kinds.append(job.kind)
+        def published(job_id):
+            asyncio.run_coroutine_threadsafe(verify(job_id), loop).result(timeout=5)
+        self.profile_delay.side_effect = published
+        self.fact_delay.side_effect = published
+        response = await self.post()
+        self.assertEqual(events(response)[-1]["status"], "completed")
+        self.profile_delay.assert_called_once()
+        self.fact_delay.assert_called_once()
+        self.assertEqual(published_kinds, ["userprofile", "fact"])
+
+    async def test_failed_profile_publication_still_publishes_fact_and_preserves_completion(self):
+        self.profile_delay.side_effect = ConnectionError("broker unavailable")
+        with self.assertLogs("app.services.agent_run_service", level="WARNING"):
+            response = await self.post()
+        self.assertEqual(events(response)[-1]["status"], "completed")
+        self.profile_delay.assert_called_once()
+        self.fact_delay.assert_called_once()
+        async with self.factory() as db:
+            jobs = await memory_job.list_dispatchable(db)
+        self.assertEqual({job.kind for job in jobs}, {"userprofile", "fact"})
+        self.assertEqual({job.status for job in jobs}, {"pending"})
+        fact = next(job for job in jobs if job.kind == "fact")
+        self.fact_delay.assert_called_once_with(fact.job_id)
+
     async def test_metadata_is_saved_and_effort_reaches_model_constructor(self):
         for effort in ("high", None):
             with self.subTest(effort=effort):
@@ -518,7 +683,7 @@ class AgentRunTests(PostgresDatabaseTestCase):
                 stored = await self.latest_run()
                 self.assertEqual(stored.run_metadata, metadata)
                 detail = await self.client.get(
-                    f"/api/agent/threads/{stored.thread_id}/runs/{stored.run_id}", params={"user_id": 1},
+                    f"/api/thread/threads/{stored.thread_id}/runs/{stored.run_id}", params={"user_id": 1},
                 )
                 self.assertEqual(detail.json()["data"]["metadata"], metadata)
                 self.assertNotIn("input", detail.json()["data"])
@@ -576,14 +741,14 @@ class AgentRunTests(PostgresDatabaseTestCase):
 
     async def test_history_uses_checkpoint_and_checks_thread_owner(self):
         params = {"user_id": 1, "thread_id": self.thread.thread_id}
-        response = await self.client.get("/api/agent/history", params=params)
+        response = await self.client.get("/api/thread/history", params=params)
         self.assertEqual(response.json()["data"], [])
         with self.graph_patch(lambda state: {"messages": [AIMessage(content="checkpoint reply")]}):
             await self.post()
-        response = await self.client.get("/api/agent/history", params=params)
+        response = await self.client.get("/api/thread/history", params=params)
         self.assertEqual(response.status_code, 200)
         self.assertEqual([message["content"] for message in response.json()["data"]["messages"]], ["hi", "checkpoint reply"])
-        response = await self.client.get("/api/agent/history", params=params | {"user_id": 2})
+        response = await self.client.get("/api/thread/history", params=params | {"user_id": 2})
         self.assertEqual(response.status_code, 404)
 
     async def test_real_interrupt_and_resume_create_separate_runs(self):
@@ -650,6 +815,7 @@ class AgentRunTests(PostgresDatabaseTestCase):
                     try:
                         await asyncio.Event().wait()
                     finally:
+                        await asyncio.sleep(0)
                         closed.set()
                 run = await self.create_run()
                 response = RunStreamingResponse(run, self.factory, self.saver, None, input={"message": "hi"})
@@ -702,6 +868,9 @@ class AgentRunTests(PostgresDatabaseTestCase):
         with self.graph_patch(lambda state: {"messages": [AIMessage(content="ok")]}):
             await self.post()
         config = {"configurable": {"thread_id": run.thread_id}}
+        self.assertIsNotNone(await self.saver.aget_tuple(config))
+        async with self.factory.begin() as db:
+            await agent_thread.delete(db, user_id=2, thread_id=run.thread_id)
         self.assertIsNotNone(await self.saver.aget_tuple(config))
         response = await self.client.delete(f"/api/thread/{run.thread_id}", params={"user_id": 1})
         self.assertEqual(response.status_code, 200)

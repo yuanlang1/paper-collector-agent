@@ -72,27 +72,82 @@ docker compose -f compose.memory.yml up -d --build
 docker compose -f compose.memory.yml exec redis redis-cli ping
 ```
 
+PostgreSQL 已运行时，可以单独启动 Redis：
+
+```powershell
+docker compose -f compose.memory.yml up -d redis
+```
+
 Redis 使用 `127.0.0.1:6380`，与已有的 6379 实例分开；AOF 文件保存在
 `memory-redis-data` 命名卷中。本地 Celery 默认连接 `redis://127.0.0.1:6380/0`。
 可用环境变量 `CELERY_BROKER_URL` 和 `CELERY_RESULT_BACKEND` 覆盖地址。
 任务结果保存在 Redis 的 DB 1，保留一小时。
 
-FastAPI 和 Celery Worker 将分别作为本地独立进程运行，Compose 仅管理
-PostgreSQL 和 Redis。当前尚未接入 Profile/Fact/Episode 提取或主图调度。
+FastAPI、Celery Worker 和 Beat 分别作为本地独立进程运行，Compose 仅管理
+PostgreSQL 和 Redis。每个 completed run 在同一事务内创建 UserProfile、Fact
+两个 job，提交后分别派发。Beat 每分钟检查空闲超过 10 分钟、最后一个 run 为
+completed 的 thread，创建 Episode job，并补派发 pending job、恢复过期租约。
 
-从项目根目录在本地初始化记忆存储：
+确认 PostgreSQL、Nacos 已运行，并完成下方记忆存储初始化后，在三个独立
+PowerShell 终端中按 FastAPI、Worker、Beat 的顺序启动。FastAPI 启动时创建缺失的
+业务表，包括 `memory_job`；等待日志显示 `Application startup complete` 后，再启动
+Worker 和 Beat。每个终端先执行：
+
+```powershell
+cd E:\FastAPI_project\paper-collector-agent
+$env:UV_PROJECT_ENVIRONMENT = ".venv311"
+```
+
+终端 1：启动 FastAPI；Windows 使用 Selector 事件循环以支持 Psycopg 异步连接：
+
+```powershell
+uv run --locked --no-sync --env-file .env python -m uvicorn app.main:app --loop asyncio:SelectorEventLoop --host 127.0.0.1 --port 8000
+```
+
+终端 2：启动串行 Worker，执行 UserProfile、Fact 和 Episode 提取任务：
+
+```powershell
+uv run --locked --no-sync --env-file .env celery -A app.tasks.celery_app:celery_app worker --pool=solo --concurrency=1 --queues=memory --loglevel=INFO
+```
+
+终端 3：启动 Beat，定期扫描 Episode、补派发 pending job 并恢复过期租约：
+
+```powershell
+uv run --locked --no-sync --env-file .env celery -A app.tasks.celery_app:celery_app beat --schedule data/celerybeat-schedule --loglevel=INFO
+```
+
+提取使用对应用户配置中 `is_small_model=true` 的小模型。当前只运行一个 `solo`
+Worker 和一个 Beat，避免同一用户的
+画像被并发覆盖；增加 Worker 前需要用户级串行控制。租约为 5 分钟，每分钟续租，
+失败最多尝试 3 次。任务只传递 job_id，根据固定 checkpoint 与 end_id 读取消息。
+提取采用至少一次执行；Store 写入与 job 完成不属于同一个事务，崩溃重试存在重复
+写入窗口。主图前的记忆检索与提示词注入尚未接入。
+
+Worker 通过 `worker_process_init` 创建进程专属事件循环、AsyncEngine 和
+`async_sessionmaker`，数据库使用 `NullPool`。三个提取任务和维护任务统一通过
+`run_async_task` 在该循环执行，每个任务使用独立 AsyncSession；领取、续租和完成
+分别提交短事务，续租协程使用另一个 Session。正常退出时清理遗留协程、数据库连接
+和事件循环，`solo` 模式同时通过 `worker_shutdown` 完成清理。
+
+任务模块统一列在 `app/tasks/celery_app.py` 的 `TASK_MODULES` 中，由 Worker
+启动时自动导入。`app/tasks/modules/memory/` 下的 `extract_userprofile.py`、
+`extract_fact.py`、`extract_episode.py`、`maintain.py`、`healthcheck.py` 各注册
+一个任务，`common.py` 保存公共辅助函数。新增任务文件时同步加入模块清单。
+
+首次启动记忆模块前，从项目根目录在本地初始化记忆存储：
 
 ```powershell
 $env:UV_PROJECT_ENVIRONMENT = ".venv311"
-uv run --locked --inexact --env-file .env python -m app.memory.init_store --check-embedding
+uv run --locked --no-sync --env-file .env python -m app.memory.init_store
 ```
 
-记忆数据库初始化命令可重复执行：启用扩展、建立中文 `memory_zh` 配置，
-由原生 LangGraph Store 创建 `vector(1024)` 表和 cosine HNSW 索引，再创建
-`content` 的全文 GIN 索引。`--check-embedding` 会调用一次 SiliconFlow；
-不带此参数时只初始化数据库。现有其他维度或不同类型的索引须单独迁移。
+记忆数据库初始化命令可重复执行：由原生 LangGraph Store 创建 `halfvec(1024)`
+表和 cosine HNSW 索引，并检查实际列类型和索引。该命令负责 Store 相关表，
+`memory_job` 等业务表由 FastAPI 启动时创建。需要同时验证 embedding 时，在命令末尾
+添加 `--check-embedding`，会调用一次 SiliconFlow；不带此参数时只初始化数据库。
+现有其他维度或不同类型的索引须单独迁移。
 PostgreSQL 设置 `hnsw.ef_search=100`、`hnsw.iterative_scan=strict_order`；
-RRF 查询和 LangMem 业务维护将在后续接入，本文命令不会启动记忆提取。
+当前使用 Store 原生语义检索，初始化命令不会启动记忆提取。
 原有论文 RAG 的 Qdrant 配置保留。
 
 切换前备份保存在 Git 忽略的 `data/backups/postgres/`；不要删除原数据卷。
@@ -122,9 +177,9 @@ AGENT_GRPC_MAX_MESSAGE_LENGTH=16777216
 
 ## 数据库生命周期
 
-数据库引擎和异步会话工厂由 FastAPI `lifespan` 调用 `create_database()` 创建，关闭时释放连接池。会话工厂使用 `async_sessionmaker(bind=engine, expire_on_commit=False)`。HTTP 从 `app.state.session_factory` 取得工厂，gRPC 通过构造参数接收工厂；每次操作创建独立会话。
+数据库引擎和异步会话工厂由 FastAPI `lifespan` 调用 `create_database()` 创建，关闭时释放连接池。会话工厂使用 `async_sessionmaker(bind=engine, expire_on_commit=False)`。HTTP 从 `app.state.session_factory` 取得工厂，gRPC 通过构造参数接收工厂；每次操作创建独立 `AsyncSession`。Celery Worker 创建自己的 AsyncEngine 和会话工厂，与 Web 服务分开管理。
 
-`app/database.py` 统一定义 ORM 基类、数据库引擎工厂和会话依赖；`app/db/models/` 按表定义模型，`app/db/repositories/` 实现异步数据访问。业务服务负责校验和事务，仓储只查询、修改及 flush，不自行 commit。
+`app/database.py` 统一定义 ORM 基类、数据库引擎工厂和异步会话依赖；`app/core/database.py`、`app/db/session.py` 复用同一工厂。`app/db/models/` 按表定义模型，`app/db/repositories/` 使用 `AsyncSession` 执行原生 SQL。业务服务负责校验和事务，仓储不自行 commit。
 
 业务数据库统一使用 `DATABASE_POSTGRES_URL=postgresql://user:password@host:5432/database`。SQLAlchemy 使用 `postgresql+psycopg` 异步驱动，LangGraph checkpointer 和 store 使用原始连接地址。启动时通过 `Base.metadata.create_all()` 创建缺失业务表，不升级已有表结构，也不搬迁旧数据库数据。
 

@@ -1,9 +1,26 @@
-from sqlalchemy import delete as sql_delete
-from sqlalchemy import func, select, text, update
+from dataclasses import dataclass
+from datetime import datetime
+
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import AgentThread
-from app.db.models.agent_run import AgentRun
+
+@dataclass(frozen=True)
+class AgentThreadRow:
+    id: int
+    thread_id: str
+    user_id: int
+    topic: str | None
+    creator_id: int
+    creation_time: datetime
+    modifier_id: int
+    modification_time: datetime
+
+
+_COLUMNS = """
+    id, thread_id, user_id, topic,
+    creator_id, creation_time, modifier_id, modification_time
+"""
 
 
 async def create(
@@ -12,15 +29,16 @@ async def create(
     user_id: int,
     thread_id: str,
     topic: str | None = None,
-) -> AgentThread:
-    thread = AgentThread(
-        user_id=user_id,
-        thread_id=thread_id,
-        topic=topic,
+) -> AgentThreadRow:
+    result = await db.execute(
+        text(f"""
+            INSERT INTO agent_thread (user_id, thread_id, topic)
+            VALUES (:user_id, :thread_id, :topic)
+            RETURNING {_COLUMNS}
+        """),
+        dict(user_id=user_id, thread_id=thread_id, topic=topic),
     )
-    db.add(thread)
-    await db.flush()
-    return thread
+    return AgentThreadRow(**result.mappings().one())
 
 
 async def get_by_thread_id(
@@ -29,29 +47,32 @@ async def get_by_thread_id(
     user_id: int,
     thread_id: str,
     for_update: bool = False,
-) -> AgentThread | None:
-    statement = select(AgentThread).where(
-        AgentThread.user_id == user_id,
-        AgentThread.thread_id == thread_id,
+) -> AgentThreadRow | None:
+    locking = " FOR UPDATE" if for_update else ""
+    result = await db.execute(
+        text(f"""
+            SELECT {_COLUMNS}
+            FROM agent_thread
+            WHERE user_id = :user_id
+              AND thread_id = :thread_id
+        """ + locking),
+        dict(user_id=user_id, thread_id=thread_id),
     )
-    if for_update:
-        statement = statement.with_for_update()
-    return await db.scalar(statement)
+    row = result.mappings().first()
+    return AgentThreadRow(**row) if row is not None else None
 
 
 async def touch(db: AsyncSession, *, user_id: int, thread_id: str) -> bool:
-    return (
-        await db.scalar(
-            update(AgentThread)
-            .where(
-                AgentThread.user_id == user_id,
-                AgentThread.thread_id == thread_id,
-            )
-            .values(modification_time=func.now())
-            .returning(AgentThread.id)
-        )
-        is not None
-    )
+    return await db.scalar(
+        text("""
+            UPDATE agent_thread
+            SET modification_time = now()
+            WHERE user_id = :user_id
+              AND thread_id = :thread_id
+            RETURNING id
+        """),
+        dict(user_id=user_id, thread_id=thread_id),
+    ) is not None
 
 
 async def require_thread(
@@ -59,12 +80,8 @@ async def require_thread(
     *,
     user_id: int,
     thread_id: str,
-) -> AgentThread:
-    thread = await get_by_thread_id(
-        db,
-        user_id=user_id,
-        thread_id=thread_id,
-    )
+) -> AgentThreadRow:
+    thread = await get_by_thread_id(db, user_id=user_id, thread_id=thread_id)
     if thread is None:
         raise ValueError("Thread not found for user")
     return thread
@@ -76,16 +93,19 @@ async def list_by_user(
     user_id: int,
     limit: int = 50,
     offset: int = 0,
-) -> list[AgentThread]:
-    return list(
-        await db.scalars(
-            select(AgentThread)
-            .where(AgentThread.user_id == user_id)
-            .order_by(AgentThread.modification_time.desc(), AgentThread.id.desc())
-            .limit(limit)
-            .offset(offset)
-        )
+) -> list[AgentThreadRow]:
+    result = await db.execute(
+        text(f"""
+            SELECT {_COLUMNS}
+            FROM agent_thread
+            WHERE user_id = :user_id
+            ORDER BY modification_time DESC, id DESC
+            LIMIT :limit
+            OFFSET :offset
+        """),
+        dict(user_id=user_id, limit=limit, offset=offset),
     )
+    return [AgentThreadRow(**row) for row in result.mappings()]
 
 
 async def update_topic(
@@ -94,16 +114,28 @@ async def update_topic(
     user_id: int,
     thread_id: str,
     topic: str | None,
-) -> AgentThread:
-    thread = await require_thread(
-        db,
-        user_id=user_id,
-        thread_id=thread_id,
+) -> AgentThreadRow:
+    result = await db.execute(
+        text(f"""
+            UPDATE agent_thread
+            SET modification_time = CASE
+                    WHEN topic IS DISTINCT FROM CAST(:topic AS VARCHAR)
+                      OR modifier_id IS DISTINCT FROM :user_id
+                    THEN now()
+                    ELSE modification_time
+                END,
+                topic = :topic,
+                modifier_id = :user_id
+            WHERE user_id = :user_id
+              AND thread_id = :thread_id
+            RETURNING {_COLUMNS}
+        """),
+        dict(user_id=user_id, thread_id=thread_id, topic=topic),
     )
-    thread.topic = topic
-    thread.modifier_id = user_id
-    await db.flush()
-    return thread
+    thread = result.mappings().first()
+    if thread is None:
+        raise ValueError("Thread not found for user")
+    return AgentThreadRow(**thread)
 
 
 async def delete(
@@ -112,18 +144,24 @@ async def delete(
     user_id: int,
     thread_id: str,
 ) -> None:
+    # ponytail: identifiers come only from this fixed list, never request parameters.
     for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
         await db.execute(
-            text(f"DELETE FROM {table} WHERE thread_id = :thread_id"),
-            {"thread_id": thread_id},
+            text(f"""
+                DELETE FROM {table} AS checkpoint
+                USING agent_thread AS thread
+                WHERE checkpoint.thread_id = thread.thread_id
+                  AND thread.user_id = :user_id
+                  AND thread.thread_id = :thread_id
+            """),
+            dict(user_id=user_id, thread_id=thread_id),
         )
-
-    for model in (AgentRun, AgentThread):
+    for table in ("agent_run", "agent_thread"):
         await db.execute(
-            sql_delete(model).where(
-                model.user_id == user_id,
-                model.thread_id == thread_id,
-            )
+            text(f"""
+                DELETE FROM {table}
+                WHERE user_id = :user_id
+                  AND thread_id = :thread_id
+            """),
+            dict(user_id=user_id, thread_id=thread_id),
         )
-
-    await db.flush()

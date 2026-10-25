@@ -1,5 +1,6 @@
+import asyncio
 import json
-from contextlib import aclosing
+from contextlib import aclosing, suppress
 from typing import Annotated, Any
 
 from anyio import CancelScope
@@ -9,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.response import ServiceResponse
 from app.database import get_db
-from app.db.models import AgentRun, RunStatus
+from app.db.models import RunStatus
+from app.db.repositories.agent_run import AgentRunRow
 from app.schemas.ai import ChatRequest, RunInfo
 from app.services import agent_run_service, thread_service
 
@@ -23,7 +25,7 @@ def _sse_line(payload: dict) -> str:
 class RunStreamingResponse(StreamingResponse):
     def __init__(
         self,
-        run: AgentRun,
+        run: AgentRunRow,
         session_factory,
         checkpointer,
         store,
@@ -54,6 +56,17 @@ class RunStreamingResponse(StreamingResponse):
         ):
             async for event in events:
                 yield _sse_line(event)
+
+    async def stream_response(self, send):
+        task = asyncio.create_task(super().stream_response(send))
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            task.cancel()
+            with CancelScope(shield=True):
+                with suppress(asyncio.CancelledError):
+                    await task
+            raise
 
     async def __call__(self, scope, receive, send):
         try:

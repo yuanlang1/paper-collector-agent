@@ -121,6 +121,8 @@ class AgentContextTests(unittest.IsolatedAsyncioTestCase):
             thread_id="thread", run_id="run", user_id=1, run_metadata={"model_id": 7},
         )
         with patch.object(agent_run_service, "update_status", new=AsyncMock(return_value=run)), patch.object(
+            agent_run_service, "complete_run", new=AsyncMock(return_value=(run, [])),
+        ), patch.object(
             agent_run_service.agent_build, "get_model", new=AsyncMock(return_value=model),
         ), patch.object(agent_run_service.agent_build, "build_tools", return_value=registry):
             events = [event async for event in agent_run_service.run(
@@ -350,6 +352,8 @@ class AgentContextTests(unittest.IsolatedAsyncioTestCase):
                 run = SimpleNamespace(thread_id="thread", run_id="first", user_id=1, run_metadata={"model_id": 7})
                 with patch.object(
                     agent_run_service, "update_status", new=AsyncMock(return_value=run),
+                ), patch.object(
+                    agent_run_service, "complete_run", new=AsyncMock(return_value=(run, [])),
                 ), patch.object(
                     agent_run_service.agent_build, "get_model", new=AsyncMock(return_value=model),
                 ), patch.object(agent_run_service.agent_build, "build_tools", return_value=registry):

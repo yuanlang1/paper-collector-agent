@@ -9,7 +9,7 @@ import grpc
 import httpx
 from fastapi import Depends, FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, inspect, select
+from sqlalchemy import func, inspect, select, text
 
 from app.common.exceptions import NotFoundException
 from app.database import Base, get_db
@@ -191,8 +191,9 @@ class AsyncDatabaseTests(PostgresDatabaseTestCase):
         old_time = datetime(2000, 1, 1, tzinfo=timezone.utc)
         async with self.factory.begin() as db:
             await system_setting.set_value(db, "key", "first")
-            row = await system_setting.get(db, "key")
-            row.modification_time = old_time
+            await db.execute(text(
+                "UPDATE config_setting SET modification_time = :old_time WHERE key = :key"
+            ), {"old_time": old_time, "key": "key"})
             # Exercise server defaults as well as the Python Boolean default.
             await db.execute(LlmSetting.__table__.insert().values(
                 user_id=1,
@@ -201,9 +202,12 @@ class AsyncDatabaseTests(PostgresDatabaseTestCase):
         async with self.factory.begin() as db:
             await system_setting.set_value(db, "key", "second")
         async with self.factory() as db:
-            row = await system_setting.get(db, "key")
-            self.assertGreater(row.modification_time, old_time)
-            self.assertIsNotNone(row.creation_time.tzinfo)
+            self.assertEqual(await system_setting.get(db, "key"), "second")
+            row = (await db.execute(text(
+                "SELECT creation_time, modification_time FROM config_setting WHERE key = :key"
+            ), {"key": "key"})).mappings().one()
+            self.assertGreater(row["modification_time"], old_time)
+            self.assertIsNotNone(row["creation_time"].tzinfo)
             llm = await db.scalar(select(LlmSetting))
             self.assertFalse(llm.is_small_model)
             self.assertEqual((llm.creator_id, llm.modifier_id), (0, 0))
@@ -296,7 +300,7 @@ class AsyncDatabaseTests(PostgresDatabaseTestCase):
             main, "InternalGrpcServer", return_value=server,
         ), patch.object(main, "close_index_resources", new_callable=AsyncMock) as close_index, patch.object(
             main.AsyncPostgresSaver, "from_conn_string", return_value=AsyncMock(),
-        ), patch.object(main.AsyncPostgresStore, "from_conn_string", return_value=AsyncMock()):
+        ), patch.object(main, "open_memory_store", return_value=AsyncMock()):
             with self.assertRaisesRegex(RuntimeError, "grpc unavailable"):
                 async with main.lifespan(FastAPI()):
                     self.fail("startup should fail")
@@ -319,7 +323,7 @@ class AsyncDatabaseTests(PostgresDatabaseTestCase):
             main, "close_task_rag_batch_runner", new_callable=AsyncMock,
         ), patch.object(main.paper_service_grpc_channel_pool, "close", new_callable=AsyncMock), patch.object(
             main.AsyncPostgresSaver, "from_conn_string", return_value=AsyncMock(),
-        ), patch.object(main.AsyncPostgresStore, "from_conn_string", return_value=AsyncMock()):
+        ), patch.object(main, "open_memory_store", return_value=AsyncMock()):
             async with main.lifespan(app):
                 self.assertIs(app.state.session_factory, self.factory)
                 engine_spy.dispose.assert_not_awaited()

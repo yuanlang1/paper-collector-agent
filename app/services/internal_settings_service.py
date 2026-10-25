@@ -17,5 +17,8 @@ async def get_limits(db: AsyncSession) -> dict[str, dict[str, int]]:
 
 
 async def update_limits(db: AsyncSession, limits: dict[str, int]) -> dict[str, dict[str, int]]:
-    await save_source_limits(db, limits)
-    return await get_limits(db)
+    return {
+        "limits": await save_source_limits(db, limits),
+        "page_sizes": source_page_sizes(),
+        "maximum_limits": source_limit_maxima(),
+    }

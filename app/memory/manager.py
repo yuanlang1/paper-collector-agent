@@ -16,11 +16,11 @@ async def create_profile_manager(
     profile = (
         UserProfile.model_validate(existing.value["content"])
         if existing is not None
-        else None
+        else UserProfile()
     )
 
     return create_memory_store_manager(
-        model=model,
+        model,
         store=store,
         namespace=namespace,
         schemas=[UserProfile],
@@ -40,7 +40,7 @@ def create_fact_manager(
     *, model: BaseChatModel, store: BaseStore, user_id: str
 ) -> MemoryStoreManager:
     return create_memory_store_manager(
-        model=model,
+        model,
         store=store,
         namespace=fact_namespace(user_id),
         schemas=[Fact],
@@ -65,7 +65,7 @@ def create_episode_manager(
     job_id: str,
 ) -> MemoryStoreManager:
     return create_memory_store_manager(
-        model=model,
+        model,
         store=store,
         namespace=episode_namespace(user_id, thread_id, job_id),
         schemas=[Episode],

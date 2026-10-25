@@ -3,8 +3,8 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.exceptions import NotFoundException
-from app.db.models import LlmSetting
 from app.db.repositories import llm_setting
+from app.db.repositories.llm_setting import LlmSettingRow
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ async def create_setting(
     model: str,
     api_key: str,
     is_small_model: bool = False,
-) -> LlmSetting:
+) -> LlmSettingRow:
     async with db.begin():
         return await llm_setting.create(
             db,
@@ -42,7 +42,7 @@ async def get_setting(
     model_id: int,
     *,
     user_id: int,
-) -> LlmSetting | None:
+) -> LlmSettingRow | None:
     async with db.begin():
         return await llm_setting.get_by_id(db, model_id, user_id=user_id)
 
@@ -54,7 +54,7 @@ async def list_settings(
     is_small_model: bool | None = None,
     limit: int = 50,
     offset: int = 0,
-) -> list[LlmSetting]:
+) -> list[LlmSettingRow]:
     async with db.begin():
         return await llm_setting.list_settings(
             db,
@@ -75,7 +75,7 @@ async def update_setting(
     model: str,
     api_key: str,
     is_small_model: bool,
-) -> LlmSetting:
+) -> LlmSettingRow:
     async with db.begin():
         return await llm_setting.update(
             db,
@@ -104,3 +104,16 @@ async def get_llm_config(db: AsyncSession, model_id: int, *, user_id: int) -> Ll
         model=setting.model,
         api_key=setting.api_key,
     )
+
+
+async def get_small_llm_config(db: AsyncSession, *, user_id: int) -> LlmConfig:
+    async with db.begin():
+        setting = await llm_setting.get_small_model(db, user_id=user_id)
+        if setting is None:
+            raise NotFoundException("小模型配置不存在")
+        return LlmConfig(
+            provider=setting.provider,
+            base_url=setting.base_url,
+            model=setting.model,
+            api_key=setting.api_key,
+        )

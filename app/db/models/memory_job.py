@@ -59,16 +59,26 @@ class MemoryJob(EntityBase, Base):
             name="ck_memory_job_lease",
         ),
         Index(
-            "uq_memory_job_run_kind", "run_id", "kind", unique=True,
+            "uq_memory_job_run_kind",
+            "run_id",
+            "kind",
+            unique=True,
             postgresql_where=text("kind IN ('userprofile', 'fact')"),
         ),
         Index(
-            "uq_memory_job_episode_source", "thread_id", "source_thread_update_time",
-            unique=True, postgresql_where=text("kind = 'episode'"),
+            "uq_memory_job_episode_source",
+            "thread_id",
+            "source_thread_update_time",
+            unique=True,
+            postgresql_where=text("kind = 'episode'"),
         ),
         Index(
-            "uq_memory_job_active_episode", "thread_id", unique=True,
-            postgresql_where=text("kind = 'episode' AND status IN ('pending', 'running')"),
+            "uq_memory_job_active_episode",
+            "thread_id",
+            unique=True,
+            postgresql_where=text(
+                "kind = 'episode' AND status IN ('pending', 'running')"
+            ),
         ),
         Index("ix_memory_job_dispatch", "status", "available_at", "id"),
         Index("ix_memory_job_thread_kind", "user_id", "thread_id", "kind", "id"),
@@ -85,12 +95,16 @@ class MemoryJob(EntityBase, Base):
     )
     checkpoint_id: Mapped[str] = mapped_column(String(128))
     end_id: Mapped[str] = mapped_column(String(128))
-    source_thread_update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source_thread_update_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     status: Mapped[str] = mapped_column(
         String(32), default=MemoryJobStatus.PENDING, server_default=text("'pending'")
     )
     attempts: Mapped[int] = mapped_column(default=0, server_default=text("0"))
-    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     claim_token: Mapped[str | None] = mapped_column(String(128))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -82,12 +82,12 @@ async def get_setting(
     default: Any = None,
 ) -> Any:
     async with db.begin():
-        setting = await system_setting.get(db, key)
-    if setting and setting.value:
+        value = await system_setting.get(db, key)
+    if value:
         try:
-            return json.loads(setting.value)
+            return json.loads(value)
         except json.JSONDecodeError:
-            return setting.value
+            return value
     return default
 
 

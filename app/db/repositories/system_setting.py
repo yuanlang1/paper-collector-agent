@@ -1,11 +1,17 @@
-from sqlalchemy import select
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import SystemSetting
 
-
-async def get(db: AsyncSession, key: str) -> SystemSetting | None:
-    return await db.scalar(select(SystemSetting).where(SystemSetting.key == key))
+async def get(db: AsyncSession, key: str) -> str | None:
+    result = await db.execute(
+        text("""
+            SELECT value
+            FROM config_setting
+            WHERE key = :key
+        """),
+        {"key": key},
+    )
+    return result.scalar_one_or_none()
 
 
 async def set_value(
@@ -13,10 +19,16 @@ async def set_value(
     key: str,
     value: str,
 ) -> None:
-    setting = await get(db, key)
-    if setting is None:
-        db.add(SystemSetting(key=key, value=value))
-    else:
-        setting.value = value
-        setting.modifier_id = 0
-    await db.flush()
+    await db.execute(
+        text("""
+            INSERT INTO config_setting (key, value)
+            VALUES (:key, :value)
+            ON CONFLICT (key) DO UPDATE
+            SET value = EXCLUDED.value,
+                modifier_id = 0,
+                modification_time = now()
+            WHERE config_setting.value IS DISTINCT FROM EXCLUDED.value
+               OR config_setting.modifier_id IS DISTINCT FROM 0
+        """),
+        {"key": key, "value": value},
+    )
