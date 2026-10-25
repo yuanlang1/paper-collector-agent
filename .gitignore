@@ -23,6 +23,13 @@ env/
 # Local assistant/tool metadata
 .codex/
 .agents/
+AGENT.md
+AGENTS.md
+
+# Local runtime and deployment configuration
+compose.*
+.python-version
+.dockerignore
 
 # OS
 .DS_Store
