@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
-from dataclasses import dataclass
 import hashlib
 import re
+from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Protocol
 
 from app.config import settings
-
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _PRESIGNED_URL_EXPIRES = timedelta(days=1)
@@ -93,7 +92,7 @@ class OssObjectStore(Protocol):
         self,
         *,
         pdf_sha256: str,
-    ) -> "MarkdownObject | None": ...
+    ) -> MarkdownObject | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,8 +103,6 @@ class MarkdownObject:
 
 
 class AliyunOssObjectStore:
-    """Stores RAG source files and produces temporary PDF download URLs."""
-
     def __init__(self) -> None:
         self._client = None
         self._oss = None
@@ -131,12 +128,10 @@ class AliyunOssObjectStore:
             raise RuntimeError("alibabacloud-oss-v2 is not installed") from exc
 
         config = oss.config.load_default()
-        config.credentials_provider = (
-            oss.credentials.StaticCredentialsProvider(
-                settings.OSS_ACCESS_KEY_ID,
-                settings.OSS_ACCESS_KEY_SECRET,
-                settings.OSS_SESSION_TOKEN or None,
-            )
+        config.credentials_provider = oss.credentials.StaticCredentialsProvider(
+            settings.OSS_ACCESS_KEY_ID,
+            settings.OSS_ACCESS_KEY_SECRET,
+            settings.OSS_SESSION_TOKEN or None,
         )
         config.region = settings.OSS_REGION
         if settings.OSS_ENDPOINT:
@@ -291,9 +286,7 @@ class AliyunOssObjectStore:
         return MarkdownObject(
             content=content,
             object_name=object_name,
-            content_sha256=hashlib.sha256(
-                content.encode("utf-8")
-            ).hexdigest(),
+            content_sha256=hashlib.sha256(content.encode("utf-8")).hexdigest(),
         )
 
     def _upload_markdown_sync(

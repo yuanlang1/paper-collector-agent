@@ -15,6 +15,7 @@ TASK_MODULES = [
     "app.tasks.modules.memory.extract_episode",
     "app.tasks.modules.memory.maintain",
     "app.tasks.modules.memory.healthcheck",
+    "app.tasks.modules.rag.index_batch",
 ]
 
 celery_app = Celery(
@@ -32,6 +33,7 @@ celery_app.conf.update(
     result_expires=3600,
     broker_connection_retry_on_startup=True,
     broker_connection_timeout=3,
+    broker_transport_options={"visibility_timeout": 7200},
     task_publish_retry=False,
     worker_prefetch_multiplier=1,
     timezone="Asia/Shanghai",
@@ -92,11 +94,16 @@ def shutdown_worker_process(**kwargs) -> None:
         for task in pending:
             task.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
-        await loop.shutdown_asyncgens()
         try:
-            await _worker_async_engine.dispose()
+            index_module = sys.modules.get("app.rag.index_construction.base")
+            if index_module is not None:
+                await index_module.close_index_resources()
         finally:
-            await loop.shutdown_default_executor()
+            await loop.shutdown_asyncgens()
+            try:
+                await _worker_async_engine.dispose()
+            finally:
+                await loop.shutdown_default_executor()
 
     try:
         loop.run_until_complete(close_resources())

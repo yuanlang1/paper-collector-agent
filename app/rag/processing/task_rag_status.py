@@ -1,7 +1,4 @@
-import asyncio
 from collections import Counter
-from collections.abc import Awaitable, Callable
-from time import monotonic
 from typing import Any
 
 from app.infrastructure.paper_service.paper_client import (
@@ -10,13 +7,6 @@ from app.infrastructure.paper_service.paper_client import (
 from app.infrastructure.paper_service.types import TaskState
 
 
-StatusListener = Callable[[dict[str, Any]], Awaitable[None]]
-
-_FAILED_TASK_STATES = {
-    TaskState.SEARCH_FAILED.name,
-    TaskState.CANCELLED.name,
-    TaskState.RAG_FAILED.name,
-}
 _SUMMARY_DEFAULTS = {
     "total": 0,
     "pending": 0,
@@ -28,26 +18,11 @@ _SUMMARY_DEFAULTS = {
 }
 
 
-def empty_rag_summary() -> dict[str, int]:
-    return dict(_SUMMARY_DEFAULTS)
-
-
 def normalize_rag_summary(value: dict[str, int] | None = None) -> dict[str, int]:
     return {
         key: int((value or {}).get(key, default))
         for key, default in _SUMMARY_DEFAULTS.items()
     }
-
-
-def rag_progress_percent(summary: dict[str, int]) -> int:
-    total = int(summary.get("total", 0))
-    if total <= 0:
-        return 0
-    completed = sum(
-        int(summary.get(key, 0))
-        for key in ("ready", "skipped", "failed")
-    )
-    return min(100, round(completed / total * 100))
 
 
 async def get_task_rag_status(task_id: int) -> dict[str, Any]:
@@ -94,48 +69,3 @@ async def get_task_rag_status(task_id: int) -> dict[str, Any]:
         "error": None,
         "metadata": response["metadata"],
     }
-
-
-def task_status_value(status: dict[str, Any]) -> str:
-    return str(status["result"]["task_status"] or "").upper()
-
-
-def is_rag_failed(status: dict[str, Any]) -> bool:
-    return (
-        task_status_value(status) in _FAILED_TASK_STATES
-        or bool(status["result"]["summary"]["failed"])
-    )
-
-
-async def wait_for_rag_terminal_status(
-    *,
-    task_id: int,
-    poll_interval_seconds: int,
-    timeout_seconds: int,
-    on_status: StatusListener | None = None,
-) -> dict[str, Any]:
-    deadline = monotonic() + timeout_seconds
-    latest: dict[str, Any] | None = None
-
-    while True:
-        status = await get_task_rag_status(task_id)
-        if not status.get("ok"):
-            return status
-
-        latest = status
-        if on_status is not None:
-            await on_status(status)
-
-        if is_rag_failed(status) or status["result"]["is_rag_complete"]:
-            return status
-
-        remaining_seconds = deadline - monotonic()
-        if remaining_seconds <= 0:
-            return {
-                "ok": False,
-                "result": latest["result"],
-                "error": "RAG_INDEX_TIMEOUT",
-                "metadata": latest.get("metadata"),
-            }
-
-        await asyncio.sleep(min(poll_interval_seconds, remaining_seconds))

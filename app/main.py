@@ -4,7 +4,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from fastapi import FastAPI
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-from app.api import internal_settings_router, run_router, setting_router, thread_router
+from app.api import internal_rag_router, internal_settings_router, run_router, setting_router, thread_router
 from app.common.exceptions import register_exception_handlers
 from app.config import settings
 from app.database import Base, create_database
@@ -12,7 +12,6 @@ from app.infrastructure.paper_service.http_client import paper_service_http_clie
 from app.infrastructure.nacos_registry import nacos_registry
 from app.memory.store import open_memory_store
 from app.rag.index_construction.base import close_index_resources
-from app.rag.processing.task_rag_batch_runner import close_task_rag_batch_runner
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,7 +47,6 @@ async def lifespan(app: FastAPI):
         await paper_service_http_client.start()
         resources.push_async_callback(paper_service_http_client.close)
         resources.push_async_callback(nacos_registry.stop)
-        resources.push_async_callback(close_task_rag_batch_runner)
         await nacos_registry.start()
         yield
 
@@ -65,6 +63,7 @@ app.include_router(run_router)
 app.include_router(thread_router)
 app.include_router(setting_router)
 app.include_router(internal_settings_router)
+app.include_router(internal_rag_router)
 
 
 @app.get("/")

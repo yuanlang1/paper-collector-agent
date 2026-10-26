@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections import defaultdict
 from pathlib import PurePosixPath
-from typing import Any, TypeVar, cast
+from typing import Any, cast
 from urllib.parse import urlparse
 
 from langchain_core.documents import Document
 
-from app.config import settings
 from app.infrastructure.mineru.mineru_client import MinerUClient
 from app.schemas.file_parser import (
     BatchDocumentParseResult,
@@ -18,8 +16,6 @@ from app.schemas.file_parser import (
     ParsedFileDocument,
     PdfSourceBlock,
 )
-
-T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
@@ -63,19 +59,12 @@ class BatchFileParseError(RuntimeError):
 
 
 class FileParser:
-    MAX_BATCH_SIZE = settings.MINERU_MAX_BATCH_SIZE
-
     def __init__(
         self,
         *,
         mineru_client: MinerUClient,
-        max_parallel_batches: int = settings.MINERU_MAX_PARALLEL_BATCHES,
     ) -> None:
-        if max_parallel_batches < 1:
-            raise ValueError("max_parallel_batches must be greater than 0")
-
         self.mineru_client = mineru_client
-        self.max_parallel_batches = max_parallel_batches
 
     async def parse_one(
         self,
@@ -102,40 +91,19 @@ class FileParser:
         if len(file_ids) != len(set(file_ids)):
             raise ValueError("file_id must be unique within one parse operation")
 
-        batches = [
-            batch
-            for group in self._group_compatible_requests(normalized)
-            for batch in self._chunked(group, self.MAX_BATCH_SIZE)
-        ]
-
-        semaphore = asyncio.Semaphore(self.max_parallel_batches)
-
-        async def execute_batch(
-            batch: list[FileParseRequest],
-        ) -> tuple[list[ParsedFileDocument], dict[str, str]]:
-            async with semaphore:
-                return await self._parse_batch(batch)
-
-        batch_results = await asyncio.gather(
-            *(execute_batch(batch) for batch in batches),
-            return_exceptions=True,
-        )
-
         documents: list[ParsedFileDocument] = []
         errors: dict[str, str] = {}
 
-        for batch, result in zip(
-            batches,
-            batch_results,
-            strict=True,
-        ):
-            if isinstance(result, Exception):
+        # ponytail: The indexing API caps input at 20; split batches if that cap grows.
+        for batch in self._group_compatible_requests(normalized):
+            try:
+                batch_documents, batch_errors = await self._parse_batch(batch)
+            except Exception as error:
                 errors.update(
-                    {request.file_id: self._format_error(result) for request in batch}
+                    {request.file_id: self._format_error(error) for request in batch}
                 )
                 continue
 
-            batch_documents, batch_errors = result
             documents.extend(batch_documents)
             errors.update(batch_errors)
 
@@ -192,15 +160,7 @@ class FileParser:
         requests: list[FileParseRequest],
     ) -> tuple[list[ParsedFileDocument], dict[str, str]]:
         if len(requests) == 1:
-            request = requests[0]
-
-            try:
-                document = await self._parse_single(request)
-                return [document], {}
-            except Exception as error:
-                return [], {
-                    request.file_id: self._format_error(error),
-                }
+            return [await self._parse_single(requests[0])], {}
 
         file_type = cast(FileType, requests[0].file_type)
         model_version = self._select_model(file_type)
@@ -546,17 +506,3 @@ class FileParser:
             return FileType(suffix.removeprefix("."))
         except ValueError as error:
             raise ValueError(f"Unsupported file type: {suffix or file_name}") from error
-
-    @staticmethod
-    def _chunked(
-        items: list[T],
-        size: int,
-    ) -> list[list[T]]:
-        return [
-            items[index : index + size]
-            for index in range(
-                0,
-                len(items),
-                size,
-            )
-        ]

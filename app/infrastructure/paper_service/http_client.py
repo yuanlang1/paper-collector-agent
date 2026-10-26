@@ -3,7 +3,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
-from app.infrastructure.nacos_registry import nacos_registry
+from app.infrastructure.nacos_registry import NacosRegistry, nacos_registry
 
 
 class PaperServiceError(RuntimeError):
@@ -13,8 +13,11 @@ class PaperServiceError(RuntimeError):
 
 
 class PaperServiceHttpClient:
-    def __init__(self, http: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self, http: httpx.AsyncClient | None = None, *, registry: NacosRegistry | None = None,
+    ) -> None:
         self.http = http
+        self.registry = registry or nacos_registry
 
     async def start(self) -> None:
         if self.http is None:
@@ -36,7 +39,7 @@ class PaperServiceHttpClient:
 
         base_url = settings.PAPER_SERVICE_BASE_URL.rstrip("/")
         if not base_url:
-            instance = await nacos_registry.choose_instance(settings.PAPER_SERVICE_NAME)
+            instance = await self.registry.choose_instance(settings.PAPER_SERVICE_NAME)
             ip = (
                 instance.get("ip")
                 if isinstance(instance, dict)

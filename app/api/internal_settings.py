@@ -21,10 +21,13 @@ async def get_source_limits(db: Annotated[AsyncSession, Depends(get_db)]):
 
 @router.put("/source-limits")
 async def update_source_limits(
-    body: UpdateSourceLimitsRequest, db: Annotated[AsyncSession, Depends(get_db)],
+    body: UpdateSourceLimitsRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     try:
         values = await internal_settings_service.update_limits(db, body.model_dump())
+
     except ValueError as exc:
         raise BadRequestException(str(exc)) from exc
+
     return ServiceResponse.build_success_response(values)

@@ -176,7 +176,63 @@ PAPER_SERVICE_TIMEOUT_SECONDS=10.0
 
 `PAPER_SERVICE_BASE_URL` 留空时，从 Nacos 发现 `paper-service` 的 HTTP 实例；也可指定实际地址（如 `http://127.0.0.1:8080`）直连。客户端同时检查 HTTP 状态和响应体的 `success`、`code`，写操作不自动重试。Nacos 与 Qdrant SDK 及其底层依赖继续保留。
 
-协议位于 [app/protos/agent/v1/agent.proto](app/protos/agent/v1/agent.proto)。当前只注册 `SettingsService.GetSourceLimits` 和 `UpdateSourceLimits`。旧主 Agent 图、会话历史和 LLM 配置档案的运行入口已停用；保留协议定义，相关 RPC 返回 `UNIMPLEMENTED`。论文检索、RAG 索引和综述生成的业务工作流仍保留，等待新主架构接入。
+协议位于 [app/protos/agent/v1/agent.proto](app/protos/agent/v1/agent.proto)。当前只注册 `SettingsService.GetSourceLimits` 和 `UpdateSourceLimits`。旧主 Agent 图、会话历史和 LLM 配置档案的运行入口已停用；保留协议定义，相关 RPC 返回 `UNIMPLEMENTED`。论文检索和综述生成的业务工作流仍保留；RAG 索引改由内部 HTTP 接口提交 Celery 任务，不再作为 Agent 子图执行。
+
+## 批量论文索引
+
+paper service 调用 `POST /internal/rag/batches`，请求仅包含
+`{"paper_ids": [123, 124]}`；列表长度为 1～20，元素必须为不重复的正整数。
+接口通过 `index_batch.delay(paper_ids=...)` 提交 Celery `rag.index_batch` 任务，返回
+HTTP 202 和 `ServiceResponse.data.job_id`（Celery 生成的 UUID）。不传论文详情、PDF 内容或 chunks。
+
+worker 调用 paper service 新增的 `POST /internal/paper/batch-details`，请求为
+`{"paperIds": [123, 124]}`。响应 `data.papers` 包含 `paperId`、`title`、
+`paperAbstract`、`pdfUrl`、`ossName`、`publishedDate`（`yyyy-MM-dd` 或 null），
+`data.missingPaperIds` 列出未找到的 ID。worker 按 ID 匹配详情，从发布日期提取年份，
+再执行 OSS 地址获取、MinerU 解析、Markdown 保存、内容切分和 Qdrant 论文级及正文索引。
+索引任务不领取 paper service 租约，不调用状态更新或批次完成接口。
+
+调用 `GET /internal/rag/batches/{job_id}` 查询结果，内部通过
+`celery_app.AsyncResult(job_id)` 读取状态和结果，响应 `data` 包含：
+
+```json
+{
+  "job_id": "00000000-0000-0000-0000-000000000001",
+  "execution_status": "SUCCESS",
+  "results": [
+    {"paper_id": 123, "status": "ready", "chunk_count": 36, "error": null},
+    {"paper_id": 124, "status": "failed", "chunk_count": 0, "error": "PAPER_NOT_FOUND"}
+  ],
+  "error": null
+}
+```
+
+执行状态包括 `PENDING`、`STARTED`、`SUCCESS`、`FAILURE`；未结束时 `results` 为 null。
+`SUCCESS` 表示批次已返回逐篇结果，可能包含 `failed` 或 `skipped`，由 paper service
+读取后更新业务状态并决定重试。详情接口整体失败、协议不匹配或批次超时会使任务失败；
+单篇缺失或处理失败保留在逐篇结果中，其他论文继续处理。结果按请求 ID 顺序返回。
+结果保存在 Redis result backend，保留一小时。使用 Celery 原生状态，不额外保存受理记录；
+未开始、未知及结果已过期的任务 ID 均可能返回 `PENDING`，调用方需自行限制轮询时间。
+队列或结果后端不可用返回 503。调用方应在保留期内读取并持久化结果。
+
+RAG worker 需要默认 `app` 依赖组及预下载的 RAG 模型。在独立 PowerShell 终端启动：
+
+```powershell
+$env:UV_PROJECT_ENVIRONMENT = ".venv311"
+uv run --locked --no-sync --env-file .env celery -A app.tasks.celery_app:celery_app worker --pool=solo --concurrency=1 --queues=rag --hostname=rag@%h --loglevel=INFO
+```
+
+每个任务只处理传入的一批论文。首版不自动重试整批，同一论文的并发提交由 paper service
+协调。任务复用 worker 专属事件循环；HTTP、Nacos 发现客户端及 MinerU 客户端在批次结束时
+关闭，缓存的向量客户端和模型在 worker 关闭时释放。worker 使用 Nacos 时只发现服务，
+不注册 FastAPI 实例。`TASK_RAG_WORKFLOW_TIMEOUT_SECONDS` 继续作为批次执行超时，默认
+1800 秒；Redis 队列可见性超时为 7200 秒。
+
+离线检查（HTTP、解析及索引使用替身，不调用外部服务）：
+
+```powershell
+.\.venv311\Scripts\python.exe -B -m unittest tests.test_rag_batch tests.test_paper_rag_processor tests.test_paper_service_http tests.test_celery_runtime tests.test_rag_oss -q
+```
 
 ## 数据库生命周期
 

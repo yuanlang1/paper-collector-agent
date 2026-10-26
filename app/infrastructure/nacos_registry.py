@@ -40,11 +40,13 @@ class NacosRegistry:
 
         return builder.build()
 
-    async def start(self) -> None:
+    async def start_discovery(self) -> None:
         self.client = await NacosNamingService.create_naming_service(
             self._build_client_config()
         )
 
+    async def start(self) -> None:
+        await self.start_discovery()
         await self.client.register_instance(
             request=RegisterInstanceParam(
                 service_name=settings.SERVICE_NAME,
