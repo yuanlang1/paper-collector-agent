@@ -16,6 +16,7 @@ TASK_MODULES = [
     "app.tasks.modules.memory.maintain",
     "app.tasks.modules.memory.healthcheck",
     "app.tasks.modules.rag.index_batch",
+    "app.tasks.modules.rag.paper_profile",
 ]
 
 celery_app = Celery(

@@ -172,8 +172,6 @@ class LoadTaskCorpusNode:
             run_id = child_run_id,
             step_key = "load_task_corpus",
             source = "task_review",
-            kind = "task_review_corpus_json",
-            count = len(review_papers),
             payload = {
                 "task_id": task_id,
                 "task_status": task_status,

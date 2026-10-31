@@ -338,13 +338,7 @@ class AbstractEnrichNode:
                 run_id = child_run_id,
                 step_key = "abstract_enrichment",
                 source = "abstract",
-                kind = "paper_info_abstract_manifest_json",
                 payload = manifest,
-                count = len(papers),
-                metadata = {
-                    "input_manifest": artifact_uri,
-                    **{f"{key}_count": value for key, value in counts.items()},
-                },
             )
 
         except Exception as exc:

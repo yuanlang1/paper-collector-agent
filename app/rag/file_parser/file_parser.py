@@ -94,7 +94,6 @@ class FileParser:
         documents: list[ParsedFileDocument] = []
         errors: dict[str, str] = {}
 
-        # ponytail: The indexing API caps input at 20; split batches if that cap grows.
         for batch in self._group_compatible_requests(normalized):
             try:
                 batch_documents, batch_errors = await self._parse_batch(batch)

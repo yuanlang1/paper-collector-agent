@@ -461,15 +461,7 @@ class VenueResolutionNode:
                 run_id=child_run_id,
                 step_key="resolve_venues",
                 source="venue",
-                kind="paper_info_venue_manifest_json",
                 payload=manifest,
-                count=len(papers),
-                metadata={
-                    "input_manifest": artifact_uri,
-                    "resolved_count": resolved_count,
-                    "missing_count": missing_count,
-                    "failed_count": failed_count,
-                },
             )
 
         except Exception as exc:

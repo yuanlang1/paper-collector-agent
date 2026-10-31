@@ -1,4 +1,5 @@
 from typing import Any
+from langchain.tools import ToolRuntime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,7 +26,6 @@ async def add_query_task_handler(
     params: dict[str, Any],
     context: object | None = None,
 ) -> dict[str, Any]:
-    del context
     request = AddQueryTaskArgs.model_validate(params)
 
     payload = request.model_dump(
@@ -33,7 +33,9 @@ async def add_query_task_handler(
         exclude_none=False,
     )
 
-    result = await task_service_client.add_query_task(payload)
+    if context is None:
+        raise ToolException("创建检索任务缺少用户上下文。")
+    result = await task_service_client.add_query_task(payload, user_id=context.user_id)
     if not result.get("ok"):
         raise ToolException(str(result.get("error") or "创建检索任务失败。"))
     return result
@@ -51,6 +53,7 @@ async def add_query_task_handler(
 )
 async def add_query_task_tool(
     *,
+    runtime: ToolRuntime,
     prompt: NonBlankString,
     searchTag: SearchTagArgs,
     queryUnderstanding: PromptUnderstandingArgs,
@@ -61,7 +64,7 @@ async def add_query_task_tool(
         "searchTag": searchTag,
         "queryUnderstanding": queryUnderstanding,
     }
-    return await add_query_task_handler(params, None)
+    return await add_query_task_handler(params, runtime.context)
 
 
 ADD_QUERY_TASK_TOOL = add_query_task_tool

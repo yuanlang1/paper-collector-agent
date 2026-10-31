@@ -13,7 +13,7 @@ MAX_EVIDENCE_QUERIES = 2
 RETRIEVAL_TOP_K = 6
 MAX_EVIDENCE_SNIPPETS = 6
 MAX_EVIDENCE_SNIPPETS_PER_PAPER = 2
-EVIDENCE_SELECTION_VERSION = "rrf-top6-v1"
+EVIDENCE_SELECTION_VERSION = "rrf-bm25-top6-v2"
 
 
 def _snippet(document):
@@ -115,6 +115,7 @@ class RetrieveEvidenceNode:
                     queries=queries,
                     settings={
                         "top_k": RETRIEVAL_TOP_K,
+                        "user_id": state["user_id"],
                         "selection_version": EVIDENCE_SELECTION_VERSION,
                     },
                 )
@@ -129,6 +130,7 @@ class RetrieveEvidenceNode:
                     for query in queries:
                         query_results.append(await retrieval.search(
                             query=query,
+                            user_id=state["user_id"],
                             top_k=RETRIEVAL_TOP_K,
                             paper_ids=claim["candidate_paper_ids"],
                         ))

@@ -7,8 +7,11 @@ from app.config import settings
 from app.rag.retrieval.base import BaseHybridRetrievalModule
 
 
-def paper_content_document_from_payload(payload: dict,) -> Document:
+def paper_content_document_from_payload(
+    payload: dict,
+) -> Document:
     metadata = {
+        "user_id": str(payload["user_id"]),
         "paper_id": str(payload["paper_id"]),
         "chunk_id": str(payload["chunk_id"]),
         "chunk_index": int(payload["chunk_index"]),
@@ -26,7 +29,10 @@ def paper_content_document_from_payload(payload: dict,) -> Document:
             }
         )
 
-    return Document(page_content=str(payload.get("content") or ""), metadata=metadata,)
+    return Document(
+        page_content=str(payload.get("content") or ""),
+        metadata=metadata,
+    )
 
 
 class PaperContentHybridRetrievalModule(BaseHybridRetrievalModule):
@@ -37,14 +43,17 @@ class PaperContentHybridRetrievalModule(BaseHybridRetrievalModule):
         default_top_k: int = 20,
     ) -> None:
         super().__init__(
-            collection_name=collection_name, default_top_k=default_top_k, default_prefetch_limit=80,
+            collection_name=collection_name,
+            text_field="content",
+            default_top_k=default_top_k,
+            default_prefetch_limit=80,
         )
 
     async def search(
         self,
         query: str,
         *,
-        sparse_query: str | None = None,
+        user_id: str,
         top_k: int | None = None,
         paper_ids: list[str] | None = None,
         exclude_chunks: list[tuple[str, str]] | None = None,
@@ -54,7 +63,12 @@ class PaperContentHybridRetrievalModule(BaseHybridRetrievalModule):
                 return []
 
             query_filter = models.Filter(
-                must=[models.FieldCondition(key="paper_id", match=models.MatchAny(any=paper_ids),)]
+                must=[
+                    models.FieldCondition(
+                        key="paper_id",
+                        match=models.MatchAny(any=paper_ids),
+                    )
+                ]
             )
         else:
             query_filter = None
@@ -76,8 +90,14 @@ class PaperContentHybridRetrievalModule(BaseHybridRetrievalModule):
             ]
 
         return await super().search(
-            query, sparse_query=sparse_query, top_k=top_k, query_filter=query_filter,
+            query,
+            user_id=user_id,
+            top_k=top_k,
+            query_filter=query_filter,
         )
 
-    def _payload_to_document(self, payload: dict,) -> Document:
+    def _payload_to_document(
+        self,
+        payload: dict,
+    ) -> Document:
         return paper_content_document_from_payload(payload)

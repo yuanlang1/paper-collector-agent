@@ -4,12 +4,18 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from fastapi import FastAPI
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-from app.api import internal_rag_router, internal_settings_router, run_router, setting_router, thread_router
+from app.api import (
+    internal_rag_router,
+    internal_settings_router,
+    run_router,
+    setting_router,
+    thread_router,
+)
 from app.common.exceptions import register_exception_handlers
 from app.config import settings
 from app.database import Base, create_database
-from app.infrastructure.paper_service.http_client import paper_service_http_client
 from app.infrastructure.nacos_registry import nacos_registry
+from app.infrastructure.paper_service.http_client import paper_service_http_client
 from app.memory.store import open_memory_store
 from app.rag.index_construction.base import close_index_resources
 

@@ -4,31 +4,24 @@ import asyncio
 import json
 import re
 from collections.abc import Mapping
-from contextvars import Context
 from typing import Any
-from weakref import WeakKeyDictionary
-
-from app.rag.index_construction.paper_reading_index_construction import (
-    ArticleProfile,
-    PaperReadingIndexConstructionModule,
-)
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.errors import GraphInterrupt
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.common.exceptions import NotFoundException
 from app.llm.artifacts.store import LocalArtifactStore
 from app.infrastructure.oss import AliyunOssObjectStore, OssObjectStore
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
 from app.llm.tools.search_tools.search_paper_index import (
     build_search_paper_index_tool,
+    search_paper_index,
 )
 from app.rag.retrieval.paper_content_retrieval import PaperContentHybridRetrievalModule
 
 
-ARTICLE_FIELDS = ("core_problem", "methods", "main_discussion")
-_READINGS = WeakKeyDictionary()
 MAX_SECTION_CHARS = 3_000
 
 
@@ -71,7 +64,9 @@ class NoReadablePaperContentError(ProfileExtractionError):
     """论文没有可供画像提取的正文证据。"""
 
 
-class SubmittedArticleProfile(BaseModel):
+class ArticleProfile(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     core_problem: str = Field(
         min_length=1,
         max_length=800,
@@ -88,6 +83,12 @@ class SubmittedArticleProfile(BaseModel):
         description="依据输入论文片段概括的主要发现、论证、结论或讨论重点。",
     )
 
+    @model_validator(mode="after")
+    def usable(self):
+        if all(value == "not_reported" for value in self.model_dump().values()):
+            raise ValueError("paper reading has no usable content")
+        return self
+
 
 class ExtractStudiesNode:
     def __init__(
@@ -98,7 +99,6 @@ class ExtractStudiesNode:
         chat: ChatClient | None = None,
         object_store: OssObjectStore | None = None,
         content_retrieval: PaperContentHybridRetrievalModule | None = None,
-        reading_index: Any | None = None,
         max_rounds: int = 3,
         query_top_k: int = 4,
         max_concurrent_papers: int = 3,
@@ -114,8 +114,8 @@ class ExtractStudiesNode:
             top_k=query_top_k,
         )
         self.model = base_model.bind_tools([self.search_paper_index_tool])
-        self.reading_index = reading_index or PaperReadingIndexConstructionModule()
         self.max_rounds = max_rounds
+        self.query_top_k = query_top_k
         self.max_concurrent_papers = max_concurrent_papers
 
     async def __call__(self, state: Mapping[str, Any], config=None) -> dict[str, Any]:
@@ -135,18 +135,23 @@ class ExtractStudiesNode:
             ) -> tuple[dict[str, str] | None, dict[str, Any] | None]:
                 paper_id = str(paper["paper_id"])
                 try:
-                    payload = await self._read_cached(paper=paper)
+                    source = await self.object_store.get_markdown(pdf_sha256=paper["oss_name"])
+                    if source is None or not source.content.strip():
+                        raise NoReadablePaperContentError("paper has no readable OSS Markdown")
+                    profile = await self._extract_profile(
+                        paper=paper, markdown=source.content, user_id=state["user_id"],
+                    )
                     return (
                         {
                             "paper_id": str(paper["paper_id"]),
                             "title": str(paper.get("title") or ""),
-                            **payload["profile"],
+                            **profile.model_dump(),
                         },
                         None,
                     )
                 except GraphInterrupt:
                     raise
-                except NoReadablePaperContentError as exc:
+                except (NoReadablePaperContentError, NotFoundException) as exc:
                     return (
                         None,
                         {
@@ -222,8 +227,6 @@ class ExtractStudiesNode:
                 run_id=state["child_run_id"],
                 step_key="extract_studies",
                 source="task_review",
-                kind="task_review_article_profiles_json",
-                count=len(records),
                 payload={
                     "task_id": state["task_id"],
                     "paper_ids_snapshot": state["paper_ids_snapshot"],
@@ -247,38 +250,8 @@ class ExtractStudiesNode:
             "error": None,
         }
 
-    async def _read_cached(self, *, paper):
-        paper_id = str(paper["paper_id"])
-        pending = _READINGS.setdefault(asyncio.get_running_loop(), {})
-
-        async def process():
-            cached = await self.reading_index.lookup(paper_id)
-            if cached:
-                return cached
-            source = await self.object_store.get_markdown(pdf_sha256=paper["oss_name"])
-            if source is None or not source.content.strip():
-                raise NoReadablePaperContentError("paper has no readable OSS Markdown")
-            profile = await self._extract_profile(paper=paper, markdown=source.content)
-            payload = PaperReadingIndexConstructionModule.payload(paper_id, profile)
-            for attempt in range(3):
-                try:
-                    await self.reading_index.save(payload)
-                    return payload
-                except Exception:
-                    if attempt == 2:
-                        raise
-                    await asyncio.sleep(0.2 * (attempt + 1))
-
-        if paper_id not in pending:
-            pending[paper_id] = asyncio.create_task(
-                process(),
-                context=Context(),
-            )
-            pending[paper_id].add_done_callback(lambda task: pending.pop(paper_id, None))
-        return await asyncio.shield(pending[paper_id])
-
     async def _extract_profile(
-        self, *, paper: Mapping[str, Any], markdown: str,
+        self, *, paper: Mapping[str, Any], markdown: str, user_id: str,
     ) -> ArticleProfile:
         paper_id = str(paper["paper_id"])
         candidates = self._markdown_context(markdown)
@@ -303,8 +276,12 @@ class ExtractStudiesNode:
                 if round_index == self.max_rounds - 1:
                     raise ProfileExtractionError("profile reading loop limit reached")
                 for tool_call in response.tool_calls:
-                    result = await self.search_paper_index_tool.ainvoke(
-                        {**tool_call["args"], "paper_id": paper_id},
+                    result = await search_paper_index(
+                        tool_call["args"],
+                        paper_id=paper_id,
+                        user_id=user_id,
+                        content_retrieval=self.content_retrieval,
+                        top_k=self.query_top_k,
                     )
                     messages.append(ToolMessage(
                         content=self._json(result),
@@ -331,12 +308,9 @@ class ExtractStudiesNode:
         except json.JSONDecodeError as exc:
             raise ProfileExtractionError(f"profile agent returned invalid JSON: {exc}") from exc
         try:
-            submitted = SubmittedArticleProfile.model_validate(payload)
+            return ArticleProfile.model_validate(payload)
         except ValueError as exc:
             raise ProfileExtractionError(f"profile JSON is invalid: {exc}") from exc
-        return ArticleProfile(
-            **{field: getattr(submitted, field).strip() for field in ARTICLE_FIELDS}
-        )
 
     @staticmethod
     def _correction_prompt(error: str) -> str:
@@ -380,8 +354,6 @@ class ExtractStudiesNode:
             run_id=state["child_run_id"],
             step_key="extract_studies",
             source="task_review",
-            kind="task_review_study_extraction_report_json",
-            count=len(failures),
             payload={
                 "task_id": state["task_id"],
                 "expected_paper_ids": expected_paper_ids,

@@ -6,9 +6,8 @@ from qdrant_client import models
 from app.config import settings
 from app.rag.retrieval.base import BaseHybridRetrievalModule
 
-class PaperHybridRetrievalModule(
-    BaseHybridRetrievalModule
-):
+
+class PaperHybridRetrievalModule(BaseHybridRetrievalModule):
     def __init__(
         self,
         *,
@@ -16,16 +15,17 @@ class PaperHybridRetrievalModule(
         default_top_k: int = 10,
     ) -> None:
         super().__init__(
-            collection_name = collection_name,
-            default_top_k = default_top_k,
-            default_prefetch_limit = 50,
+            collection_name=collection_name,
+            text_field="search_text",
+            default_top_k=default_top_k,
+            default_prefetch_limit=50,
         )
 
     async def search(
         self,
         query: str,
         *,
-        sparse_query: str | None = None,
+        user_id: str,
         top_k: int | None = None,
         paper_ids: list[str] | None = None,
     ) -> list[Document]:
@@ -34,10 +34,10 @@ class PaperHybridRetrievalModule(
                 return []
 
             query_filter = models.Filter(
-                must = [
+                must=[
                     models.FieldCondition(
-                        key = "paper_id",
-                        match = models.MatchAny(any = paper_ids),
+                        key="paper_id",
+                        match=models.MatchAny(any=paper_ids),
                     )
                 ]
             )
@@ -46,9 +46,9 @@ class PaperHybridRetrievalModule(
 
         return await super().search(
             query,
-            sparse_query = sparse_query,
-            top_k = top_k,
-            query_filter = query_filter,
+            user_id=user_id,
+            top_k=top_k,
+            query_filter=query_filter,
         )
 
     def _payload_to_document(
@@ -59,7 +59,7 @@ class PaperHybridRetrievalModule(
         abstract = str(payload.get("abstract") or "")
 
         return Document(
-            page_content = "\n\n".join(
+            page_content="\n\n".join(
                 part
                 for part in (
                     title,
@@ -67,7 +67,8 @@ class PaperHybridRetrievalModule(
                 )
                 if part
             ),
-            metadata = {
+            metadata={
+                "user_id": str(payload["user_id"]),
                 "paper_id": str(payload["paper_id"]),
                 "title": title,
                 "abstract": abstract,

@@ -422,14 +422,12 @@ class PersistRecommendedPapersNode:
             if not isinstance(papers, list):
                 raise ValueError("recommendation manifest papers must be a list")
 
-            entries, outcomes, invalid_count = self._prepare_entries(papers, child_run_id, task_id)
+            entries, outcomes, _ = self._prepare_entries(papers, child_run_id, task_id)
 
-            venue_cache_hits, venue_saved, venue_failed = await self._resolve_venues(
-                entries
-            )
+            await self._resolve_venues(entries)
             await self._save_new_papers(entries)
 
-            cache_updated, cache_failed = await self._update_paper_cache(entries)
+            _, cache_failed = await self._update_paper_cache(entries)
 
             await self._save_relations(entries)
 
@@ -442,27 +440,11 @@ class PersistRecommendedPapersNode:
                 run_id=child_run_id,
                 step_key="persist_recommended_papers",
                 source="paper_service",
-                kind="persisted_papers_manifest_json",
                 payload={
                     "run_id": child_run_id,
                     "step_key": "persist_recommended_papers",
                     "input_manifest": artifact_uri,
                     "results": outcomes,
-                },
-                count=persisted_count,
-                metadata={
-                    "input_count": len(papers),
-                    "invalid_input_count": invalid_count,
-                    "venue_cache_hit_count": venue_cache_hits,
-                    "venue_saved_count": venue_saved,
-                    "venue_failed_count": venue_failed,
-                    "paper_saved_count": sum(
-                        outcome["paper_save_status"] == "saved"
-                        for outcome in outcomes
-                    ),
-                    "paper_cache_updated_count": cache_updated,
-                    "paper_cache_failed_count": cache_failed,
-                    "relation_saved_count": persisted_count,
                 },
             )
         except Exception as exc:

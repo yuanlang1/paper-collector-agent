@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field
 
 from app.bus.events import SubagentFinishedEvent, SubagentStartedEvent
 from app.config import settings
+from app.core.identifiers import normalize_user_id
+from app.infrastructure.paper_service.http_client import positive_id
 
 
 def create_child_run_id(parent_run_id: str) -> str:
@@ -75,6 +77,8 @@ def build_paper_search_tool(*, model: BaseChatModel) -> BaseTool:
         )
 
         try:
+            user_id, numeric_user_id = normalize_user_id(runtime.context.user_id)
+            positive_id(numeric_user_id, "user_id")
             from app.llm.graph.workflows.paper_search.workflow import (
                 build_paper_search_workflow,
             )
@@ -88,7 +92,7 @@ def build_paper_search_tool(*, model: BaseChatModel) -> BaseTool:
                         **args,
                     },
                     config=runtime.config,
-                    context={"event_fields": fields},
+                    context={"event_fields": fields, "user_id": user_id},
                 ),
                 timeout=settings.SUBAGENT_DISPATCH_TIMEOUT_SECONDS,
             )

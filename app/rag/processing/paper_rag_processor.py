@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True, slots=True)
 class PaperRagInput:
     paper_id: int
+    user_id: str
     title: str
     abstract: str
     pdf_url: str
@@ -178,7 +179,9 @@ class PaperRagProcessor:
                 parsed_document.document,
                 paper,
             )
+
             await self._save_markdown(paper, parent_document.page_content)
+
             chunks = (
                 self.data_preparation.prepare_pdf_document(
                     parent_document,
@@ -193,6 +196,10 @@ class PaperRagProcessor:
 
                 if chunks:
                     await self.paper_content_index.build_index(chunks)
+                else:
+                    await self.paper_content_index.delete_paper_contents(
+                        [str(paper.paper_id)], user_id=paper.user_id
+                    )
 
             if not chunks:
                 return PaperRagResult(
@@ -266,6 +273,7 @@ class PaperRagProcessor:
     ) -> Document:
         metadata = {
             **parsed_document.metadata,
+            "user_id": paper.user_id,
             "paper_id": str(paper.paper_id),
             "parent_id": str(paper.paper_id),
             "title": paper.title,

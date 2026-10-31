@@ -223,8 +223,6 @@ class AssembleReviewNode:
                 run_id=state["child_run_id"],
                 step_key="assemble_review",
                 source="task_review",
-                kind="task_review_draft_json",
-                count=len(sections),
                 payload=review_draft,
             )
         except Exception as exc:

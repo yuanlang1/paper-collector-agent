@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+from langgraph.runtime import Runtime
+from app.llm.context import PaperSearchContext
 
 from app.infrastructure.paper_service.task_client import (
     TaskServiceClient,
@@ -64,17 +66,13 @@ class CreatePaperSearchTaskNode:
             run_id=child_run_id,
             step_key="bind_recommendations_to_task",
             source="task_service",
-            kind="task_bound_recommendation_manifest_json",
             payload=manifest,
-            count=len(papers),
-            metadata={
-                "input_manifest": artifact_uri,
-                "search_task_id": task_id,
-            },
         )
         return artifact.artifact_uri
 
-    async def _create_remote_task(self, state: Mapping[str, Any]) -> dict[str, Any]:
+    async def _create_remote_task(
+        self, state: Mapping[str, Any], runtime: Runtime[PaperSearchContext]
+    ) -> dict[str, Any]:
         try:
             request = AddQueryTaskArgs.model_validate(
                 {
@@ -98,7 +96,9 @@ class CreatePaperSearchTaskNode:
         )
 
         try:
-            result = await self.client.add_query_task(payload)
+            result = await self.client.add_query_task(
+                payload, user_id=runtime.context["user_id"]
+            )
         except Exception as exc:
             return {
                 "stage": "failed",
@@ -176,12 +176,14 @@ class CreatePaperSearchTaskNode:
             "error": None,
         }
 
-    async def __call__(self, state: Mapping[str, Any]) -> dict[str, Any]:
+    async def __call__(
+        self, state: Mapping[str, Any], runtime: Runtime[PaperSearchContext]
+    ) -> dict[str, Any]:
         task_id = state.get("paper_service_task_id")
         created = not _is_valid_task_id(task_id)
         update = {}
         if created:
-            update = await self._create_remote_task(state)
+            update = await self._create_remote_task(state, runtime)
             if update.get("status") in {"failed", "blocked"}:
                 return update
             task_id = update["paper_service_task_id"]

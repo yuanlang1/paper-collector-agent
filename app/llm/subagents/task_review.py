@@ -98,6 +98,7 @@ async def task_review_agent(
                     "run_id": parent_run_id, 
                     "child_run_id": run_id,
                     "conversation_id": session_id,
+                    "user_id": str(runtime.context.user_id),
                     **args,
                 },
                 config = runtime.config,

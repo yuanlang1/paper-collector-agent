@@ -1,5 +1,5 @@
 import json
-from datetime import date, datetime, time, timezone
+from datetime import UTC, date, datetime, time
 from typing import Any
 
 from app.infrastructure.paper_service.http_client import (
@@ -35,8 +35,8 @@ class PaperServiceClient(ServiceClient):
         else:
             raise ValueError("published_date must be an ISO-8601 date or datetime")
         if resolved.tzinfo is None:
-            resolved = resolved.replace(tzinfo=timezone.utc)
-        return resolved.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+            resolved = resolved.replace(tzinfo=UTC)
+        return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
     @classmethod
     def _build_request(cls, item: dict[str, Any]) -> dict[str, Any]:
@@ -79,7 +79,9 @@ class PaperServiceClient(ServiceClient):
                 raise ValueError("papers must not be empty")
             requests = [self._build_request(paper) for paper in papers]
             response = await self.http.request(
-                "POST", "/internal/paper/batch-save", json={"papers": requests},
+                "POST",
+                "/internal/paper/batch-save",
+                json={"papers": requests},
             )
             saved = [object_value(item) for item in list_value(response["data"])]
             if len(saved) != len(requests) or any(
@@ -153,29 +155,39 @@ class PaperServiceClient(ServiceClient):
             if len(paper_ids) != len(set(paper_ids)):
                 raise ValueError("paper_ids must be unique")
             response = await self.http.request(
-                "POST", "/internal/paper/batch-details", json={"paperIds": paper_ids},
+                "POST",
+                "/internal/paper/batch-details",
+                json={"paperIds": paper_ids},
             )
             data = object_value(response["data"])
             papers = []
             for value in list_value(data["papers"]):
                 item = object_value(value)
                 published_date = item.get("publishedDate")
-                papers.append({
-                    "paper_id": positive_id(item["paperId"], "paper_id"),
-                    "title": text_value(item.get("title")).strip(),
-                    "abstract": text_value(item.get("paperAbstract")).strip(),
-                    "pdf_url": text_value(item.get("pdfUrl")).strip(),
-                    "oss_name": text_value(item.get("ossName")).strip(),
-                    "year": date.fromisoformat(published_date).year if published_date is not None else None,
-                })
+                papers.append(
+                    {
+                        "paper_id": positive_id(item["paperId"], "paper_id"),
+                        "title": text_value(item.get("title")).strip(),
+                        "abstract": text_value(item.get("paperAbstract")).strip(),
+                        "pdf_url": text_value(item.get("pdfUrl")).strip(),
+                        "oss_name": text_value(item.get("ossName")).strip(),
+                        "year": date.fromisoformat(published_date).year
+                        if published_date is not None
+                        else None,
+                    }
+                )
             missing = [
                 positive_id(value, "paper_id")
                 for value in list_value(data["missingPaperIds"])
             ]
             returned_ids = [paper["paper_id"] for paper in papers] + missing
-            if len(returned_ids) != len(set(returned_ids)) or set(returned_ids) != set(paper_ids):
+            if len(returned_ids) != len(set(returned_ids)) or set(returned_ids) != set(
+                paper_ids
+            ):
                 raise ValueError("Paper details do not match requested IDs")
-            return self._success({"papers": papers, "missing_paper_ids": missing}, response)
+            return self._success(
+                {"papers": papers, "missing_paper_ids": missing}, response
+            )
         except CLIENT_ERRORS as exc:
             return self._error(exc)
 

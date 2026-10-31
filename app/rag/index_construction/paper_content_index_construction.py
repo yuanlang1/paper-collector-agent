@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -10,6 +11,7 @@ from app.config import settings
 from app.rag.index_construction.base import (
     BaseQdrantIndexConstructionModule,
     IndexConstructionResult,
+    user_filter,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,18 +39,20 @@ class PaperContentIndexConstructionModule(BaseQdrantIndexConstructionModule):
         result = await super().build_index(documents)
 
         if replace_existing and documents:
-            chunk_ids_by_paper: dict[str, set[str]] = {}
+            chunk_ids_by_paper: dict[tuple[str, str], set[str]] = {}
 
             for document in documents:
                 paper_id = str(document.metadata["paper_id"])
-                chunk_ids_by_paper.setdefault(paper_id, set()).add(
+                user_id = str(document.metadata["user_id"])
+                chunk_ids_by_paper.setdefault((user_id, paper_id), set()).add(
                     str(document.metadata["chunk_id"])
                 )
 
-            for paper_id, chunk_ids in chunk_ids_by_paper.items():
+            for (user_id, paper_id), chunk_ids in chunk_ids_by_paper.items():
                 await self._delete_stale_paper_contents(
                     paper_id,
                     chunk_ids,
+                    user_id=user_id,
                 )
 
         return result
@@ -57,7 +61,9 @@ class PaperContentIndexConstructionModule(BaseQdrantIndexConstructionModule):
         self,
         document: Document,
     ) -> str:
-        return str(document.metadata["chunk_id"])
+        return json.dumps(
+            [str(document.metadata["user_id"]), str(document.metadata["chunk_id"])]
+        )
 
     def _build_embedding_text(
         self,
@@ -73,6 +79,7 @@ class PaperContentIndexConstructionModule(BaseQdrantIndexConstructionModule):
         paper_id = str(metadata["paper_id"])
 
         payload: dict[str, Any] = {
+            "user_id": str(metadata["user_id"]),
             "paper_id": paper_id,
             "parent_id": str(metadata.get("parent_id") or paper_id),
             "chunk_id": str(metadata["chunk_id"]),
@@ -96,8 +103,25 @@ class PaperContentIndexConstructionModule(BaseQdrantIndexConstructionModule):
 
     def _payload_indexes(
         self,
-    ) -> list[tuple[str, models.PayloadSchemaType]]:
+    ) -> list[tuple[str, models.PayloadFieldSchema]]:
         return [
+            (
+                "user_id",
+                models.KeywordIndexParams(
+                    type=models.KeywordIndexType.KEYWORD,
+                    is_tenant=True,
+                ),
+            ),
+            (
+                "content",
+                models.TextIndexParams(
+                    type=models.TextIndexType.TEXT,
+                    tokenizer=models.TokenizerType.MULTILINGUAL,
+                    lowercase=True,
+                    scoring=models.TextScoringParams(type=models.TextScoringType.BM25),
+                    enable_hnsw=False,
+                ),
+            ),
             (
                 "paper_id",
                 models.PayloadSchemaType.KEYWORD,
@@ -111,7 +135,10 @@ class PaperContentIndexConstructionModule(BaseQdrantIndexConstructionModule):
     async def delete_paper_contents(
         self,
         paper_ids: list[str],
+        *,
+        user_id: str,
     ) -> None:
+        tenant_filter = user_filter(user_id)
         if not paper_ids:
             return
 
@@ -127,12 +154,13 @@ class PaperContentIndexConstructionModule(BaseQdrantIndexConstructionModule):
             points_selector=models.FilterSelector(
                 filter=models.Filter(
                     must=[
+                        tenant_filter,
                         models.FieldCondition(
                             key="paper_id",
                             match=models.MatchAny(
                                 any=[str(paper_id) for paper_id in paper_ids]
                             ),
-                        )
+                        ),
                     ]
                 )
             ),
@@ -143,16 +171,19 @@ class PaperContentIndexConstructionModule(BaseQdrantIndexConstructionModule):
         self,
         paper_id: str,
         retained_chunk_ids: set[str],
+        *,
+        user_id: str,
     ) -> None:
         await self.client.delete(
             collection_name=self.collection_name,
             points_selector=models.FilterSelector(
                 filter=models.Filter(
                     must=[
+                        user_filter(user_id),
                         models.FieldCondition(
                             key="paper_id",
                             match=models.MatchValue(value=paper_id),
-                        )
+                        ),
                     ],
                     must_not=[
                         models.FieldCondition(

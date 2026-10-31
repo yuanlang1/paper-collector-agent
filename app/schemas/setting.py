@@ -8,6 +8,7 @@ class PostAddModelRequest(BaseModel):
     base_url: str
     api_key: str
     is_small_model: bool
+    is_default: bool = False
 
 
 class UpdateSourceLimitsRequest(BaseModel):

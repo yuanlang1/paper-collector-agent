@@ -16,7 +16,6 @@ async def save(store, state, name, payload):
         run_id=state["child_run_id"],
         step_key=name,
         source="task_review",
-        kind=f"task_review_{name}_json",
         payload={"task_id": state["task_id"], **payload},
     )
     return artifact.artifact_uri

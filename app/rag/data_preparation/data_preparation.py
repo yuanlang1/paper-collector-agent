@@ -5,12 +5,13 @@ from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
-from app.schemas.file_parser import PdfSourceBlock
 from langchain_core.documents import Document
 from langchain_text_splitters import (
     MarkdownHeaderTextSplitter,
     RecursiveCharacterTextSplitter,
 )
+
+from app.schemas.file_parser import PdfSourceBlock
 
 logger = logging.getLogger(__name__)
 

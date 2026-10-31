@@ -47,15 +47,7 @@ class PaperEnrichmentNode:
                 run_id=child_run_id,
                 step_key="paper_enrichment",
                 source="enriched",
-                kind="paper_info_enriched_manifest_json",
                 payload=manifest,
-                count=len(kept_papers),
-                metadata={
-                    "input_manifest": artifact_uri,
-                    "pdf_enriched_count": 0,
-                    "venue_enriched_count": 0,
-                    "removed_without_pdf_count": len(removed_papers),
-                },
             )
         except Exception as exc:
             return {

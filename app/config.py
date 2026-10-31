@@ -114,7 +114,6 @@ class Settings(BaseSettings):
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str | None = None
     PAPER_COLLECTION_NAME: str
-    PAPER_READING_COLLECTION_NAME: str = "paper_reading"
     PAPER_CONTENT_COLLECTION_NAME: str
     MODEL_DIR: str = "models"
     SPARSE_EMBEDDING_MODEL_NAME: str = "Qdrant/bm25"

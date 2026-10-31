@@ -1,5 +1,6 @@
 from langchain_core.language_models import BaseChatModel
 from langgraph.graph import END, START, StateGraph
+from app.llm.context import PaperSearchContext
 
 from app.llm.graph.workflows.paper_search.nodes.abstract_enrich import (
     AbstractEnrichNode,
@@ -126,7 +127,11 @@ def build_paper_search_workflow(
             node=node_overrides.get(name, default),
         )
 
-    builder = StateGraph(PaperSearchWorkflowState, output_schema=PaperSearchOutputState)
+    builder = StateGraph(
+        PaperSearchWorkflowState,
+        output_schema=PaperSearchOutputState,
+        context_schema=PaperSearchContext,
+    )
     builder.add_node(
         "initialize",
         node("initialize", initialize_paper_search_node),

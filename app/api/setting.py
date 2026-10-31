@@ -23,6 +23,7 @@ async def add_model(
         model=body.model_name,
         api_key=body.api_key,
         is_small_model=body.is_small_model,
+        is_default=body.is_default,
     )
 
     return ServiceResponse.build_success_response(data=llm_config.id)

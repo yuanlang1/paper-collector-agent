@@ -17,7 +17,8 @@ Base = declarative_base()
 
 
 def create_database(
-    *, poolclass: type[Pool] | None = None,
+    *,
+    poolclass: type[Pool] | None = None,
 ) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     url = make_url(settings.DATABASE_POSTGRES_URL).set(drivername="postgresql+psycopg")
     engine = create_async_engine(

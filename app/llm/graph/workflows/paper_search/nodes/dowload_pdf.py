@@ -189,14 +189,7 @@ class PdfDownloadNode:
                 run_id=child_run_id,
                 step_key="download_pdfs",
                 source="pdf",
-                kind="paper_info_pdf_manifest_json",
                 payload=manifest,
-                count=len(downloaded_papers),
-                metadata={
-                    "input_manifest": artifact_uri,
-                    "downloaded_count": len(downloaded_papers),
-                    "removed_count": len(removed_papers),
-                },
             )
 
             has_existing = False

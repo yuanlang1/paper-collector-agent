@@ -11,6 +11,7 @@ class TaskReviewOutputState(TypedDict):
 class TaskReviewWorkflowState(TypedDict, total=False):
     run_id: str
     child_run_id: str
+    user_id: str
     content: str
     task_id: int
     topic: str

@@ -313,15 +313,7 @@ class CrossrefMetadataEnrichmentNode:
                 run_id=child_run_id,
                 step_key="crossref_enrichment",
                 source="crossref",
-                kind="paper_info_crossref_enriched_manifest_json",
                 payload=manifest,
-                count=len(papers),
-                metadata={
-                    "input_manifest": artifact_uri,
-                    "matched_count": matched_count,
-                    "unmatched_count": unmatched_count,
-                    "failed_count": len(warnings),
-                },
             )
 
         except Exception as exc:

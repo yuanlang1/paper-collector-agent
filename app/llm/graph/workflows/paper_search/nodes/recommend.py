@@ -347,25 +347,7 @@ class RecommendationNode:
                 run_id=child_run_id,
                 step_key="recommend_papers",
                 source="recommendation",
-                kind="paper_info_recommendation_manifest_json",
                 payload=manifest,
-                count=len(kept_papers),
-                metadata={
-                    "abstract_input_manifest": abstract_artifact_uri,
-                    "existing_input_manifest": existing_artifact_uri,
-                    "new_input_count": len(new_papers),
-                    "existing_input_count": len(existing_papers),
-                    "kept_count": len(kept_papers),
-                    "low_recommendation_count": len(
-                        removed_low_recommendation
-                    ),
-                    "recommendation_failed_count": len(
-                        removed_recommendation_failed
-                    ),
-                    "invalid_existing_count": len(
-                        skipped_invalid_existing
-                    ),
-                },
             )
 
         except Exception as exc:

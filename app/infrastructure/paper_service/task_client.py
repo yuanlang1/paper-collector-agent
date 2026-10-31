@@ -1,4 +1,5 @@
 from typing import Any
+from app.core.identifiers import normalize_user_id
 
 from app.infrastructure.paper_service.http_client import (
     CLIENT_ERRORS,
@@ -10,13 +11,18 @@ from app.llm.graph.workflows.paper_search_schemas import PaperTypeCode
 
 
 class TaskServiceClient(ServiceClient):
-    async def add_query_task(self, request: dict[str, Any]) -> dict[str, Any]:
+    async def add_query_task(
+        self, request: dict[str, Any], *, user_id: str | int
+    ) -> dict[str, Any]:
         try:
+            _, numeric_user_id = normalize_user_id(user_id)
+            positive_id(numeric_user_id, "user_id")
             tag = request["searchTag"]
             response = await self.http.request(
                 "POST",
                 "/internal/task/add-task",
                 json={
+                    "userId": numeric_user_id,
                     "prompt": request["prompt"],
                     "searchTag": {
                         "yearTag": tag["yearTag"],

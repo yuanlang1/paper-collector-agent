@@ -658,7 +658,7 @@ class NormalizeDeduplicateFilterNode:
                 await self._resolve_cached_papers(normalized_papers)
             )
 
-            new_papers, existing_papers, lookup_warning, lookup_count = (
+            new_papers, existing_papers, lookup_warning, _ = (
                 await self._lookup_existing_papers(lookup_papers, cached_existing_by_key)
             )
 
@@ -666,20 +666,10 @@ class NormalizeDeduplicateFilterNode:
                 run_id=child_run_id,
                 step_key="find_existing_papers",
                 source="database",
-                kind="existing_paper_manifest_json",
                 payload={
                     "run_id": child_run_id,
                     "step_key": "find_existing_papers",
                     "papers": existing_papers,
-                },
-                count=len(existing_papers),
-                metadata={
-                    "lookup_candidate_count": lookup_count,
-                    "paper_cache_existing_count": len(
-                        cached_existing_by_key
-                    ),
-                    "paper_cache_miss_count": cache_miss_count,
-                    "existing_count": len(existing_papers),
                 },
             )
 
@@ -702,7 +692,6 @@ class NormalizeDeduplicateFilterNode:
                 run_id=child_run_id,
                 step_key="search_quality",
                 source="filter",
-                kind="search_quality_report_json",
                 payload={
                     "effective_count": len(new_papers) + len(existing_papers),
                     "source_stats": source_stats,
@@ -729,16 +718,7 @@ class NormalizeDeduplicateFilterNode:
                 run_id=child_run_id,
                 step_key="normalize_deduplicate_filter",
                 source="normalized",
-                kind="paper_info_manifest_json",
                 payload=manifest,
-                count=len(new_papers),
-                metadata={
-                    "input_artifact_refs": artifact_uris,
-                    "identity_conflict_count": len(identity_conflicts),
-                    "filtered_count": filtered_count,
-                    "rejected_count": len(rejected),
-                    "existing_count": len(existing_papers),
-                },
             )
 
         except Exception as exc:

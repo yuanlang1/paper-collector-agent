@@ -149,7 +149,6 @@ class ReviewNode:
                 run_id=child_run_id,
                 step_key="search_review",
                 source="search_review",
-                kind="search_review_decision_json",
                 payload={
                     "effective_count": effective,
                     "target_count": target,
