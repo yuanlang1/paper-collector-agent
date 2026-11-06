@@ -5,6 +5,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from typing import Any, Literal
+from contextlib import nullcontext
 
 import httpx
 from langchain_core.tools import ToolException, tool
@@ -347,7 +348,7 @@ def _parse_arxiv_feed(
                 "version": _extract_version(arxiv_id),
                 "title": title,
                 "authors": authors,
-                "abstract": abstract,
+                "abstract": abstract if include_abstract else None,
                 "published": clean_text(
                     entry.findtext(
                         "atom:published",
@@ -426,6 +427,8 @@ async def _fetch_arxiv_page(
 async def arxiv_search_service(
     params: dict[str, Any],
     context: object | None = None,
+    *,
+    http_client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any]:
     del context
 
@@ -452,7 +455,7 @@ async def arxiv_search_service(
         stop_reason = "upstream_exhausted"
         page_warning: str | None = None
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with (nullcontext(http_client) if http_client is not None else httpx.AsyncClient(timeout=30.0)) as client:
             while len(papers) < args.total_limit and pages_fetched < args.max_pages:
                 page_size = min(
                     args.max_results,
@@ -592,14 +595,6 @@ async def arxiv_search_service(
             message=str(exc),
             retryable=False,
         )
-
-    except Exception as exc:
-        return failure(
-            code="INTERNAL_ERROR",
-            message=str(exc),
-            retryable=False,
-        )
-
 
 @tool(
     "arxiv_search",

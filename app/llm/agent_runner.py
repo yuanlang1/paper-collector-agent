@@ -14,9 +14,20 @@ from app.llm.loop.agent_loop import AgentLoop
 from app.llm.tools.registry import ToolRegistry
 
 _EVENT_TRACE_FIELDS = {
-    "thread_id", "run_id", "session_id", "user_id", "app_run_id",
-    "parent_thread_id", "parent_run_id", "parent_session_id",
-    "tool_use_id", "attempt", "attempts", "namespace", "agent_scope", "ts",
+    "thread_id",
+    "run_id",
+    "session_id",
+    "user_id",
+    "app_run_id",
+    "parent_thread_id",
+    "parent_run_id",
+    "parent_session_id",
+    "tool_use_id",
+    "attempt",
+    "attempts",
+    "namespace",
+    "agent_scope",
+    "ts",
 }
 
 
@@ -105,11 +116,14 @@ class AgentRunner:
                     if isinstance(payload, BaseModel):
                         payload = payload.model_dump(mode="json")
                     payload = {
-                        key: value for key, value in payload.items()
+                        key: value
+                        for key, value in payload.items()
                         if key not in _EVENT_TRACE_FIELDS
                     }
                     if payload.get("type") in ("tool_start", "tool_end", "tool_failed"):
-                        payload["label"] = self.tool_registry.get_preview_name(payload["name"])
+                        payload["label"] = self.tool_registry.get_preview_name(
+                            payload["name"]
+                        )
                     yield payload
 
                 elif part["type"] == "messages":

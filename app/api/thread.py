@@ -16,7 +16,7 @@ async def create_thread(
     body: CreateThreadRequest, db: Annotated[AsyncSession, Depends(get_db)]
 ):
     thread = await thread_service.create_thread(
-        db, user_id=body.user_id, message=body.topic
+        db, user_id=body.user_id, message=body.message
     )
     return ServiceResponse.build_success_response(data=thread)
 

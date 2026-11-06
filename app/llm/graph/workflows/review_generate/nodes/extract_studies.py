@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.common.exceptions import NotFoundException
 from app.llm.artifacts.store import LocalArtifactStore
-from app.infrastructure.oss import AliyunOssObjectStore, OssObjectStore
+from app.infrastructure.oss import oss_store, OssObjectStore
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
 from app.llm.tools.search_tools.search_paper_index import (
@@ -107,7 +107,7 @@ class ExtractStudiesNode:
         base_model = model or (chat or ChatClient()).model(
             ModelOptions(temperature=0),
         )
-        self.object_store = object_store or AliyunOssObjectStore()
+        self.object_store = object_store or oss_store
         self.content_retrieval = content_retrieval or PaperContentHybridRetrievalModule()
         self.search_paper_index_tool = build_search_paper_index_tool(
             content_retrieval=self.content_retrieval,

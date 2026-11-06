@@ -37,7 +37,7 @@ class ChatRequest(BaseModel):
 
 class CreateThreadRequest(BaseModel):
     user_id: int = Field(gt=0)
-    topic: str | None = Field(default=None, max_length=500)
+    message: str | None = Field(default=None, max_length=500)
 
 
 class RunInfo(BaseModel):

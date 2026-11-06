@@ -1,5 +1,7 @@
 from langchain_core.language_models import BaseChatModel
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Send
+from app.llm.graph.workflows.paper_search.nodes.collect_search import CollectSearchNode
 from app.llm.context import PaperSearchContext
 
 from app.llm.graph.workflows.paper_search.nodes.abstract_enrich import (
@@ -7,9 +9,6 @@ from app.llm.graph.workflows.paper_search.nodes.abstract_enrich import (
 )
 from app.llm.graph.workflows.paper_search.nodes.create_task import (
     CreatePaperSearchTaskNode,
-)
-from app.llm.graph.workflows.paper_search.nodes.crossref_enrich import (
-    CrossrefMetadataEnrichmentNode,
 )
 from app.llm.graph.workflows.paper_search.nodes.dowload_pdf import PdfDownloadNode
 from app.llm.graph.workflows.paper_search.nodes.enrich import PaperEnrichmentNode
@@ -38,6 +37,7 @@ from app.llm.graph.workflows.paper_search.progress import instrument_paper_searc
 from app.llm.graph.workflows.paper_search.state import (
     PaperSearchOutputState,
     PaperSearchWorkflowState,
+    SearchWorkerState,
 )
 
 
@@ -83,9 +83,21 @@ def _terminal_target(state: PaperSearchWorkflowState) -> str:
     return "finalize_result"
 
 
-def _route_after_review(state: PaperSearchWorkflowState) -> str:
+def _dispatch_search(state):
+    tasks = state.get("active_search_tasks", {})
+    if not tasks:
+        return _terminal_target(state)
+    return [Send("search", {"search_task": task, "child_run_id": state["child_run_id"]})
+            for task in tasks.values()]
+
+
+def _route_after_plan(state):
+    return _dispatch_search(state) if state.get("stage") == "searching" else _terminal_target(state)
+
+
+def _route_after_review(state):
     if state.get("stage") == "searching":
-        return "search"
+        return _dispatch_search(state)
     if state.get("stage") == "enriching":
         return "enrich"
     return _terminal_target(state)
@@ -147,17 +159,15 @@ def build_paper_search_workflow(
         "create_task",
         node("create_task", CreatePaperSearchTaskNode(client=task_client)),
     )
-    builder.add_node("search", node("search", SearchNode()))
+    builder.add_node("search", node("search", SearchNode()), input_schema=SearchWorkerState)
+    builder.add_node("collect_search", node("collect_search", CollectSearchNode()))
     builder.add_node("filter", node("filter", NormalizeDeduplicateFilterNode()))
     builder.add_node("review", node("review", ReviewNode(model=model)))
     builder.add_node("enrich", node("enrich", PaperEnrichmentNode()))
-    builder.add_node(
-        "crossref_enrich", node("crossref_enrich", CrossrefMetadataEnrichmentNode())
-    )
     builder.add_node("venue", node("venue", VenueResolutionNode(model=model)))
     builder.add_node("download_pdf", node("download_pdf", PdfDownloadNode()))
     builder.add_node(
-        "abstract_enrich", node("abstract_enrich", AbstractEnrichNode(model=model))
+        "abstract_enrich", node("abstract_enrich", AbstractEnrichNode())
     )
     builder.add_node("recommend", node("recommend", RecommendationNode(model=model)))
     builder.add_node("persist", node("persist", PersistRecommendedPapersNode()))
@@ -192,13 +202,12 @@ def build_paper_search_workflow(
     )
     builder.add_conditional_edges(
         "plan_search",
-        _route("searching", "search"),
-        _route_paths("search"),
+        _route_after_plan,
+        ["search", "finalize_pdfs", "finalize_result"],
     )
+    builder.add_edge("search", "collect_search")
     builder.add_conditional_edges(
-        "search",
-        _route("normalizing", "filter"),
-        _route_paths("filter"),
+        "collect_search", _route("normalizing", "filter"), _route_paths("filter"),
     )
     builder.add_conditional_edges(
         "filter",
@@ -217,11 +226,6 @@ def build_paper_search_workflow(
     )
     builder.add_conditional_edges(
         "enrich",
-        _route("enriching_crossref", "crossref_enrich"),
-        _route_paths("crossref_enrich"),
-    )
-    builder.add_conditional_edges(
-        "crossref_enrich",
         _route("resolving_venues", "venue"),
         _route_paths("venue"),
     )

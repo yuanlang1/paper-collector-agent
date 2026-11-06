@@ -221,7 +221,11 @@ async def run(
             user_id=run.user_id,
             think_effort=metadata.get("think_effort"),
         )
-        tool_registry = agent_build.build_tools(db, user_id=run.user_id, model=model)
+        tool_registry = agent_build.build_tools(
+            db,
+            user_id=run.user_id,
+            model=model,
+        )
 
         runner = AgentRunner(
             context=AgentRunContext(

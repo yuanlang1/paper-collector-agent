@@ -6,6 +6,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from app.core.identifiers import validate_run_id
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.tools.file_tools.download_file import download_file_handler
 
@@ -76,10 +77,7 @@ class PdfDownloadNode:
         result = await download_file_handler(
             {
                 "url": str(paper_info["pdf_url"]),
-                "save_dir": (
-                    f"{LIBRARY_SAVE_DIR}/"
-                    f"{_safe_filename_part(child_run_id, max_length=120)}"
-                ),
+                "save_dir": f"{validate_run_id(child_run_id)}/{LIBRARY_SAVE_DIR}",
                 "file_name": self._pdf_file_name(paper_info),
                 "expected_type": "pdf",
                 "overwrite": False,

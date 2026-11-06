@@ -22,7 +22,12 @@ async def initialize_paper_search_node(
 
     return {
         "original_prompt": request.prompt,
-        "paper_service_task_id": request.task_id,
+        "provider_ids": request.provider_ids,
+        "search_results": {},
+        "search_history": {},
+        "provider_stats": {},
+        "provider_cursors": {},
+        "paper_service_task_id": None,
         "warnings": [],
         "progress": {},
         "downloaded_pdf_paths": [],

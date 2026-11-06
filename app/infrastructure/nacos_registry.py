@@ -21,7 +21,7 @@ class NacosRegistry:
         self.client = None
         self.service_ip = settings.SERVICE_IP
         self.service_port = settings.SERVICE_PORT
-    
+
     def _build_client_config(self):
         builder = (
             ClientConfigBuilder()
@@ -121,4 +121,3 @@ class NacosRegistry:
 
 
 nacos_registry = NacosRegistry()
-

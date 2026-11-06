@@ -2,12 +2,12 @@ import asyncio
 from typing import Any
 from uuid import uuid4
 
-from langchain.tools import ToolRuntime
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables.config import patch_config
 from langchain_core.tools import BaseTool, ToolException, tool
 from langgraph.errors import GraphRecursionError
+from langgraph.prebuilt.tool_node import ToolRuntime
 from langgraph.types import interrupt
 from pydantic import BaseModel, ConfigDict, Field
 

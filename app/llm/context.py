@@ -1,9 +1,11 @@
 from dataclasses import dataclass
+
 from typing_extensions import TypedDict
 
 
 class PaperSearchContext(TypedDict):
     user_id: str
+    event_fields: dict
 
 
 @dataclass(kw_only=True)

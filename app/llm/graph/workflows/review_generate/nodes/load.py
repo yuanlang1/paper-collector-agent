@@ -119,7 +119,7 @@ class LoadTaskCorpusNode:
             paper["rag_status"]
             for paper in papers
         )
-        task_status = str(result.get("task_status") or "").strip().lower()
+        task_rag_status = str(result.get("rag_status") or "").strip().lower()
 
         warnings = list(state.get("warnings", []))
 
@@ -127,7 +127,7 @@ class LoadTaskCorpusNode:
             warnings.append(f"Removed {duplicate_count} duplicate task-paper relation(s).")
 
         if (
-            task_status != "rag_completed"
+            task_rag_status != "rag_completed"
             or rag_status_counts["pending"]
             or rag_status_counts["indexing"]
         ):
@@ -174,7 +174,8 @@ class LoadTaskCorpusNode:
             source = "task_review",
             payload = {
                 "task_id": task_id,
-                "task_status": task_status,
+                "search_status": result.get("search_status"),
+                "rag_status": task_rag_status,
                 "paper_ids_snapshot": paper_ids_snapshot,
                 "papers": review_papers,
                 "summary": {

@@ -138,7 +138,8 @@ class PaperServiceClient(ServiceClient):
             return self._success(
                 {
                     "task_id": data["taskId"],
-                    "task_status": data["taskStatus"],
+                    "search_status": text_value(data["searchStatus"]),
+                    "rag_status": text_value(data["ragStatus"]),
                     "papers": papers,
                 },
                 response,

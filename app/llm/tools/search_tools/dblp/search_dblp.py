@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import Any, Literal
+from contextlib import nullcontext
 
 import httpx
 from langchain_core.tools import ToolException, tool
@@ -285,7 +286,7 @@ def _parse_dblp_result(
             papers.append(paper)
 
     return {
-        "total_results": parse_year(hits_object.get("@total")) or 0,
+        "total_results": int(hits_object.get("@total") or 0),
         "papers": papers,
     }
 
@@ -293,6 +294,8 @@ def _parse_dblp_result(
 async def dblp_search_service(
     params: dict[str, Any],
     context: object | None = None,
+    *,
+    http_client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any]:
     del context
 
@@ -323,7 +326,7 @@ async def dblp_search_service(
         stop_reason = "upstream_exhausted"
         page_warning: str | None = None
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with (nullcontext(http_client) if http_client is not None else httpx.AsyncClient(timeout=30.0)) as client:
             while len(papers) < args.total_limit and pages_fetched < args.max_pages:
                 page_size = min(
                     args.h,
@@ -473,14 +476,6 @@ async def dblp_search_service(
             message=str(exc),
             retryable=False,
         )
-
-    except Exception as exc:
-        return failure(
-            code="INTERNAL_ERROR",
-            message=str(exc),
-            retryable=False,
-        )
-
 
 @tool(
     "dblp_search",

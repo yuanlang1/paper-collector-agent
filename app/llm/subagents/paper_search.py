@@ -5,12 +5,12 @@ import hashlib
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from langchain.tools import ToolRuntime
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, tool
 from langgraph.errors import GraphBubbleUp, GraphInterrupt
-from pydantic import BaseModel, Field
+from langgraph.prebuilt.tool_node import ToolRuntime
+from pydantic import BaseModel, Field, model_validator
 
 from app.bus.events import SubagentFinishedEvent, SubagentStartedEvent
 from app.config import settings
@@ -34,12 +34,23 @@ class PaperSearchParams(BaseModel):
         max_length=2_000,
         description="用户原始论文检索要求，包含研究主题及用户明确提出的限制。",
     )
-    task_id: int | None = Field(
+
+    provider_ids: list[str] | None = Field(
         default=None,
-        gt=0,
-        strict=True,
-        description="可选的已有检索任务正整数 ID；仅在需要复用已有任务时提供。",
+        min_length=1,
+        description="可选检索来源 ID；不指定时使用当前用户已启用的可用来源。",
     )
+
+    @model_validator(mode="after")
+    def validate_providers(self):
+        if self.provider_ids is not None:
+            if len(set(self.provider_ids)) != len(self.provider_ids):
+                raise ValueError("provider_ids must not contain duplicates")
+            from app.utils.search_adapters.registry import get_adapter
+
+            for provider in self.provider_ids:
+                get_adapter(provider)
+        return self
 
 
 def build_paper_search_tool(*, model: BaseChatModel) -> BaseTool:
@@ -49,14 +60,15 @@ def build_paper_search_tool(*, model: BaseChatModel) -> BaseTool:
             "检索、补充检索、筛选、推荐并保存学术论文。"
             "当用户需要查找研究主题的相关论文、了解研究进展或获取论文推荐时，调用此工具。"
             "输入 prompt 应保留用户原始检索要求，包含明确的研究主题或关键词及用户提出的限制。"
-            "需要复用已有检索任务时，可提供其 task_id。"
         ),
         args_schema=PaperSearchParams,
     )
     async def paper_search_agent(
-        prompt: str, runtime: ToolRuntime, task_id: int | None = None
+        prompt: str,
+        runtime: ToolRuntime,
+        provider_ids: list[str] | None = None,
     ) -> ToolMessage:
-        args = {"prompt": prompt, "task_id": task_id}
+        args = {"prompt": prompt, "provider_ids": provider_ids}
         parent_run_id = runtime.context.run_id
         session_id = runtime.config["configurable"]["thread_id"]
         run_id = create_child_run_id(parent_run_id)
@@ -91,7 +103,7 @@ def build_paper_search_tool(*, model: BaseChatModel) -> BaseTool:
                         "conversation_id": session_id,
                         **args,
                     },
-                    config=runtime.config,
+                    config={**runtime.config, "recursion_limit": 10007},
                     context={"event_fields": fields, "user_id": user_id},
                 ),
                 timeout=settings.SUBAGENT_DISPATCH_TIMEOUT_SECONDS,
@@ -142,7 +154,6 @@ def build_paper_search_tool(*, model: BaseChatModel) -> BaseTool:
             content=content,
             status="success" if status == "success" else "error",
         )
-
 
     paper_search_agent.metadata = {
         "display_name": "论文检索子代理",

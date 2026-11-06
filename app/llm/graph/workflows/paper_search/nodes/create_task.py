@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+
 from langgraph.runtime import Runtime
-from app.llm.context import PaperSearchContext
 
 from app.infrastructure.paper_service.task_client import (
     TaskServiceClient,
@@ -11,15 +11,12 @@ from app.infrastructure.paper_service.task_client import (
 )
 from app.infrastructure.paper_service.types import TaskState
 from app.llm.artifacts.store import LocalArtifactStore
+from app.llm.context import PaperSearchContext
 from app.llm.tools.task_tools.search_task.search_task_create import AddQueryTaskArgs
 
 
 def _is_valid_task_id(value: Any) -> bool:
-    return (
-        isinstance(value, int)
-        and not isinstance(value, bool)
-        and value > 0
-    )
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
 class CreatePaperSearchTaskNode:
@@ -39,9 +36,8 @@ class CreatePaperSearchTaskNode:
         bound_artifact_uri = state.get(
             "task_bound_recommendation_manifest_artifact_ref"
         )
-        if (
-            isinstance(bound_artifact_uri, str)
-            and bound_artifact_uri.startswith("artifact://")
+        if isinstance(bound_artifact_uri, str) and bound_artifact_uri.startswith(
+            "artifact://"
         ):
             return bound_artifact_uri
 
@@ -78,9 +74,7 @@ class CreatePaperSearchTaskNode:
                 {
                     "prompt": state.get("original_prompt"),
                     "searchTag": state.get("search_tag"),
-                    "queryUnderstanding": state.get(
-                        "query_understanding"
-                    ),
+                    "queryUnderstanding": state.get("query_understanding"),
                 }
             )
         except Exception as exc:
@@ -112,10 +106,7 @@ class CreatePaperSearchTaskNode:
                 "stage": "failed",
                 "status": "failed",
                 "create_task_payload": payload,
-                "error": str(
-                    result.get("error")
-                    or "paper-service 创建检索任务失败"
-                ),
+                "error": str(result.get("error") or "paper-service 创建检索任务失败"),
                 "warnings": [
                     *state.get("warnings", []),
                     "远端检索任务未创建，后续检索流程未启动。",
@@ -188,20 +179,26 @@ class CreatePaperSearchTaskNode:
                 return update
             task_id = update["paper_service_task_id"]
         try:
-            bound_artifact_uri = await self._bind_recommendation_manifest(state, task_id)
+            bound_artifact_uri = await self._bind_recommendation_manifest(
+                state, task_id
+            )
         except Exception as exc:
             return {
                 **update,
-                "stage": "failed", "status": "failed",
+                "stage": "failed",
+                "status": "failed",
                 "paper_service_task_id": task_id,
                 "error": f"绑定推荐论文与检索任务失败：{exc}",
             }
         if created:
-            update.update(await self._mark_running(task_id, list(state.get("warnings", []))))
+            update.update(
+                await self._mark_running(task_id, list(state.get("warnings", [])))
+            )
             update["progress"] = {**state.get("progress", {}), **update["progress"]}
         return {
             **update,
-            "stage": "persisting_papers", "status": "running",
+            "stage": "persisting_papers",
+            "status": "running",
             "task_bound_recommendation_manifest_artifact_ref": bound_artifact_uri,
             "error": None,
         }

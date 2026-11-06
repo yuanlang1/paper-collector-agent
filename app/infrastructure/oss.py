@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
+from threading import Lock
 from typing import Protocol
 
 from app.common.exceptions import (
@@ -110,8 +111,22 @@ class MarkdownObject:
 
 class AliyunOssObjectStore:
     def __init__(self) -> None:
+        self._lock = Lock()
+        self._transport = None
         self._client = None
         self._oss = None
+
+    def _run_sync(self, operation, **kwargs):
+        with self._lock:
+            return operation(**kwargs)
+
+    async def close(self) -> None:
+        await asyncio.to_thread(self._run_sync, self._close_sync)
+
+    def _close_sync(self) -> None:
+        if self._transport is not None:
+            self._transport.close()
+        self._client = self._oss = self._transport = None
 
     def _get_client(self):
         if not settings.OSS_ENABLED:
@@ -143,6 +158,8 @@ class AliyunOssObjectStore:
         if settings.OSS_ENDPOINT:
             config.endpoint = settings.OSS_ENDPOINT
 
+        self._transport = oss.transport.RequestsHttpClient()
+        config.http_client = self._transport
         self._client = oss.Client(config)
         self._oss = oss
         return self._client, self._oss
@@ -201,6 +218,7 @@ class AliyunOssObjectStore:
         sha256: str,
     ) -> None:
         await asyncio.to_thread(
+            self._run_sync,
             self._upload_pdf_sync,
             source_path=source_path,
             object_name=object_name,
@@ -220,6 +238,7 @@ class AliyunOssObjectStore:
             raise BadRequestException("pdf_sha256 必须是 64 位十六进制字符串。")
 
         return await asyncio.to_thread(
+            self._run_sync,
             self._get_pdf_temporary_url_sync,
             object_name=object_name,
         )
@@ -269,6 +288,7 @@ class AliyunOssObjectStore:
             raise BadRequestException("pdf_sha256 必须是 64 位十六进制字符串。")
 
         await asyncio.to_thread(
+            self._run_sync,
             self._upload_markdown_sync,
             markdown=markdown,
             object_name=object_name,
@@ -288,6 +308,7 @@ class AliyunOssObjectStore:
             raise BadRequestException("pdf_sha256 必须是 64 位十六进制字符串。")
 
         return await asyncio.to_thread(
+            self._run_sync,
             self._get_markdown_sync,
             object_name=object_name,
         )
@@ -337,3 +358,6 @@ class AliyunOssObjectStore:
                     metadata={"sha256": sha256},
                 )
             )
+
+
+oss_store = AliyunOssObjectStore()

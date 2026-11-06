@@ -41,8 +41,8 @@ async def finalize_paper_search_node(
         f"已有论文 {progress.get('existing_in_database', 0)} 篇，新增候选 {progress.get('new_candidates', 0)} 篇。"
     )
     lines.append(f"补充检索轮数：{state.get('supplemental_search_round', 0)}。")
-    if state.get("source_search_stats"):
-        lines.append(f"来源统计：{state['source_search_stats']}")
+    if state.get("provider_stats"):
+        lines.append(f"来源统计：{state['provider_stats']}")
     if state.get("remote_task_state"):
         lines.append(f"远端任务状态：{state['remote_task_state']}。")
     if state.get("error"):

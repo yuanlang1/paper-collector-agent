@@ -8,7 +8,7 @@ from typing import Any
 
 from app.config import settings
 from app.infrastructure.oss import (
-    AliyunOssObjectStore,
+    oss_store,
     OssObjectStore,
     build_pdf_object_name,
     normalize_pdf_sha256,
@@ -27,7 +27,7 @@ class FinalizePdfsNode:
         object_store: OssObjectStore | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.object_store = object_store or AliyunOssObjectStore()
+        self.object_store = object_store or oss_store
 
     def _local_pdf_path(self, paper: dict[str, Any]) -> tuple[Path, str] | None:
         pdf_download = paper.get("pdf_download")

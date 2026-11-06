@@ -7,7 +7,7 @@ from langchain_core.documents import Document
 from pydantic import ValidationError
 
 from app.infrastructure.oss import (
-    AliyunOssObjectStore,
+    oss_store as shared_oss_store,
     OssObjectStore,
     normalize_pdf_sha256,
 )
@@ -57,7 +57,7 @@ class PaperRagProcessor:
         self.data_preparation = data_preparation
         self.paper_index = paper_index
         self.paper_content_index = paper_content_index
-        self.oss_store = oss_store or AliyunOssObjectStore()
+        self.oss_store = oss_store or shared_oss_store
 
         self._index_lock = asyncio.Lock()
 

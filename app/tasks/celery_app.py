@@ -1,15 +1,19 @@
 import asyncio
 import os
 import sys
+from contextlib import AsyncExitStack
 
 from celery import Celery, signals
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import NullPool
 
 from app.database import create_database
+from app.infrastructure.http import http_manager
+from app.infrastructure.oss import oss_store
 
-# 任务模块列表（Worker 启动时自动导入）
 TASK_MODULES = [
+    "app.tasks.modules.paper_search.abstract_enrich",
+    "app.tasks.modules.paper_search.crossref_enrich",
     "app.tasks.modules.memory.extract_userprofile",
     "app.tasks.modules.memory.extract_fact",
     "app.tasks.modules.memory.extract_episode",
@@ -69,11 +73,20 @@ def init_worker_process(**kwargs) -> None:
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    engine = None
     try:
         engine, factory = create_database(poolclass=NullPool)
+        loop.run_until_complete(http_manager.start())
     except BaseException:
-        loop.close()
-        asyncio.set_event_loop(None)
+        try:
+            loop.run_until_complete(http_manager.close())
+        finally:
+            try:
+                if engine is not None:
+                    loop.run_until_complete(engine.dispose())
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)
         raise
     _worker_event_loop, _worker_async_engine, _worker_session_maker = (
         loop,
@@ -95,16 +108,15 @@ def shutdown_worker_process(**kwargs) -> None:
         for task in pending:
             task.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
-        try:
+        async with AsyncExitStack() as resources:
+            resources.push_async_callback(loop.shutdown_default_executor)
+            resources.push_async_callback(_worker_async_engine.dispose)
+            resources.push_async_callback(loop.shutdown_asyncgens)
+            resources.push_async_callback(http_manager.close)
+            resources.push_async_callback(oss_store.close)
             index_module = sys.modules.get("app.rag.index_construction.base")
             if index_module is not None:
                 await index_module.close_index_resources()
-        finally:
-            await loop.shutdown_asyncgens()
-            try:
-                await _worker_async_engine.dispose()
-            finally:
-                await loop.shutdown_default_executor()
 
     try:
         loop.run_until_complete(close_resources())

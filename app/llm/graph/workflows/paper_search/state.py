@@ -1,11 +1,31 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from typing_extensions import TypedDict
 
+ProviderId = Literal["arxiv", "dblp", "google_scholar"]
 
-SourceName = Literal["Google Scholar"]
+
+def merge_search_results(left: dict, right: dict) -> dict:
+    return {**left, **right}
+
+
+class SearchTask(TypedDict):
+    provider_id: ProviderId
+    round: int
+    query_args: dict[str, Any]
+    configuration_version: str
+    cursor: dict[str, Any] | None
+    page_size: int
+    limit: int
+    max_pages: int
+
+
+class SearchWorkerState(TypedDict):
+    search_task: SearchTask
+    child_run_id: str
+
 
 PaperSearchStage = Literal[
     "preparing_search",
@@ -13,7 +33,6 @@ PaperSearchStage = Literal[
     "normalizing",
     "reviewing_search",
     "enriching",
-    "enriching_crossref",
     "downloading_pdfs",
     "enriching_abstract",
     "uploading_oss",
@@ -35,22 +54,6 @@ PaperSearchStatus = Literal[
 ]
 
 
-class SourceQueryPlan(TypedDict):
-    source: SourceName
-    display_query: str
-    reasoning: str
-    arguments: dict[str, Any]
-    post_filters: dict[str, Any]
-
-
-class SourceRunSummary(TypedDict):
-    source: SourceName
-    status: Literal["success", "partial", "failed"]
-    discovered_count: int
-    artifact_ref: str | None
-    error: str | None
-
-
 class PaperSearchOutputState(TypedDict):
     content: str
     status: Literal["success", "failed", "timed_out"]
@@ -66,14 +69,19 @@ class PaperSearchWorkflowState(TypedDict, total=False):
     paper_search_source_limits: dict[str, int] | None
     original_prompt: str
 
-    requested_sources: list[SourceName]
+    provider_ids: list[ProviderId] | None
+    provider_query_plans: dict[str, SearchTask]
+    active_search_tasks: dict[str, SearchTask]
+    search_results: Annotated[dict[str, dict[str, Any]], merge_search_results]
+    search_history: dict[str, dict[str, dict[str, Any]]]
+    provider_cursors: dict[str, dict[str, Any] | None]
+    provider_stats: dict[str, dict[str, Any]]
 
     query_understanding: dict[str, Any] | None
     intent_error: str | None
 
     search_tag: dict[str, Any] | None
 
-    source_query_plans: list[SourceQueryPlan]
     query_plan_artifact_ref: str | None
 
     create_task_payload: dict[str, Any] | None
@@ -81,17 +89,11 @@ class PaperSearchWorkflowState(TypedDict, total=False):
     local_task_id: str | None
     paper_service_task_id: int | None
 
-    source_summaries: dict[str, SourceRunSummary]
-    active_search_sources: list[SourceName]
-    active_source_query_plans: list[SourceQueryPlan]
-    source_search_cursors: dict[str, dict[str, Any]]
-    source_search_stats: dict[str, dict[str, Any]]
     supplemental_search_round: int
 
     raw_result_artifact_refs: list[str]
     normalized_manifest_artifact_ref: str | None
     existing_papers_manifest_artifact_ref: str | None
-    enrichment_manifest_artifact_ref: str | None
     crossref_enrichment_manifest_artifact_ref: str | None
     pdf_manifest_artifact_ref: str | None
     failed_manifest_artifact_ref: str | None

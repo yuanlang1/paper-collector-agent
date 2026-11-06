@@ -61,7 +61,7 @@ class TaskServiceClient(ServiceClient):
                 "/internal/task/update-status",
                 json={
                     "taskId": task_id,
-                    "taskState": int(state),
+                    "searchStatus": int(state),
                     "errorMessage": str(error_message or "")
                     if state == TaskState.SEARCH_FAILED
                     else None,

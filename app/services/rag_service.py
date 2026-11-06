@@ -10,9 +10,9 @@ from langchain_openai import ChatOpenAI
 
 from app.common.exceptions import AppException
 from app.config import settings
-from app.infrastructure.mineru.mineru_client import MinerUClient
+from app.infrastructure.http import http_manager
 from app.infrastructure.nacos_registry import NacosRegistry
-from app.infrastructure.oss import AliyunOssObjectStore
+from app.infrastructure.oss import oss_store
 from app.infrastructure.paper_service.http_client import PaperServiceHttpClient
 from app.infrastructure.paper_service.paper_client import PaperServiceClient
 from app.llm.context import PaperReadingContext
@@ -48,7 +48,7 @@ async def extract_studies(
     paper_id = paper_id.strip()
     oss_name = oss_name.strip()
 
-    markdown = await AliyunOssObjectStore().get_markdown(
+    markdown = await oss_store.get_markdown(
         pdf_sha256=oss_name,
     )
     initial_evidence = _markdown_context(markdown.content)
@@ -153,8 +153,6 @@ async def process_batch(paper_ids: list[int], *, user_id: str) -> dict:
             resources.push_async_callback(registry.client.shutdown)
 
         http = PaperServiceHttpClient(registry=registry)
-        await http.start()
-        resources.push_async_callback(http.close)
 
         response = await PaperServiceClient(http).batch_get_paper_details(paper_ids)
         if not response["ok"]:
@@ -171,11 +169,7 @@ async def process_batch(paper_ids: list[int], *, user_id: str) -> dict:
         }
         papers = response["result"]["papers"]
         if papers:
-            mineru = MinerUClient(
-                token=settings.MINERU_TOKEN,
-                parse_timeout=settings.MINERU_PARSE_TIMEOUT_SECONDS,
-            )
-            resources.push_async_callback(mineru.close)
+            mineru = http_manager.mineru_client
 
             processor = PaperRagProcessor(
                 file_parser=FileParser(mineru_client=mineru),

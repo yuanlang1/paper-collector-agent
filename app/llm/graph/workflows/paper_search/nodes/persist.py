@@ -18,10 +18,8 @@ from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.paper_search.paper_cache import (
     PaperCacheStore,
 )
-from app.llm.graph.workflows.paper_search.nodes.venue import (
-    VenueCacheStore,
-    VenueInfoDraft,
-)
+from app.schemas.venue import VenueInfoDraft
+from app.services.venue_service import VenueService
 
 
 BatchSave = Callable[[list[dict[str, Any]]], Awaitable[dict[str, Any]]]
@@ -54,7 +52,7 @@ class PersistRecommendedPapersNode:
         save_venues: BatchSave | None = None,
         save_papers: BatchSave | None = None,
         save_task_papers: BatchSave | None = None,
-        venue_cache_store: VenueCacheStore | None = None,
+        venue_service: VenueService | None = None,
         paper_cache_store: PaperCacheStore | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
@@ -69,9 +67,7 @@ class PersistRecommendedPapersNode:
             save_task_papers
             or task_service_client.batch_save_task_paper_relations
         )
-        self.venue_cache_store = venue_cache_store or VenueCacheStore(
-            cache_dir / "venue_cache.json"
-        )
+        self.venue_service = venue_service or VenueService()
         self.paper_cache_store = paper_cache_store or PaperCacheStore(
             cache_dir / "paper_cache.json"
         )
@@ -172,9 +168,8 @@ class PersistRecommendedPapersNode:
                 entry["outcome"]["venue_save_status"] = "not_available"
                 continue
 
-            cached_id = await self.venue_cache_store.get_venue_id(
-                venue.standard_name
-            )
+            record, _ = await self.venue_service.get_by_name(venue.standard_name)
+            cached_id = record.id if record is not None else None
             if cached_id is not None:
                 paper_info["venue_id"] = cached_id
                 resolution["venue_id"] = cached_id
@@ -206,6 +201,7 @@ class PersistRecommendedPapersNode:
         saved_count = 0
         failed_count = 0
 
+        refreshed_names: set[str] = set()
         for entry in entries:
             venue = entry.get("venue")
             if not isinstance(venue, VenueInfoDraft):
@@ -221,7 +217,9 @@ class PersistRecommendedPapersNode:
             entry["paper"]["venue_resolution"]["venue_id"] = venue_id
             entry["outcome"]["venue_id"] = venue_id
             entry["outcome"]["venue_save_status"] = "saved"
-            await self.venue_cache_store.set_venue_id(venue, venue_id)
+            if venue.standard_name not in refreshed_names:
+                await self.venue_service.get_by_name(venue.standard_name)
+                refreshed_names.add(venue.standard_name)
             saved_count += 1
 
         return cache_hits, saved_count, failed_count

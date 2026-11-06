@@ -19,6 +19,15 @@ class Settings(BaseSettings):
     HOST: str
     PORT: int
 
+    VENUE_CACHE_TTL_SECONDS: int = Field(default=86400, gt=0)
+    REDIS_URL: str = Field(default="", repr=False)
+    REDIS_CONNECT_TIMEOUT_SECONDS: float = Field(default=1.0, gt=0)
+    REDIS_SOCKET_TIMEOUT_SECONDS: float = Field(default=1.0, gt=0)
+    REDIS_MAX_CONNECTIONS: int = Field(default=20, gt=0)
+    REDIS_KEY_PREFIX: str = Field(
+        default="paper-collector", min_length=1, pattern=r"\S"
+    )
+
     OPENAI_API_KEY: str
     OPENAI_BASE_URL: str
     LLM_PROVIDER: str
@@ -49,12 +58,14 @@ class Settings(BaseSettings):
     PAPER_SERVICE_TIMEOUT_SECONDS: float = Field(default=10.0, gt=0)
 
     SERPAPI_SEARCH_URL: str
-    SERPAPI_API_KEY: str
+    SERPAPI_API_KEY: str = ""
     ARXIV_API_URL: str
     DBLP_API_URL: str
     CROSSREF_API_URL: str
     CROSSREF_MAILTO: str = ""
     CROSSREF_TIMEOUT_SECONDS: float = 15.0
+    PAPER_CROSSREF_TASK_TIMEOUT_SECONDS: float = Field(default=100, gt=0)
+    PAPER_CROSSREF_GROUP_TIMEOUT_SECONDS: float = Field(default=300, gt=0)
 
     FIRECRAWL_API_KEY: str = ""
     FIRECRAWL_SEARCH_URL: str = "https://api.firecrawl.dev/v2/search"
@@ -104,6 +115,8 @@ class Settings(BaseSettings):
     MINERU_PARSE_TIMEOUT_SECONDS: int = 1200
     TASK_RAG_POST_PROCESSING_GRACE_SECONDS: int = 600
     TASK_RAG_WORKFLOW_TIMEOUT_SECONDS: int = Field(default=1800, ge=1, le=3600)
+    PAPER_ABSTRACT_TASK_TIMEOUT_SECONDS: int = Field(default=180, gt=0)
+    PAPER_ABSTRACT_GROUP_TIMEOUT_SECONDS: int = Field(default=900, gt=0)
     SUBAGENT_DISPATCH_TIMEOUT_SECONDS: int = 1800
     TASK_REVIEW_SUBAGENT_TIMEOUT_SECONDS: int = 3600
     TASK_REVIEW_MAX_REFLECTION_ROUNDS: int = Field(default=5, ge=1, le=5)

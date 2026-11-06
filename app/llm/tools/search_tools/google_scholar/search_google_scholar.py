@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import nullcontext
 from typing import Any
 
 import httpx
@@ -225,8 +226,10 @@ async def _request_serpapi(
 
 def _build_serpapi_params(
     args: GoogleScholarSearchArgs,
+    *, api_key: str | None = None,
 ) -> dict[str, Any]:
-    if not settings.SERPAPI_API_KEY:
+    resolved_key = settings.SERPAPI_API_KEY if api_key is None else api_key
+    if not resolved_key:
         raise SerpApiConfigurationError(
             "SERPAPI_API_KEY is not configured"
         )
@@ -234,7 +237,7 @@ def _build_serpapi_params(
     params: dict[str, Any] = {
         "engine": "google_scholar",
         "q": args.query,
-        "api_key": settings.SERPAPI_API_KEY,
+        "api_key": resolved_key,
         "output": "json",
         "hl": "en",
         "start": args.start,
@@ -279,6 +282,9 @@ def _validate_serpapi_result(
 async def google_scholar_search_service(
     params: dict[str, Any],
     context: object | None = None,
+    *,
+    http_client: httpx.AsyncClient | None = None,
+    api_key: str | None = None,
 ) -> dict[str, Any]:
     del context
     args = GoogleScholarSearchArgs.model_validate(params)
@@ -286,13 +292,13 @@ async def google_scholar_search_service(
     if not query:
         raise ValueError("query cannot be empty")
     try:
-        return await _fetch_scholar_pages(args.model_copy(update={"query": query}))
+        return await _fetch_scholar_pages(args.model_copy(update={"query": query}), api_key=api_key, http_client=http_client)
     except httpx.HTTPStatusError as exc:
         # HTTPStatusError 包含带 API key 的请求 URL，不进入下游的用户可见错误。
         raise SerpApiSearchError(exc.response.text[:500]) from exc
 
 
-async def _fetch_scholar_pages(args: GoogleScholarSearchArgs) -> dict[str, Any]:
+async def _fetch_scholar_pages(args: GoogleScholarSearchArgs, *, api_key: str | None = None, http_client: httpx.AsyncClient | None = None) -> dict[str, Any]:
     started_at = time.perf_counter()
     papers: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
@@ -304,7 +310,7 @@ async def _fetch_scholar_pages(args: GoogleScholarSearchArgs) -> dict[str, Any]:
     stop_reason = "upstream_exhausted"
     page_warning: str | None = None
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with (nullcontext(http_client) if http_client is not None else httpx.AsyncClient(timeout=30.0)) as client:
         while (
             len(papers) < args.total_limit
             and pages_fetched < args.max_pages
@@ -316,7 +322,7 @@ async def _fetch_scholar_pages(args: GoogleScholarSearchArgs) -> dict[str, Any]:
             page_args = args.model_copy(
                 update={"start": current_start, "num": page_size}
             )
-            request_params = _build_serpapi_params(page_args)
+            request_params = _build_serpapi_params(page_args, api_key=api_key)
 
             try:
                 raw_result = await _request_serpapi(

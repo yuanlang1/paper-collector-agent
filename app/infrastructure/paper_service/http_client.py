@@ -3,6 +3,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.infrastructure.http import http_manager
 from app.infrastructure.nacos_registry import NacosRegistry, nacos_registry
 
 
@@ -19,23 +20,8 @@ class PaperServiceHttpClient:
         self.http = http
         self.registry = registry or nacos_registry
 
-    async def start(self) -> None:
-        if self.http is None:
-            self.http = httpx.AsyncClient(
-                timeout=httpx.Timeout(
-                    settings.PAPER_SERVICE_TIMEOUT_SECONDS,
-                    connect=settings.PAPER_SERVICE_CONNECT_TIMEOUT_SECONDS,
-                ),
-            )
-
-    async def close(self) -> None:
-        if self.http is not None:
-            await self.http.aclose()
-            self.http = None
-
     async def request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
-        if self.http is None:
-            raise RuntimeError("Paper service HTTP client is not initialized")
+        http = self.http if self.http is not None else http_manager.paper_service_client
 
         base_url = settings.PAPER_SERVICE_BASE_URL.rstrip("/")
         if not base_url:
@@ -57,7 +43,7 @@ class PaperServiceHttpClient:
             )
 
         # ponytail: no write retries; review versions and RAG leases need explicit idempotency first.
-        response = await self.http.request(method, base_url + path, **kwargs)
+        response = await http.request(method, base_url + path, **kwargs)
         response.raise_for_status()
         body = object_value(response.json())
         if type(body.get("success")) is not bool or type(body.get("code")) is not int:

@@ -4,7 +4,6 @@ from typing import Any
 from app.infrastructure.paper_service.paper_client import (
     paper_service_client,
 )
-from app.infrastructure.paper_service.types import TaskState
 
 
 _SUMMARY_DEFAULTS = {
@@ -45,21 +44,22 @@ async def get_task_rag_status(task_id: int) -> dict[str, Any]:
             if paper["rag_status"] == "ready"
         ),
     })
-    task_status = str(result["task_status"] or "").upper()
+    rag_status = str(result["rag_status"] or "").upper()
     return {
         "ok": True,
         "result": {
             "task_id": result["task_id"],
-            "task_status": result["task_status"],
+            "search_status": result["search_status"],
+            "rag_status": result["rag_status"],
             "summary": summary,
             "is_rag_complete": (
-                task_status == TaskState.RAG_COMPLETED.name
+                rag_status == "RAG_COMPLETED"
                 and not summary["pending"]
                 and not summary["indexing"]
                 and not summary["failed"]
             ),
             "can_generate_review": (
-                task_status == TaskState.RAG_COMPLETED.name
+                rag_status == "RAG_COMPLETED"
                 and not summary["pending"]
                 and not summary["indexing"]
                 and not summary["failed"]

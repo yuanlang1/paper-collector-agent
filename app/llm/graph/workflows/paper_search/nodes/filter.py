@@ -675,7 +675,7 @@ class NormalizeDeduplicateFilterNode:
 
             source_stats = {
                 source: dict(summary)
-                for source, summary in (state.get("source_search_stats") or {}).items()
+                for source, summary in (state.get("provider_stats") or {}).items()
                 if isinstance(source, str) and isinstance(summary, dict)
             }
             for source, summary in source_stats.items():
@@ -683,7 +683,7 @@ class NormalizeDeduplicateFilterNode:
                     1
                     for paper in [*new_papers, *existing_papers]
                     if any(
-                        ref.get("source") == source
+                        ref.get("source") == _normalize_source(source)
                         for ref in paper.get("source_refs", [])
                         if isinstance(ref, dict)
                     )
@@ -736,7 +736,7 @@ class NormalizeDeduplicateFilterNode:
                 existing_artifact.artifact_uri
             ),
             "search_quality_artifact_ref": quality_artifact.artifact_uri,
-            "source_search_stats": source_stats,
+            "provider_stats": source_stats,
             "progress": {
                 **state.get("progress", {}),
                 "deduplicated": len(normalized_papers),

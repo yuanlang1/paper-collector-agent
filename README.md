@@ -326,3 +326,27 @@ $env:UV_PROJECT_ENVIRONMENT = ".venv311"
 ```powershell
 .\.venv311\Scripts\python.exe -m unittest discover -s tests -p 'test_review*.py' -q
 ```
+
+
+### 论文检索 Celery Group
+
+`enrich` 节点筛掉无 PDF 链接的候选后，把 Crossref 查询逐篇提交为
+`paper_search.query_crossref` 任务，由同一个 `paper_search` 队列消费。
+节点合并查询结果后进入 `venue`。单篇查询和 Group 等待上限分别由
+`PAPER_CROSSREF_TASK_TIMEOUT_SECONDS`（默认 100 秒）和
+`PAPER_CROSSREF_GROUP_TIMEOUT_SECONDS`（默认 300 秒）控制。
+
+`abstract_enrich` 节点将每篇论文提交为 `paper_search.enrich_abstract` 任务，
+由 `paper_search` 队列消费。任务在 service 中读取用户小模型配置，结果由任务模块汇总，
+节点统一写入摘要清单。API 和 worker 必须使用相同的 `ARTIFACT_BASE_DIR` 并可访问同一目录。
+
+Windows 启动专用 worker（需要并行处理时，在独立终端启动多个实例并使用不同名称）：
+
+```powershell
+uv run --locked --no-sync --env-file .env celery -A app.tasks.celery_app:celery_app worker --pool=solo --queues=paper_search --hostname=abstract1@%h --loglevel=INFO
+```
+
+初始可启动 3 个实例，名称分别为 `abstract1@%h`、`abstract2@%h`、`abstract3@%h`。
+单篇超时使用 `PAPER_ABSTRACT_TASK_TIMEOUT_SECONDS`（默认 180 秒），
+Group 等待上限使用 `PAPER_ABSTRACT_GROUP_TIMEOUT_SECONDS`（默认 900 秒）。
+取消时撤销尚未执行的任务；已运行任务可能继续至结束，其晚到结果不再合并。

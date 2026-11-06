@@ -111,7 +111,7 @@ async def chat(
     )
 
 
-@router.get("/threads/{thread_id}/runs")
+@router.get("/{thread_id}/runs")
 async def list_runs(
     user_id: Annotated[int, Query(gt=0)],
     thread_id: Annotated[str, Path(min_length=1, max_length=128)],
@@ -131,7 +131,7 @@ async def list_runs(
     )
 
 
-@router.get("/threads/{thread_id}/runs/{run_id}")
+@router.get("/{thread_id}/runs/{run_id}")
 async def get_run(
     user_id: Annotated[int, Query(gt=0)],
     thread_id: Annotated[str, Path(min_length=1, max_length=128)],
