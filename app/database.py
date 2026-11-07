@@ -14,11 +14,16 @@ from sqlalchemy.pool import Pool
 from app.config import settings
 
 Base = declarative_base()
+SessionLocal = async_sessionmaker(
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
 
 
 def create_database(
     *,
     poolclass: type[Pool] | None = None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     url = make_url(settings.DATABASE_POSTGRES_URL).set(drivername="postgresql+psycopg")
     engine = create_async_engine(
@@ -28,10 +33,13 @@ def create_database(
         echo=settings.SQL_ECHO,
         **({"poolclass": poolclass} if poolclass is not None else {}),
     )
-    session_factory = async_sessionmaker(
-        bind=engine,
-        expire_on_commit=False,
-    )
+    if session_factory is None:
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+        )
+    else:
+        session_factory.configure(bind=engine)
     return engine, session_factory
 
 

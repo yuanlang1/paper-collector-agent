@@ -11,6 +11,7 @@ from urllib.parse import quote
 import httpx
 
 from app.config import settings
+from app.infrastructure.http import http_manager
 from langchain_core.tools import ToolException, tool
 from app.llm.tools.search_tools.common import (
     RETRYABLE_STATUS_CODES,
@@ -311,45 +312,35 @@ async def crossref_search_service(
         raise ToolException(message)
 
     try:
-        headers = {
-            "User-Agent": (
-                "paper-collector-agent/1.0 "
-                f"(mailto:{settings.CROSSREF_MAILTO or 'not-configured'})"
-            ),
-        }
-
-        async with httpx.AsyncClient(
-            timeout=settings.CROSSREF_TIMEOUT_SECONDS,
-            headers=headers,
-        ) as client:
-            if args.doi:
-                doi = _normalize_doi(args.doi)
-                payload = await _fetch_crossref(
-                    client=client,
-                    url=f"{CROSSREF_API_URL}/works/{quote(doi, safe='')}",
-                    params=(
-                        {"mailto": settings.CROSSREF_MAILTO}
-                        if settings.CROSSREF_MAILTO
-                        else {}
-                    ),
+        client = http_manager.crossref_client
+        if args.doi:
+            doi = _normalize_doi(args.doi)
+            payload = await _fetch_crossref(
+                client=client,
+                url=f"{CROSSREF_API_URL}/works/{quote(doi, safe='')}",
+                params=(
+                    {"mailto": settings.CROSSREF_MAILTO}
+                    if settings.CROSSREF_MAILTO
+                    else {}
+                ),
+            )
+            message = payload.get("message")
+            items = [message] if isinstance(message, Mapping) else []
+            total_results = len(items)
+        else:
+            payload = await _fetch_crossref(
+                client=client,
+                url=f"{CROSSREF_API_URL}/works",
+                params=_request_params(args),
+            )
+            message = payload.get("message")
+            if not isinstance(message, Mapping):
+                raise CrossrefResponseParseError(
+                    "Crossref response is missing message"
                 )
-                message = payload.get("message")
-                items = [message] if isinstance(message, Mapping) else []
-                total_results = len(items)
-            else:
-                payload = await _fetch_crossref(
-                    client=client,
-                    url=f"{CROSSREF_API_URL}/works",
-                    params=_request_params(args),
-                )
-                message = payload.get("message")
-                if not isinstance(message, Mapping):
-                    raise CrossrefResponseParseError(
-                        "Crossref response is missing message"
-                    )
-                raw_items = message.get("items")
-                items = raw_items if isinstance(raw_items, list) else []
-                total_results = int(message.get("total-results") or 0)
+            raw_items = message.get("items")
+            items = raw_items if isinstance(raw_items, list) else []
+            total_results = int(message.get("total-results") or 0)
 
         papers = [
             paper

@@ -58,7 +58,7 @@ async def add_query_task_tool(
     searchTag: SearchTagArgs,
     queryUnderstanding: PromptUnderstandingArgs,
 ) -> dict[str, Any]:
-    """创建并保存论文查询任务。该工具会通过 Nacos 发现 paper-service，调用 addQueryTask 接口持久化用户的原始检索要求、检索标签和结构化查询理解。仅当用户明确要求创建、提交、启动或保存论文查询任务时使用；如果用户只是咨询检索方案、要求推荐关键词或预览查询条件，不得调用该工具。"""
+    """创建并保存论文查询任务。该工具会通过固定地址调用 paper-service 的  addQueryTask 接口持久化用户的原始检索要求、检索标签和结构化查询理解。仅当用户明确要求创建、提交、启动或保存论文查询任务时使用；如果用户只是咨询检索方案、要求推荐关键词或预览查询条件，不得调用该工具。"""
     params = {
         "prompt": prompt,
         "searchTag": searchTag,

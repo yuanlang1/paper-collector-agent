@@ -133,6 +133,9 @@ class PaperServiceClient(ServiceClient):
                         "paper_abstract": text_value(item.get("paperAbstract")).strip(),
                         "oss_name": text_value(item.get("ossName")).strip() or None,
                         "pdf_url": text_value(item.get("pdfUrl")).strip() or None,
+                        "paper_profile": text_value(item.get("paperProfile")).strip() or None,
+                        "profile_status": text_value(item.get("profileStatus")).strip().lower()
+                        or "pending",
                     }
                 )
             return self._success(

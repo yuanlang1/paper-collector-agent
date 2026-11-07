@@ -2,17 +2,22 @@ import asyncio
 import json
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.errors import GraphBubbleUp
 from pydantic import BaseModel, Field
 
+from app.database import SessionLocal
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import (
+    UNTRUSTED_INPUT_GUARD,
     content_hash,
     revisions_for,
+    review_batch,
     save,
     verified_pack,
 )
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
+from app.services import llm_setting_service
 
 
 SECTION_DRAFT_PROMPT = """
@@ -99,15 +104,25 @@ class RenderSectionsNode:
         *,
         artifact_store=None,
         model=None,
-        chat: ChatClient | None = None,
-        max_concurrency: int = 4,
+        user_id: int | None = None,
     ):
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.max_concurrency = max_concurrency
-        self.model = model or (chat or ChatClient()).structured(
-            SectionDraft,
-            options=ModelOptions(temperature=0),
+        self.user_id = user_id
+        self.model = model
+        self._model_lock = asyncio.Lock()
+
+    async def _create_model(self):
+        async with SessionLocal() as db:
+            config = await llm_setting_service.get_small_llm_config(db, user_id=self.user_id)
+        return ChatClient(runtime_config=config).structured(
+            SectionDraft, options=ModelOptions(temperature=0),
         )
+
+    async def _ensure_model(self):
+        if self.model is None:
+            async with self._model_lock:
+                if self.model is None:
+                    self.model = await self._create_model()
 
     @staticmethod
     def _citation_text(text, paper_ids):
@@ -145,90 +160,92 @@ class RenderSectionsNode:
             for pack in packages
         ]
 
-    async def __call__(self, state):
+    async def prepare(self, state):
         refs = dict(state.get("section_draft_artifact_refs", {}))
-        try:
-            framework = (await self.artifact_store.read_json_uri(state["framework_artifact_ref"]))[
-                "framework"
-            ]
-            claims = {
-                claim["claim_id"]: claim
-                for claim in (
-                    await self.artifact_store.read_json_uri(state["claims_artifact_ref"])
-                )["claims"]
+        framework = (await self.artifact_store.read_json_uri(state["framework_artifact_ref"]))[
+            "framework"
+        ]
+        claims = {
+            claim["claim_id"]: claim
+            for claim in (
+                await self.artifact_store.read_json_uri(state["claims_artifact_ref"])
+            )["claims"]
+        }
+        verdicts = {
+            item["claim_id"]: item
+            for item in (
+                await self.artifact_store.read_json_uri(
+                    state["claim_verification_artifact_ref"]
+                )
+            )["claims"]
+        }
+        refs = {
+            key: ref
+            for key, ref in refs.items()
+            if key in {section["section_id"] for section in framework["sections"]}
+        }
+        revision_targets = {
+            item["target_id"]
+            for item in state.get("revision_items", [])
+            if item["target_type"] == "section"
+        }
+        section_outline = [
+            {
+                key: section[key]
+                for key in ("section_id", "title", "description")
             }
-            verdicts = {
-                item["claim_id"]: item
-                for item in (
-                    await self.artifact_store.read_json_uri(
-                        state["claim_verification_artifact_ref"]
-                    )
-                )["claims"]
-            }
-            refs = {
-                key: ref
-                for key, ref in refs.items()
-                if key in {section["section_id"] for section in framework["sections"]}
-            }
-            revision_targets = {
-                item["target_id"]
-                for item in state.get("revision_items", [])
-                if item["target_type"] == "section"
-            }
-            section_outline = [
-                {
-                    key: section[key]
-                    for key in ("section_id", "title", "description")
-                }
-                for section in framework["sections"]
-            ]
-            semaphore = asyncio.Semaphore(self.max_concurrency)
-
-            tasks = [
-                asyncio.create_task(self._render_section(
-                    state, section, framework, claims, verdicts,
-                    section_outline, revision_targets, semaphore,
-                ))
-                for section in framework["sections"]
-            ]
+            for section in framework["sections"]
+        ]
+        jobs, errors = [], []
+        for section in framework["sections"]:
             try:
-                for task in asyncio.as_completed(tasks):
-                    section_id, ref = await task
-                    refs[section_id] = ref
-            except (asyncio.CancelledError, Exception):
-                for task in tasks:
-                    task.cancel()
-                for result in await asyncio.gather(*tasks, return_exceptions=True):
-                    if not isinstance(result, BaseException):
-                        section_id, ref = result
-                        refs[section_id] = ref
+                job = await self._prepare_section(
+                    state, section, framework, claims, verdicts, section_outline, revision_targets,
+                )
+            except GraphBubbleUp:
                 raise
-            refs = {
-                section["section_id"]: refs[section["section_id"]]
-                for section in framework["sections"]
-                if section["section_id"] in refs
-            }
-            return {
-                "section_draft_artifact_refs": refs,
-                "revision_items": [
-                    item
-                    for item in state.get("revision_items", [])
-                    if item["target_type"] != "section"
-                ],
-                "stage": "assembling_review",
-                "status": "running",
-            }
-        except Exception as exc:
-            return failed(
-                f"section rendering failed: {exc}",
-                section_draft_artifact_refs=refs,
-                error_code="RENDER_FAILED",
-                retryable=True,
-            )
+            except Exception as exc:
+                errors.append({"item_id": section["section_id"], "error": str(exc)})
+                continue
+            if job is not None:
+                jobs.append(job)
+        if jobs:
+            await self._ensure_model()
+        return review_batch(
+            jobs, initial_results=errors, refs=refs,
+            section_ids=[section["section_id"] for section in framework["sections"]],
+        )
 
-    async def _render_section(
-        self, state, section, framework, claims, verdicts,
-        section_outline, revision_targets, semaphore,
+    async def collect(self, state, results, failure):
+        context = state["batch_context"]
+        refs = {**context["refs"], **results}
+        refs = {
+            section_id: refs[section_id]
+            for section_id in context["section_ids"]
+            if section_id in refs
+        }
+        if failure:
+            return self.failure({**state, "section_draft_artifact_refs": refs}, failure)
+        return {
+            "section_draft_artifact_refs": refs,
+            "revision_items": [
+                item for item in state.get("revision_items", []) if item["target_type"] != "section"
+            ],
+            "stage": "assembling_review",
+            "status": "running",
+        }
+
+    @staticmethod
+    def failure(state, error):
+        return failed(
+            f"section rendering failed: {error['error']}",
+            section_draft_artifact_refs=state.get("section_draft_artifact_refs", {}),
+            error_code="RENDER_FAILED",
+            retryable=True,
+        )
+
+    async def _prepare_section(
+        self, state, section, framework, claims, verdicts, section_outline, revision_targets,
     ):
         section_claims = [
             claim
@@ -257,7 +274,7 @@ class RenderSectionsNode:
         if old and section["section_id"] not in revision_targets and (
             revision_targets or old.get("input_hash") == signature
         ):
-            return section["section_id"], old_ref
+            return None
 
         evidence = {
             item["evidence_id"]: item
@@ -275,13 +292,26 @@ class RenderSectionsNode:
             "old_draft": old if revisions else None,
             "revisions": revisions,
         }
-        async with semaphore:
-            result = (await self.model.ainvoke([
-                SystemMessage(content=SECTION_DRAFT_PROMPT + UNTRUSTED_INPUT_GUARD),
-                HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-            ])).model_dump(mode="json")
+        return {
+            "item_id": section["section_id"],
+            "child_run_id": state["child_run_id"],
+            "task_id": state["task_id"],
+            "payload": payload,
+            "input_hash": signature,
+            "packages": packages,
+            "sources": sources,
+        }
+
+    async def run_item(self, item):
+        await self._ensure_model()
+        payload, packages, sources = item["payload"], item["packages"], item["sources"]
+        result = (await self.model.ainvoke([
+            SystemMessage(content=SECTION_DRAFT_PROMPT + UNTRUSTED_INPUT_GUARD),
+            HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
+        ])).model_dump(mode="json")
+        section_claims = [package["claim"] for package in packages]
         if packages:
-            arguments = self._render_arguments(result, packages, sources, claims, verdicts)
+            arguments = self._render_arguments(result, packages, sources)
             text = "\n\n".join(item["text"] for item in arguments)
         else:
             arguments = result["arguments"]
@@ -295,9 +325,9 @@ class RenderSectionsNode:
             text = result["insufficient_notice"]
 
         draft = {
-            "section_id": section["section_id"],
-            "title": section["title"],
-            "input_hash": signature,
+            "section_id": payload["section"]["section_id"],
+            "title": payload["section"]["title"],
+            "input_hash": item["input_hash"],
             "claim_hashes": {
                 claim["claim_id"]: claim["claim_hash"]
                 for claim in section_claims
@@ -309,16 +339,17 @@ class RenderSectionsNode:
             "omitted_claim_ids": [],
         }
         ref = await save(
-            self.artifact_store, state, "section_draft", draft
+            self.artifact_store, item, "section_draft", draft
         )
-        return section["section_id"], ref
+        return ref
 
-    def _render_arguments(self, result, packages, sources, claims, verdicts):
+    def _render_arguments(self, result, packages, sources):
         if result["insufficient_notice"]:
             raise ValueError(
                 "evidence-backed section cannot contain an insufficiency notice"
             )
-        claim_ids = {item["claim"]["claim_id"] for item in packages}
+        by_claim_id = {item["claim"]["claim_id"]: item for item in packages}
+        claim_ids = set(by_claim_id)
         arguments = []
         for argument in result["arguments"]:
             if (
@@ -335,9 +366,10 @@ class RenderSectionsNode:
                 for index in argument["evidence_indices"]
             ]
             for claim_id in argument["claim_ids"]:
+                package = by_claim_id[claim_id]
                 claim_evidence = {
                     item["evidence_id"]: item
-                    for item in verdicts[claim_id]["evidence"]
+                    for item in package["evidence"]
                 }
                 support = {
                     claim_evidence[evidence_id]["paper_id"]
@@ -347,7 +379,7 @@ class RenderSectionsNode:
                 }
                 required = (
                     2
-                    if claims[claim_id]["evidence_requirement"] == "multiple_fulltext"
+                    if package["claim"]["evidence_requirement"] == "multiple_fulltext"
                     else 1
                 )
                 if len(support) < required:

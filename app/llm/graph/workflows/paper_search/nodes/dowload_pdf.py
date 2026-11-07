@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import re
+import sys
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from app.core.identifiers import validate_run_id
@@ -13,6 +15,7 @@ from app.llm.tools.file_tools.download_file import download_file_handler
 
 LIBRARY_SAVE_DIR = "papers"
 PDF_DOWNLOAD_CONCURRENCY = 4
+WINDOWS_MAX_PATH_UNITS = 259  # Excludes the terminating NUL.
 
 
 def _safe_filename_part(value: str, max_length: int) -> str:
@@ -55,6 +58,7 @@ class PdfDownloadNode:
     def _pdf_file_name(
         self,
         paper_info: Mapping[str, Any],
+        directory: Path,
     ) -> str:
         title = _safe_filename_part(
             str(paper_info.get("title") or "unknown_paper"),
@@ -67,18 +71,37 @@ class PdfDownloadNode:
         identity_hash = hashlib.sha256(
             _paper_identity(paper_info).encode("utf-8")
         ).hexdigest()[:12]
-        return f"{title}_{author}_{identity_hash}.pdf"
+        prefix = f"{title}_{author}_"
+        suffix = f"{identity_hash}.pdf"
+        if sys.platform == "win32":
+            prefix_budget_bytes = WINDOWS_MAX_PATH_UNITS * 2 - len(
+                str(directory / suffix).encode("utf-16-le")
+            )
+            if prefix_budget_bytes < 0:
+                raise ValueError("PDF 保存目录过长，无法容纳文件名。")
+
+            encoded_prefix = prefix.encode("utf-16-le")
+            if len(encoded_prefix) > prefix_budget_bytes:
+                # Leave room for the separator and discard an incomplete surrogate pair.
+                prefix = encoded_prefix[:max(0, prefix_budget_bytes - 2)].decode(
+                    "utf-16-le", errors="ignore",
+                ).rstrip(" ._")
+                if prefix:
+                    prefix += "_"
+        return f"{prefix}{suffix}"
 
     async def _download_one(
         self,
         paper_info: dict[str, Any],
         child_run_id: str,
     ) -> dict[str, Any]:
+        save_dir = f"{validate_run_id(child_run_id)}/{LIBRARY_SAVE_DIR}"
+        directory = (LocalArtifactStore().base_dir / save_dir).resolve()
         result = await download_file_handler(
             {
                 "url": str(paper_info["pdf_url"]),
-                "save_dir": f"{validate_run_id(child_run_id)}/{LIBRARY_SAVE_DIR}",
-                "file_name": self._pdf_file_name(paper_info),
+                "save_dir": save_dir,
+                "file_name": self._pdf_file_name(paper_info, directory),
                 "expected_type": "pdf",
                 "overwrite": False,
             },
@@ -100,10 +123,10 @@ class PdfDownloadNode:
         paper_info = paper["paper_info"]
         title = str(paper_info.get("title") or "")
         try:
-            file_name = self._pdf_file_name(paper_info)
             async with semaphore:
                 downloaded = await self._download_one(paper_info, child_run_id)
 
+            file_name = Path(downloaded["saved_path"]).name
             paper_info["file_name"] = file_name
             paper["pdf_download"] = {
                 "status": "success",

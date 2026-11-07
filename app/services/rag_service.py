@@ -1,6 +1,5 @@
 import json
 import re
-from contextlib import AsyncExitStack
 from dataclasses import asdict
 from uuid import uuid4
 
@@ -9,12 +8,9 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 
 from app.common.exceptions import AppException
-from app.config import settings
 from app.infrastructure.http import http_manager
-from app.infrastructure.nacos_registry import NacosRegistry
 from app.infrastructure.oss import oss_store
-from app.infrastructure.paper_service.http_client import PaperServiceHttpClient
-from app.infrastructure.paper_service.paper_client import PaperServiceClient
+from app.infrastructure.paper_service.paper_client import paper_service_client
 from app.llm.context import PaperReadingContext
 from app.llm.loop.agent_loop import AgentLoop
 from app.llm.tools.search_tools.search_paper_index import (
@@ -146,39 +142,31 @@ async def process_batch(paper_ids: list[int], *, user_id: str) -> dict:
     paper_ids = request.paper_ids
     user_id = request.user_id
 
-    async with AsyncExitStack() as resources:
-        registry = NacosRegistry()
-        if not settings.PAPER_SERVICE_BASE_URL:
-            await registry.start_discovery()
-            resources.push_async_callback(registry.client.shutdown)
+    response = await paper_service_client.batch_get_paper_details(paper_ids)
+    if not response["ok"]:
+        raise RuntimeError(response["error"])
 
-        http = PaperServiceHttpClient(registry=registry)
-
-        response = await PaperServiceClient(http).batch_get_paper_details(paper_ids)
-        if not response["ok"]:
-            raise RuntimeError(response["error"])
-
-        results = {
-            paper_id: {
-                "paper_id": paper_id,
-                "status": "failed",
-                "chunk_count": 0,
-                "error": "PAPER_NOT_FOUND",
-            }
-            for paper_id in response["result"]["missing_paper_ids"]
+    results = {
+        paper_id: {
+            "paper_id": paper_id,
+            "status": "failed",
+            "chunk_count": 0,
+            "error": "PAPER_NOT_FOUND",
         }
-        papers = response["result"]["papers"]
-        if papers:
-            mineru = http_manager.mineru_client
+        for paper_id in response["result"]["missing_paper_ids"]
+    }
+    papers = response["result"]["papers"]
+    if papers:
+        mineru = http_manager.mineru_client
 
-            processor = PaperRagProcessor(
-                file_parser=FileParser(mineru_client=mineru),
-                data_preparation=DataPreparationModule(),
-            )
-            processed = await processor.process_many(
-                [PaperRagInput(**paper, user_id=user_id) for paper in papers]
-            )
+        processor = PaperRagProcessor(
+            file_parser=FileParser(mineru_client=mineru),
+            data_preparation=DataPreparationModule(),
+        )
+        processed = await processor.process_many(
+            [PaperRagInput(**paper, user_id=user_id) for paper in papers]
+        )
 
-            results.update((item.paper_id, asdict(item)) for item in processed)
+        results.update((item.paper_id, asdict(item)) for item in processed)
 
-        return {"results": [results[paper_id] for paper_id in paper_ids]}
+    return {"results": [results[paper_id] for paper_id in paper_ids]}

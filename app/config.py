@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from pydantic import Field, model_validator
+from pydantic import AnyHttpUrl, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -35,25 +35,10 @@ class Settings(BaseSettings):
     THINKING_TYPE: str
     REASONING_EFFORT: str
 
-    # Nacos
-    NACOS_SERVER_ADDR: str
-    NACOS_NAMESPACE_ID: str
-    NACOS_GROUP_NAME: str
-    NACOS_CLUSTER_NAME: str
-    NACOS_USERNAME: str
-    NACOS_PASSWORD: str
-    NACOS_LOG_LEVEL: str
-    NACOS_LOG_DIR: str = "data/logs/nacos"
-    NACOS_GRPC_TIMEOUT_MS: int
-
-    # nacos
     SERVICE_NAME: str
-    SERVICE_IP: str
-    SERVICE_PORT: int
 
-    # paper-service internal HTTP API; an empty URL uses Nacos discovery.
-    PAPER_SERVICE_NAME: str = "paper-service"
-    PAPER_SERVICE_BASE_URL: str = ""
+    # paper-service internal HTTP API
+    PAPER_SERVICE_BASE_URL: AnyHttpUrl
     PAPER_SERVICE_CONNECT_TIMEOUT_SECONDS: float = Field(default=5.0, gt=0)
     PAPER_SERVICE_TIMEOUT_SECONDS: float = Field(default=10.0, gt=0)
 

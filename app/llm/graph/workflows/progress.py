@@ -29,6 +29,8 @@ def instrument_subagent_progress_node(
     data_builder: ProgressDataBuilder | None = None,
     iteration_resolver: IterationResolver | None = None,
     label_resolver: Callable[[Mapping[str, Any]], str] | None = None,
+    emit_start: bool = True,
+    finish_when: Callable[[Mapping[str, Any]], bool] | None = None,
 ) -> Node:
     """Send progress through the graph runtime's stream writer."""
     parameters = inspect.signature(node).parameters
@@ -47,7 +49,8 @@ def instrument_subagent_progress_node(
 
         iteration = iteration_resolver(state) if iteration_resolver else None
         label = (label_resolver(state) if label_resolver else phase_label) + (f"（第 {iteration} 轮）" if iteration else "")
-        emit(f"开始：{label}。")
+        if emit_start:
+            emit(f"开始：{label}。")
         kwargs = {}
         if "config" in parameters:
             kwargs["config"] = config
@@ -60,6 +63,9 @@ def instrument_subagent_progress_node(
         except Exception as exc:
             emit(f"失败：{label}。{exc}")
             raise
+
+        if finish_when is not None and not finish_when(result):
+            return result
 
         error = result.get("error")
         description = f"失败：{label}。{error}" if error else f"完成：{label}。"

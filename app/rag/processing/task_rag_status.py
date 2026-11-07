@@ -30,21 +30,22 @@ async def get_task_rag_status(task_id: int) -> dict[str, Any]:
         return response
 
     result = response["result"]
-    counts = Counter(paper["rag_status"] for paper in result["papers"])
+    papers = result["papers"]
+    indexed_papers = [paper for paper in papers if paper["rag_status"] == "success"]
+    counts = Counter(paper["rag_status"] for paper in papers)
     summary = normalize_rag_summary({
-        "total": len(result["papers"]),
+        "total": len(papers),
         "pending": counts["pending"],
         "indexing": counts["indexing"],
-        "ready": counts["ready"],
+        "ready": len(indexed_papers),
         "skipped": counts["skipped"],
         "failed": counts["failed"],
-        "ready_chunks": sum(
-            paper["chunk_count"]
-            for paper in result["papers"]
-            if paper["rag_status"] == "ready"
-        ),
+        "ready_chunks": sum(paper["chunk_count"] for paper in indexed_papers),
     })
     rag_status = str(result["rag_status"] or "").upper()
+    indexing_finished = (
+        rag_status == "RAG_COMPLETED" and not summary["pending"] and not summary["indexing"]
+    )
     return {
         "ok": True,
         "result": {
@@ -52,18 +53,16 @@ async def get_task_rag_status(task_id: int) -> dict[str, Any]:
             "search_status": result["search_status"],
             "rag_status": result["rag_status"],
             "summary": summary,
-            "is_rag_complete": (
-                rag_status == "RAG_COMPLETED"
-                and not summary["pending"]
-                and not summary["indexing"]
-                and not summary["failed"]
-            ),
+            "is_rag_complete": indexing_finished and not summary["failed"],
             "can_generate_review": (
-                rag_status == "RAG_COMPLETED"
-                and not summary["pending"]
-                and not summary["indexing"]
-                and not summary["failed"]
-                and bool(summary["ready"])
+                indexing_finished
+                and bool(indexed_papers)
+                and all(
+                    paper["chunk_count"] > 0
+                    and paper.get("profile_status") == "success"
+                    and paper.get("paper_profile")
+                    for paper in indexed_papers
+                )
             ),
         },
         "error": None,

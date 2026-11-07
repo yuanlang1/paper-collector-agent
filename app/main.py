@@ -13,8 +13,7 @@ from app.api import (
 )
 from app.common.exceptions import register_exception_handlers
 from app.config import settings
-from app.database import Base, create_database
-from app.infrastructure.nacos_registry import nacos_registry
+from app.database import Base, SessionLocal, create_database
 from app.infrastructure.redis import redis_manager
 from app.infrastructure.http import http_manager
 from app.infrastructure.oss import oss_store
@@ -33,8 +32,9 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with AsyncExitStack() as resources:
-        engine, session_factory = create_database()
+        engine, session_factory = create_database(session_factory=SessionLocal)
         resources.push_async_callback(engine.dispose)
+        resources.callback(SessionLocal.configure, bind=None)
         app.state.session_factory = session_factory
         resources.push_async_callback(redis_manager.close)
         await redis_manager.start()
@@ -60,8 +60,6 @@ async def lifespan(app: FastAPI):
 
         resources.push_async_callback(oss_store.close)
         resources.push_async_callback(close_index_resources)
-        resources.push_async_callback(nacos_registry.stop)
-        await nacos_registry.start()
         yield
 
 

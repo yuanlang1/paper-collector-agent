@@ -4,10 +4,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.database import SessionLocal
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.graph.workflows.review_generate.contracts import save
+from app.llm.graph.workflows.review_generate.contracts import UNTRUSTED_INPUT_GUARD, save
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
+from app.services import llm_setting_service
 
 
 FRAMEWORK_PROMPT = """
@@ -106,21 +108,32 @@ class ReviewFramework(BaseModel):
 
 
 class GenerateFrameworkNode:
-    def __init__(self, *, artifact_store=None, model=None, chat: ChatClient | None = None):
+    def __init__(self, *, artifact_store=None, model=None, user_id: int | None = None):
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = model or (chat or ChatClient()).structured(
-            ReviewFramework, options=ModelOptions(temperature=0)
-        )
+        self.user_id = user_id
+        self.model = model
 
     async def __call__(self, state):
         if state.get("framework_artifact_ref"):
             return {"stage": "generating_claims", "status": "running"}
         try:
-            studies = (
-                await self.artifact_store.read_json_uri(state["study_records_artifact_ref"])
-            )["studies"]
+            corpus = await self.artifact_store.read_json_uri(state["corpus_artifact_ref"])
+            studies = [
+                {
+                    "paper_id": str(paper["paper_id"]),
+                    "title": paper["title"],
+                    "paper_profile": paper["paper_profile"],
+                }
+                for paper in corpus["papers"]
+            ]
+            if self.model is None:
+                async with SessionLocal() as db:
+                    config = await llm_setting_service.get_small_llm_config(db, user_id=self.user_id)
+                self.model = ChatClient(runtime_config=config).structured(
+                    ReviewFramework, options=ModelOptions(temperature=0),
+                )
             framework = await self.model.ainvoke([
-                SystemMessage(content = FRAMEWORK_PROMPT),
+                SystemMessage(content = FRAMEWORK_PROMPT + UNTRUSTED_INPUT_GUARD),
                 HumanMessage(
                     content = json.dumps({
                         "topic": state["topic"],
@@ -130,7 +143,7 @@ class GenerateFrameworkNode:
                     }, ensure_ascii=False)),
             ])
 
-            return await self._save_framework(state, framework)
+            return await self._save_framework(state, framework.model_dump(mode="json"))
             
         except Exception as exc:
             return failed(

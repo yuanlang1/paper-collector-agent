@@ -3,19 +3,24 @@ import json
 from typing import Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.errors import GraphBubbleUp
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.config import settings
+from app.database import SessionLocal
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import (
+    UNTRUSTED_INPUT_GUARD,
     content_hash,
     evidence_requirement_met,
     required_source_count,
+    review_batch,
     save,
     supporting_paper_ids,
 )
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
+from app.services import llm_setting_service
 from app.llm.provider.structured_output import StructuredOutputError
 
 
@@ -222,17 +227,12 @@ class VerifyClaimsNode:
         *,
         artifact_store=None,
         model=None,
-        chat: ChatClient | None = None,
-        max_concurrency: int = 4,
+        user_id: int | None = None,
     ):
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.chat = chat or ChatClient()
-        self.max_concurrency = max_concurrency
-        self.model = model or self.chat.structured(
-            Verdict,
-            max_attempts=1,
-            options=ModelOptions(temperature=0),
-        )
+        self.user_id = user_id
+        self._model_lock = asyncio.Lock()
+        self.model = model
 
     @staticmethod
     def _sources(evidence, titles):
@@ -381,189 +381,162 @@ class VerifyClaimsNode:
             "status": "running",
         }
 
-    async def __call__(self, state):
-        verification_ref = state.get("claim_verification_artifact_ref")
-        try:
-            claims = (await self.artifact_store.read_json_uri(state["claims_artifact_ref"]))["claims"]
-            ledger = {
+    async def _ensure_model(self):
+        if self.model is None:
+            async with self._model_lock:
+                if self.model is None:
+                    async with SessionLocal() as db:
+                        config = await llm_setting_service.get_small_llm_config(db, user_id=self.user_id)
+                    self.model = ChatClient(runtime_config=config).structured(
+                        Verdict, max_attempts=1, options=ModelOptions(temperature=0),
+                    )
+
+    async def prepare(self, state):
+        claims = (await self.artifact_store.read_json_uri(state["claims_artifact_ref"]))["claims"]
+        ledger = {
+            item["claim_id"]: item
+            for item in (await self.artifact_store.read_json_uri(state["evidence_ledger_artifact_ref"]))["claims"]
+        }
+        framework = (await self.artifact_store.read_json_uri(state["framework_artifact_ref"]))["framework"]
+        corpus = await self.artifact_store.read_json_uri(state["corpus_artifact_ref"])
+        sections = {section["section_id"]: section for section in framework["sections"]}
+        titles = {
+            str(paper["paper_id"]): paper.get("title", "")
+            for paper in corpus["papers"]
+        }
+        previous = {}
+        if state.get("claim_verification_artifact_ref"):
+            previous = {
                 item["claim_id"]: item
-                for item in (await self.artifact_store.read_json_uri(state["evidence_ledger_artifact_ref"]))["claims"]
-            }
-            framework = (await self.artifact_store.read_json_uri(state["framework_artifact_ref"]))["framework"]
-            corpus = await self.artifact_store.read_json_uri(state["corpus_artifact_ref"])
-            sections = {section["section_id"]: section for section in framework["sections"]}
-            titles = {
-                str(paper["paper_id"]): paper.get("title", "")
-                for paper in corpus["papers"]
-            }
-            previous = {}
-            if state.get("claim_verification_artifact_ref"):
-                previous = {
-                    item["claim_id"]: item
-                    for item in (
-                        await self.artifact_store.read_json_uri(
-                            state["claim_verification_artifact_ref"]
-                        )
-                    )["claims"]
-                }
-            verdicts = {}
-            pending = []
-            for claim in claims:
-                if claim["withdrawn_reason"]:
-                    continue
-                if ledger[claim["claim_id"]]["claim_hash"] != claim["claim_hash"]:
-                    raise ValueError("evidence ledger belongs to a previous claim version")
-                evidence = ledger[claim["claim_id"]]["chunk_snippets"]
-                digest = content_hash(evidence)
-                cached = previous.get(claim["claim_id"])
-                if (
-                    cached
-                    and cached["claim_hash"] == claim["claim_hash"]
-                    and cached["evidence_digest"] == digest
-                    and not cached.get("revisions")
-                ):
-                    verdicts[claim["claim_id"]] = cached
-                else:
-                    pending.append(
-                        (
-                            claim,
-                            digest,
-                            sections[claim["section_id"]],
-                            [
-                                {
-                                    key: item[key]
-                                    for key in (
-                                        "claim_id",
-                                        "text",
-                                        "claim_type",
-                                        "withdrawn_reason",
-                                    )
-                                }
-                                for item in claims
-                                if item["section_id"] == claim["section_id"]
-                            ],
-                            self._sources(evidence, titles),
-                        )
+                for item in (
+                    await self.artifact_store.read_json_uri(
+                        state["claim_verification_artifact_ref"]
                     )
-
-            def completed_verdicts():
-                return [
-                    verdicts[claim["claim_id"]]
-                    for claim in claims
-                    if not claim["withdrawn_reason"] and claim["claim_id"] in verdicts
-                ]
-
-            if verdicts:
-                verification_ref = await save(
-                    self.artifact_store,
-                    state,
-                    "claim_verification",
-                    {"claims": completed_verdicts()},
-                )
-
-            semaphore = asyncio.Semaphore(self.max_concurrency)
-
-            async def verify(claim, digest, section, section_claims, sources):
-                async with semaphore:
-                    try:
-                        verdict = await self._verify_claim(
-                            claim=claim,
-                            section=section,
-                            section_claims=section_claims,
-                            sources=sources,
-                        )
-                    except VerificationProtocolError as exc:
-                        raise VerificationProtocolError(
-                            f"claim_id={claim['claim_id']}: {exc}"
-                        ) from exc
-                    except Exception as exc:
-                        raise RuntimeError(f"claim_id={claim['claim_id']}: {exc}") from exc
-                verdict.update(
-                    claim_id=claim["claim_id"],
-                    claim_hash=claim["claim_hash"],
-                    evidence_digest=digest,
-                )
-                return claim["claim_id"], verdict
-
-            tasks = [asyncio.create_task(verify(*item)) for item in pending]
-            try:
-                for task in asyncio.as_completed(tasks):
-                    claim_id, verdict = await task
-                    verdicts[claim_id] = verdict
-                    verification_ref = await save(
-                        self.artifact_store,
-                        state,
-                        "claim_verification",
-                        {"claims": completed_verdicts()},
-                    )
-            except (asyncio.CancelledError, Exception):
-                for task in tasks:
-                    task.cancel()
-                await asyncio.gather(*tasks, return_exceptions=True)
-                raise
-
-            ordered_verdicts = completed_verdicts()
-            revisions = []
-            for claim in claims:
-                if claim["withdrawn_reason"]:
-                    continue
-                verdict = verdicts[claim["claim_id"]]
-                revisions.extend(verdict["revisions"])
-            supported = {
-                item["claim_id"] for item in ordered_verdicts if item["status"] == "supported"
+                )["claims"]
             }
-            if verification_ref is None:
-                verification_ref = await save(
-                    self.artifact_store,
-                    state,
-                    "claim_verification",
-                    {"claims": ordered_verdicts},
-                )
-            update = {"claim_verification_artifact_ref": verification_ref}
-            if revisions:
-                if (
-                    state["reflection_round"]
-                    >= settings.TASK_REVIEW_MAX_REFLECTION_ROUNDS - 1
-                ):
-                    return {
-                        **update,
-                        "revision_items": [],
-                        "warnings": state.get("warnings", []) + [
-                            "Claim evidence revision limit reached; unsupported claims "
-                            "will be represented as material insufficiency."
+        verdicts, jobs, claim_ids = {}, [], []
+        for claim in claims:
+            if claim["withdrawn_reason"]:
+                continue
+            claim_ids.append(claim["claim_id"])
+            if ledger[claim["claim_id"]]["claim_hash"] != claim["claim_hash"]:
+                raise ValueError("evidence ledger belongs to a previous claim version")
+            evidence = ledger[claim["claim_id"]]["chunk_snippets"]
+            digest = content_hash(evidence)
+            cached = previous.get(claim["claim_id"])
+            if (
+                cached
+                and cached["claim_hash"] == claim["claim_hash"]
+                and cached["evidence_digest"] == digest
+                and not cached.get("revisions")
+            ):
+                verdicts[claim["claim_id"]] = cached
+            else:
+                jobs.append(
+                    {
+                        "item_id": claim["claim_id"],
+                        "claim": claim,
+                        "digest": digest,
+                        "section": sections[claim["section_id"]],
+                        "section_claims": [
+                            {
+                                key: item[key]
+                                for key in (
+                                    "claim_id",
+                                    "text",
+                                    "claim_type",
+                                    "withdrawn_reason",
+                                )
+                            }
+                            for item in claims
+                            if item["section_id"] == claim["section_id"]
                         ],
-                        "stage": "rendering_sections",
-                        "status": "running",
+                        "sources": self._sources(evidence, titles),
                     }
-                result = await self._schedule_claim_revision(
-                    {**state, **update},
-                    revisions,
                 )
-                return {**update, **result}
-            return {
-                **update,
-                "warnings": (
-                    state.get("warnings", [])
-                    + [
-                        "No claim has verified evidence; "
-                        "sections will state material insufficiency."
-                    ]
-                    if not supported
-                    else state.get("warnings", [])
-                ),
-                "stage": "rendering_sections",
-                "status": "running",
-            }
-        except VerificationProtocolError as exc:
-            return failed(
-                f"claim verification protocol failed: {exc}",
-                claim_verification_artifact_ref=verification_ref,
-                error_code="VERIFICATION_PROTOCOL_FAILED",
+
+        if jobs:
+            await self._ensure_model()
+        return review_batch(jobs, claim_ids=claim_ids, cached=verdicts)
+
+    async def run_item(self, item):
+        await self._ensure_model()
+        claim = item["claim"]
+        verdict = await self._verify_claim(
+            claim=claim, section=item["section"], section_claims=item["section_claims"],
+            sources=item["sources"],
+        )
+        verdict.update(
+            claim_id=claim["claim_id"],
+            claim_hash=claim["claim_hash"],
+            evidence_digest=item["digest"],
+        )
+        return verdict
+
+    async def collect(self, state, results, failure):
+        context = state["batch_context"]
+        verdicts = {**context["cached"], **results}
+        ordered_verdicts = [
+            verdicts[claim_id] for claim_id in context["claim_ids"] if claim_id in verdicts
+        ]
+        verification_ref = state.get("claim_verification_artifact_ref")
+        if ordered_verdicts or not failure:
+            verification_ref = await save(
+                self.artifact_store, state, "claim_verification", {"claims": ordered_verdicts},
             )
-        except Exception as exc:
-            return failed(
-                f"claim verification failed: {exc}",
-                claim_verification_artifact_ref=verification_ref,
-                error_code="VERIFICATION_FAILED",
-                retryable=True,
-            )
+        update = {"claim_verification_artifact_ref": verification_ref}
+        if failure:
+            return self.failure({**state, **update}, failure)
+
+        revisions = [revision for verdict in ordered_verdicts for revision in verdict["revisions"]]
+        supported = any(verdict["status"] == "supported" for verdict in ordered_verdicts)
+        if revisions:
+            if (
+                state["reflection_round"]
+                >= settings.TASK_REVIEW_MAX_REFLECTION_ROUNDS - 1
+            ):
+                return {
+                    **update,
+                    "revision_items": [],
+                    "warnings": state.get("warnings", []) + [
+                        "Claim evidence revision limit reached; unsupported claims "
+                        "will be represented as material insufficiency."
+                    ],
+                    "stage": "rendering_sections",
+                    "status": "running",
+                }
+            try:
+                result = await self._schedule_claim_revision({**state, **update}, revisions)
+            except GraphBubbleUp:
+                raise
+            except Exception as exc:
+                return self.failure({**state, **update}, {"error": str(exc)})
+            return {**update, **result}
+        return {
+            **update,
+            "warnings": (
+                state.get("warnings", [])
+                + [
+                    "No claim has verified evidence; "
+                    "sections will state material insufficiency."
+                ]
+                if not supported
+                else state.get("warnings", [])
+            ),
+            "stage": "rendering_sections",
+            "status": "running",
+        }
+
+    @staticmethod
+    def failure(state, error):
+        message = error["error"]
+        if "item_id" in error:
+            message = f"claim_id={error['item_id']}: {message}"
+        protocol_error = error.get("protocol_error", False)
+        label = "claim verification protocol failed" if protocol_error else "claim verification failed"
+        return failed(
+            f"{label}: {message}",
+            claim_verification_artifact_ref=state.get("claim_verification_artifact_ref"),
+            error_code="VERIFICATION_PROTOCOL_FAILED" if protocol_error else "VERIFICATION_FAILED",
+            retryable=not protocol_error,
+        )

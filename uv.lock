@@ -1468,27 +1468,6 @@ wheels = [
 ]
 
 [[package]]
-name = "nacos-sdk-python"
-version = "3.2.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "a2a-sdk" },
-    { name = "aiofiles" },
-    { name = "aiohttp" },
-    { name = "alibabacloud-kms20160120" },
-    { name = "alibabacloud-tea-openapi" },
-    { name = "grpcio" },
-    { name = "protobuf" },
-    { name = "psutil" },
-    { name = "pycryptodome" },
-    { name = "pydantic" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/47/91/37bcae40b8f0be50d16223ca3a58028f93c078085aabcc48c79d003f8ae0/nacos_sdk_python-3.2.0.tar.gz", hash = "sha256:646fb1c243caf540f381f1e08d489160fc2a314df00c919db306512ea6265f56", size = 94558, upload-time = "2026-04-27T09:04:11.485Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/5f/cf/6c578843dd82e70ec3d48c57410ed36f00d32cfa8ee114dc8d3bce92055f/nacos_sdk_python-3.2.0-py3-none-any.whl", hash = "sha256:241ef203115eaabc97622dbbf773c3aa824b5886bc9f77033268a6d75b63d2a6", size = 120949, upload-time = "2026-04-27T09:04:09.914Z" },
-]
-
-[[package]]
 name = "narwhals"
 version = "2.24.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1868,7 +1847,6 @@ app = [
     { name = "mmh3" },
     { name = "mpmath" },
     { name = "multidict" },
-    { name = "nacos-sdk-python" },
     { name = "narwhals" },
     { name = "networkx" },
     { name = "numpy" },
@@ -2035,7 +2013,6 @@ app = [
     { name = "mmh3", specifier = "==5.2.1" },
     { name = "mpmath", specifier = "==1.3.0" },
     { name = "multidict", specifier = "==6.7.1" },
-    { name = "nacos-sdk-python", specifier = "==3.2.0" },
     { name = "narwhals", specifier = "==2.24.0" },
     { name = "networkx", specifier = "==3.6.1" },
     { name = "numpy", specifier = "==2.4.4" },

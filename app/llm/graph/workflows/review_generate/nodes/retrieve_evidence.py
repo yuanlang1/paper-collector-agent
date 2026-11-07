@@ -1,9 +1,8 @@
-import asyncio
-
 from app.llm.artifacts.store import LocalArtifactStore
 from app.rag.retrieval.paper_content_retrieval import PaperContentHybridRetrievalModule
 from app.llm.graph.workflows.review_generate.contracts import (
     retrieval_plan_hash,
+    review_batch,
     save,
 )
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
@@ -84,75 +83,92 @@ def select_evidence_snippets(query_results):
 
 
 class RetrieveEvidenceNode:
-    def __init__(self, *, artifact_store=None, content_retrieval=None, max_concurrency=4):
+    def __init__(self, *, artifact_store=None, content_retrieval=None):
         self.artifact_store = artifact_store or LocalArtifactStore()
         self.content_retrieval = content_retrieval
-        self.max_concurrency = max_concurrency
 
-    async def __call__(self, state):
-        try:
-            claims = (await self.artifact_store.read_json_uri(state["claims_artifact_ref"]))[
-                "claims"
-            ]
-            previous = {}
-            if state.get("evidence_ledger_artifact_ref"):
-                previous = {
-                    item["claim_id"]: item
-                    for item in (
-                        await self.artifact_store.read_json_uri(
-                            state["evidence_ledger_artifact_ref"]
-                        )
-                    )["claims"]
-                }
-            retrieval = self.content_retrieval or PaperContentHybridRetrievalModule()
-            semaphore = asyncio.Semaphore(self.max_concurrency)
-
-            async def retrieve(claim):
-                old = previous.get(claim["claim_id"])
-                queries = claim["retrieval_queries"][:MAX_EVIDENCE_QUERIES]
-                plan_hash = retrieval_plan_hash(
-                    claim,
-                    queries=queries,
-                    settings={
-                        "top_k": RETRIEVAL_TOP_K,
-                        "user_id": state["user_id"],
-                        "selection_version": EVIDENCE_SELECTION_VERSION,
-                    },
-                )
-                if (
-                    old
-                    and old["claim_hash"] == claim["claim_hash"]
-                    and old.get("retrieval_plan_hash") == plan_hash
-                ):
-                    return old
-                async with semaphore:
-                    query_results = []
-                    for query in queries:
-                        query_results.append(await retrieval.search(
-                            query=query,
-                            user_id=state["user_id"],
-                            top_k=RETRIEVAL_TOP_K,
-                            paper_ids=claim["candidate_paper_ids"],
-                        ))
-                snippets = select_evidence_snippets(query_results)
-                return {
-                    "claim_id": claim["claim_id"],
-                    "claim_hash": claim["claim_hash"],
-                    "retrieval_plan_hash": plan_hash,
-                    "queries": queries,
-                    "chunk_snippets": snippets,
-                }
-
-            results = await asyncio.gather(
-                *(retrieve(claim) for claim in claims if not claim["withdrawn_reason"])
-            )
-            ref = await save(self.artifact_store, state, "evidence_ledger", {"claims": results})
-            return {
-                "evidence_ledger_artifact_ref": ref,
-                "stage": "verifying_claims",
-                "status": "running",
+    async def prepare(self, state):
+        claims = (await self.artifact_store.read_json_uri(state["claims_artifact_ref"]))["claims"]
+        previous = {}
+        if state.get("evidence_ledger_artifact_ref"):
+            previous = {
+                item["claim_id"]: item
+                for item in (await self.artifact_store.read_json_uri(
+                    state["evidence_ledger_artifact_ref"]
+                ))["claims"]
             }
-        except Exception as exc:
-            return failed(
-                f"evidence retrieval failed: {exc}", error_code="RETRIEVAL_FAILED", retryable=True
+        jobs, claim_ids, cached = [], [], {}
+        user_id = state["user_id"]
+        for claim in claims:
+            if claim["withdrawn_reason"]:
+                continue
+            claim_id = claim["claim_id"]
+            claim_ids.append(claim_id)
+            queries = claim["retrieval_queries"][:MAX_EVIDENCE_QUERIES]
+            plan_hash = retrieval_plan_hash(
+                claim,
+                queries=queries,
+                settings={
+                    "top_k": RETRIEVAL_TOP_K,
+                    "user_id": user_id,
+                    "selection_version": EVIDENCE_SELECTION_VERSION,
+                },
             )
+            old = previous.get(claim_id)
+            if (
+                old
+                and old["claim_hash"] == claim["claim_hash"]
+                and old.get("retrieval_plan_hash") == plan_hash
+            ):
+                cached[claim_id] = old
+                continue
+            jobs.append({
+                "item_id": claim_id,
+                "claim_hash": claim["claim_hash"],
+                "retrieval_plan_hash": plan_hash,
+                "queries": queries,
+                "paper_ids": claim["candidate_paper_ids"],
+                "user_id": user_id,
+            })
+        return review_batch(jobs, claim_ids=claim_ids, cached=cached)
+
+    async def run_item(self, item):
+        if self.content_retrieval is None:
+            self.content_retrieval = PaperContentHybridRetrievalModule()
+        query_results = []
+        for query in item["queries"]:
+            query_results.append(await self.content_retrieval.search(
+                query=query,
+                user_id=item["user_id"],
+                top_k=RETRIEVAL_TOP_K,
+                paper_ids=item["paper_ids"],
+            ))
+        return {
+            "claim_id": item["item_id"],
+            "claim_hash": item["claim_hash"],
+            "retrieval_plan_hash": item["retrieval_plan_hash"],
+            "queries": item["queries"],
+            "chunk_snippets": select_evidence_snippets(query_results),
+        }
+
+    async def collect(self, state, results, failure):
+        if failure:
+            return self.failure(state, failure)
+        context = state["batch_context"]
+        entries = {**context["cached"], **results}
+        ref = await save(
+            self.artifact_store, state, "evidence_ledger",
+            {"claims": [entries[claim_id] for claim_id in context["claim_ids"]]},
+        )
+        return {
+            "evidence_ledger_artifact_ref": ref,
+            "stage": "verifying_claims",
+            "status": "running",
+        }
+
+    @staticmethod
+    def failure(state, error):
+        return failed(
+            f"evidence retrieval failed: {error['error']}",
+            error_code="RETRIEVAL_FAILED", retryable=True,
+        )

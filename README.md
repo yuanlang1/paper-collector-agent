@@ -1,35 +1,5 @@
 # paper-collector-agent
 
-## 在 Docker 中运行 Nacos
-
-项目仅通过 Nacos 做服务注册与发现，当前 `.env` 的
-`NACOS_SERVER_ADDR="127.0.0.1:8848"` 可保持不变。根目录的
-`compose.nacos.yml` 使用与本机安装一致的 Nacos `3.2.0` 单机 Derby
-模式；数据和日志存放在 Docker 命名卷中，重建容器不会丢失。
-
-在 PowerShell 中启动：
-
-```powershell
-docker compose -f compose.nacos.yml up -d
-```
-
-随后可访问 [Nacos 控制台](http://127.0.0.1:8080/)，或使用以下命令检查容器：
-
-```powershell
-docker compose -f compose.nacos.yml ps
-docker compose -f compose.nacos.yml logs -f nacos
-```
-
-该配置保持本机 Nacos 的 `NACOS_AUTH_ENABLE=false`。它只适用于本机开发；若将端口暴露到非受信任网络，应先启用认证，并替换 Compose 中的三个 `NACOS_AUTH_*` 值及限制端口访问范围。
-
-停止服务时保留数据：
-
-```powershell
-docker compose -f compose.nacos.yml down
-```
-
-若要连同 Nacos 的 Docker 数据一并移除，执行 `docker compose -f compose.nacos.yml down -v`。
-
 ## 安装 Python 依赖
 
 本项目使用 Python 3.11 和 uv。`pyproject.toml` 声明依赖，`uv.lock` 锁定
@@ -46,6 +16,46 @@ uv pip check --python .\.venv311\Scripts\python.exe
 PyTorch，uv 已为 `torch` 和 `torchvision` 配置独立官方源；Windows 专有包
 包含平台标记。依赖配置统一维护在 `pyproject.toml` 与 `uv.lock`，
 后续依赖更新使用 `uv add`，并提交这两个文件。
+
+## Linux 新环境部署
+
+`docker-compose-environment.yml` 创建 PostgreSQL、Redis 和 Qdrant。应用进程在宿主机通过 uv 运行。将完整的应用配置写入 `.env.deploy`，并设置以下连接参数。用 `openssl rand -hex 24` 生成密码，将同一个值填入 PostgreSQL 密码和连接 URL。
+
+```dotenv
+POSTGRES_PASSWORD=replace_with_generated_hex_password
+DATABASE_POSTGRES_URL=postgresql://yl:replace_with_generated_hex_password@127.0.0.1:5432/agent_db
+REDIS_URL=redis://127.0.0.1:6380/2
+CELERY_BROKER_URL=redis://127.0.0.1:6380/0
+CELERY_RESULT_BACKEND=redis://127.0.0.1:6380/1
+QDRANT_URL=http://127.0.0.1:6333
+QDRANT_API_KEY=
+PAPER_SERVICE_BASE_URL=http://paper-service.internal:8080
+ARTIFACT_BASE_DIR=./data/artifacts
+```
+
+将 `PAPER_SERVICE_BASE_URL` 换成宿主机可访问的实际地址。在项目根目录启动基础设施，安装依赖，然后初始化记忆存储。
+
+```bash
+docker compose --env-file .env.deploy -f docker-compose-environment.yml up -d --build --wait
+uv sync --locked
+mkdir -p data/artifacts
+uv run --locked --no-sync --env-file .env.deploy python -m app.memory.init_store
+```
+
+在项目根目录分别启动 FastAPI、Worker 和 Beat。FastAPI 的 `/health` 返回 HTTP 200 后，再启动 Worker 和 Beat。
+
+```bash
+# FastAPI
+uv run --locked --no-sync --env-file .env.deploy python -m uvicorn app.main:app --host 127.0.0.1 --port 8002
+
+# Celery Worker
+uv run --locked --no-sync --env-file .env.deploy celery -A app.tasks.celery_app:celery_app worker \
+  --pool=prefork --concurrency=1 --queues=memory,paper_search,rag --loglevel=INFO
+
+# Celery Beat
+uv run --locked --no-sync --env-file .env.deploy celery -A app.tasks.celery_app:celery_app beat \
+  --schedule data/celerybeat-schedule --loglevel=INFO
+```
 
 ## PostgreSQL 与 Redis
 
@@ -88,7 +98,7 @@ PostgreSQL 和 Redis。每个 completed run 在同一事务内创建 UserProfile
 两个 job，提交后分别派发。Beat 每分钟检查空闲超过 10 分钟、最后一个 run 为
 completed 的 thread，创建 Episode job，并补派发 pending job、恢复过期租约。
 
-确认 PostgreSQL、Nacos 已运行，并完成下方记忆存储初始化后，在三个独立
+确认 PostgreSQL、Redis 已运行，并完成下方记忆存储初始化后，在三个独立
 PowerShell 终端中按 FastAPI、Worker、Beat 的顺序启动。FastAPI 启动时创建缺失的
 业务表，包括 `memory_job`；等待日志显示 `Application startup complete` 后，再启动
 Worker 和 Beat。每个终端先执行：
@@ -163,18 +173,17 @@ docker compose -f compose.memory.yml down
 
 HTTP 提供根路径 `/`、健康检查 `/health`、Agent SSE 与历史接口、thread 操作和 run 查询。主服务负责用户鉴权和权限判断。内部检索数量配置使用 `GET /internal/settings/source-limits` 和 `PUT /internal/settings/source-limits`；更新请求为 `{"arxiv": 20, "dblp": 20, "google_scholar": 20}`，返回 `ServiceResponse`，其中 `data` 包含 `limits`、`page_sizes` 和 `maximum_limits`。Swagger、ReDoc 和 OpenAPI 均已关闭。
 
-Agent 仅监听原 HTTP 端口，并以 `SERVICE_NAME` 在 Nacos 注册。主服务通过实例 IP 和 HTTP 端口调用内部配置接口；网关不得对外转发 `/internal/**`，需通过网络策略限制内部接口只允许可信服务访问。旧配置调用方需同步切换到 HTTP，不再提供业务 gRPC 服务。
+Agent 监听 HTTP 端口。主服务通过配置的 Agent HTTP 地址调用内部配置接口；网关不得对外转发 `/internal/**`，需通过网络策略限制内部接口只允许可信服务访问。旧配置调用方需同步切换到 HTTP，不再提供业务 gRPC 服务。
 
 访问 Java paper-service 时复用 `httpx.AsyncClient`，调用 `/internal/**` 接口。`.env` 配置如下：
 
 ```dotenv
-PAPER_SERVICE_NAME=paper-service
-PAPER_SERVICE_BASE_URL=
+PAPER_SERVICE_BASE_URL=http://paper-service:8080
 PAPER_SERVICE_CONNECT_TIMEOUT_SECONDS=5.0
 PAPER_SERVICE_TIMEOUT_SECONDS=10.0
 ```
 
-`PAPER_SERVICE_BASE_URL` 留空时，从 Nacos 发现 `paper-service` 的 HTTP 实例；也可指定实际地址（如 `http://127.0.0.1:8080`）直连。客户端同时检查 HTTP 状态和响应体的 `success`、`code`，写操作不自动重试。Nacos 与 Qdrant SDK 及其底层依赖继续保留。
+`PAPER_SERVICE_BASE_URL` 必填，使用 FastAPI 和 Worker 均可访问的 HTTP(S) 地址。客户端同时检查 HTTP 状态和响应体的 `success`、`code`，写操作不自动重试。
 
 协议位于 [app/protos/agent/v1/agent.proto](app/protos/agent/v1/agent.proto)。当前只注册 `SettingsService.GetSourceLimits` 和 `UpdateSourceLimits`。旧主 Agent 图、会话历史和 LLM 配置档案的运行入口已停用；保留协议定义，相关 RPC 返回 `UNIMPLEMENTED`。论文检索和综述生成的业务工作流仍保留；RAG 索引改由内部 HTTP 接口提交 Celery 任务，不再作为 Agent 子图执行。
 
@@ -223,9 +232,7 @@ uv run --locked --no-sync --env-file .env celery -A app.tasks.celery_app:celery_
 ```
 
 每个任务只处理传入的一批论文。首版不自动重试整批，同一论文的并发提交由 paper service
-协调。任务复用 worker 专属事件循环；HTTP、Nacos 发现客户端及 MinerU 客户端在批次结束时
-关闭，缓存的向量客户端和模型在 worker 关闭时释放。worker 使用 Nacos 时只发现服务，
-不注册 FastAPI 实例。`TASK_RAG_WORKFLOW_TIMEOUT_SECONDS` 继续作为批次执行超时，默认
+协调。任务复用 worker 专属事件循环，使用固定地址访问 Paper Service。Worker 退出时释放共享 HTTP 客户端和向量客户端。`TASK_RAG_WORKFLOW_TIMEOUT_SECONDS` 继续作为批次执行超时，默认
 1800 秒；Redis 队列可见性超时为 7200 秒。
 
 离线检查（HTTP、解析及索引使用替身，不调用外部服务）：

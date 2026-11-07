@@ -4,7 +4,6 @@ import httpx
 
 from app.config import settings
 from app.infrastructure.http import http_manager
-from app.infrastructure.nacos_registry import NacosRegistry, nacos_registry
 
 
 class PaperServiceError(RuntimeError):
@@ -14,33 +13,13 @@ class PaperServiceError(RuntimeError):
 
 
 class PaperServiceHttpClient:
-    def __init__(
-        self, http: httpx.AsyncClient | None = None, *, registry: NacosRegistry | None = None,
-    ) -> None:
+    def __init__(self, http: httpx.AsyncClient | None = None) -> None:
         self.http = http
-        self.registry = registry or nacos_registry
 
     async def request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         http = self.http if self.http is not None else http_manager.paper_service_client
 
-        base_url = settings.PAPER_SERVICE_BASE_URL.rstrip("/")
-        if not base_url:
-            instance = await self.registry.choose_instance(settings.PAPER_SERVICE_NAME)
-            ip = (
-                instance.get("ip")
-                if isinstance(instance, dict)
-                else getattr(instance, "ip", None)
-            )
-            port = (
-                instance.get("port")
-                if isinstance(instance, dict)
-                else getattr(instance, "port", None)
-            )
-            if not ip or not port:
-                raise RuntimeError("Nacos paper-service instance is missing ip or port")
-            base_url = str(httpx.URL(scheme="http", host=ip, port=int(port))).rstrip(
-                "/"
-            )
+        base_url = str(settings.PAPER_SERVICE_BASE_URL).rstrip("/")
 
         # ponytail: no write retries; review versions and RAG leases need explicit idempotency first.
         response = await http.request(method, base_url + path, **kwargs)

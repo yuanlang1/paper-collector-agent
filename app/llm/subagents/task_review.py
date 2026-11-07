@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from app.bus.events import SubagentFinishedEvent, SubagentStartedEvent
 from app.config import settings
-from app.llm.provider import ChatClient
+from app.core.identifiers import normalize_user_id
 from app.llm.subagents.paper_search import create_child_run_id
 
 
@@ -23,7 +23,7 @@ def _now():
 class TaskReviewParams(BaseModel):
     task_id: int = Field(
         gt=0,
-        description="已完成 RAG 索引、用于提供固定论文集的检索任务 ID。",
+        description="已完成 RAG 索引和论文画像、用于提供固定论文集的检索任务 ID。",
     )
     topic: str = Field(
         min_length=2,
@@ -58,7 +58,7 @@ class TaskReviewParams(BaseModel):
 @tool(
     "task_review_agent",
     description=(
-        "基于已完成 RAG 索引的固定任务论文集生成结构化学术综述。"
+        "基于已完成 RAG 索引和论文画像的固定任务论文集生成结构化学术综述。"
         "当用户需要围绕任务论文撰写综述、综合研究进展或批判性分析时，调用此工具。"
         "输入应包含 task_id 和明确的综述主题 topic，可指定输出语言、引用格式和综述组织方式。"
         "不扩展论文集合；systematic 和 scoping 仅指定组织方式，不代表执行正式系统综述检索协议。"
@@ -102,19 +102,28 @@ async def task_review_agent(
     )
     try:
         from app.llm.graph.workflows.review_generate.workflow import (
+            REVIEW_MAX_CONCURRENCY,
             build_task_review_workflow,
         )
 
+        user_id, numeric_user_id = normalize_user_id(runtime.context.user_id)
         output = await asyncio.wait_for(
-            build_task_review_workflow(chat=ChatClient()).ainvoke(
+            build_task_review_workflow(user_id=numeric_user_id).ainvoke(
                 {
                     "run_id": parent_run_id,
                     "child_run_id": run_id,
                     "conversation_id": session_id,
-                    "user_id": str(runtime.context.user_id),
+                    "user_id": user_id,
                     **args,
                 },
-                config={**runtime.config, "recursion_limit": 10007},
+                config={
+                    **runtime.config,
+                    "recursion_limit": 10007,
+                    "max_concurrency": min(
+                        runtime.config.get("max_concurrency") or REVIEW_MAX_CONCURRENCY,
+                        REVIEW_MAX_CONCURRENCY,
+                    ),
+                },
                 context={"event_fields": fields},
             ),
             timeout=settings.TASK_REVIEW_SUBAGENT_TIMEOUT_SECONDS,

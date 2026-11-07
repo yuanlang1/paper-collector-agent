@@ -1,4 +1,5 @@
-from typing import Any, Literal
+from operator import add
+from typing import Annotated, Any, Literal
 
 from typing_extensions import TypedDict
 
@@ -29,9 +30,6 @@ class TaskReviewWorkflowState(TypedDict, total=False):
 
     paper_ids_snapshot: list[str]
     corpus_artifact_ref: str | None
-    study_records_artifact_ref: str | None
-    study_extraction_report_artifact_ref: str | None
-    reading_summary: dict[str, int]
 
     framework_artifact_ref: str | None
 
@@ -54,3 +52,7 @@ class TaskReviewWorkflowState(TypedDict, total=False):
     claim_verification_artifact_ref: str | None
     revision_items: list[dict[str, Any]]
     revision_before: str | None
+
+    batch_jobs: list[dict[str, Any]] | None
+    batch_context: dict[str, Any]
+    batch_results: Annotated[list[dict[str, Any]], add]
