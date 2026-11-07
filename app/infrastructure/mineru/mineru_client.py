@@ -8,9 +8,10 @@ from collections import Counter
 from io import BytesIO
 from typing import Any, Literal
 from zipfile import BadZipFile, ZipFile
-import httpx
-from app.config import settings
 
+import httpx
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +123,9 @@ class MinerUClient:
                 return result
 
             if state == "failed":
-                raise MinerUTaskFailedError(result.get("err_msg") or f"MinerU task failed: {task_id}")
+                raise MinerUTaskFailedError(
+                    result.get("err_msg") or f"MinerU task failed: {task_id}"
+                )
 
             if state not in self.PENDING_STATES:
                 raise MinerUResultError(f"Unexpected MinerU task state: {state}")
@@ -206,28 +209,33 @@ class MinerUClient:
                     "states=%s, progress=%s",
                     batch_id,
                     len(results),
-                    dict(Counter(str(item.get("state") or "missing") for item in results)),
+                    dict(
+                        Counter(str(item.get("state") or "missing") for item in results)
+                    ),
                     [
                         {
                             "data_id": str(item.get("data_id") or ""),
                             "state": str(item.get("state") or "missing"),
-                            "extracted_pages": (item.get("extract_progress") or {}).get("extracted_pages"),
-                            "total_pages": (item.get("extract_progress") or {}).get("total_pages"),
+                            "extracted_pages": (item.get("extract_progress") or {}).get(
+                                "extracted_pages"
+                            ),
+                            "total_pages": (item.get("extract_progress") or {}).get(
+                                "total_pages"
+                            ),
                         }
                         for item in results
                     ],
                 )
                 last_snapshot = snapshot
 
-            if all(
-                item.get("state") in {"done", "failed"}
-                for item in results
-            ):
+            if all(item.get("state") in {"done", "failed"} for item in results):
                 logger.info(
                     "MinerU batch completed: batch_id=%s, result_count=%s, states=%s",
                     batch_id,
                     len(results),
-                    dict(Counter(str(item.get("state") or "missing") for item in results)),
+                    dict(
+                        Counter(str(item.get("state") or "missing") for item in results)
+                    ),
                 )
                 return results
 
@@ -291,9 +299,7 @@ class MinerUClient:
                 return markdown
 
         markdown_files = [
-            content
-            for name, content in files.items()
-            if name.lower().endswith(".md")
+            content for name, content in files.items() if name.lower().endswith(".md")
         ]
 
         if len(markdown_files) == 1:
@@ -312,9 +318,8 @@ class MinerUClient:
             normalized = name.replace("\\", "/")
             basename = normalized.rsplit("/", 1)[-1].lower()
 
-            if (
-                basename != "content_list.json"
-                and not basename.endswith("_content_list.json")
+            if basename != "content_list.json" and not basename.endswith(
+                "_content_list.json"
             ):
                 continue
 
@@ -324,8 +329,7 @@ class MinerUClient:
                 return None
 
             if isinstance(content_list, list) and all(
-                isinstance(item, dict)
-                for item in content_list
+                isinstance(item, dict) for item in content_list
             ):
                 return content_list
 

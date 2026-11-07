@@ -2,15 +2,15 @@ from collections import Counter
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-from app.infrastructure.grpc.paper_service_grpc_client import (
-    PaperServiceGrpcClient,
-    paper_service_grpc_client,
+from app.infrastructure.paper_service.paper_client import (
+    PaperServiceClient,
+    paper_service_client,
 )
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 
-RagStatus = Literal["ready", "pending", "skipped", "failed", "indexing"]
-RAG_STATUSES = {"ready", "pending", "skipped", "failed", "indexing"}
+RagStatus = Literal["success", "pending", "skipped", "failed", "indexing"]
+RAG_STATUSES = {"success", "pending", "skipped", "failed", "indexing"}
 
 class CorpusPaper(BaseModel):
     paper_id: int = Field(..., gt = 0)
@@ -24,6 +24,8 @@ class CorpusPaper(BaseModel):
 
     rag_status: RagStatus = "pending"
     chunk_count: int = Field(default = 0, ge = 0)
+    paper_profile: str | None = None
+    profile_status: str = "pending"
 
 class TaskReviewCorpus(BaseModel):
     task_id: int = Field(..., gt = 0)
@@ -32,10 +34,10 @@ class TaskReviewCorpus(BaseModel):
 class LoadTaskCorpusNode:
     def __init__(
         self,
-        client: PaperServiceGrpcClient | None = None,
+        client: PaperServiceClient | None = None,
         artifact_store: LocalArtifactStore | None = None,
     ) -> None:
-        self.client = client or paper_service_grpc_client
+        self.client = client or paper_service_client
         self.store = artifact_store or LocalArtifactStore()
 
     async def __call__(
@@ -85,8 +87,8 @@ class LoadTaskCorpusNode:
             if chunk_count < 0:
                 return failed(f"paper_id = {paper_id} has invalid chunk_count")
 
-            if rag_status == "ready" and chunk_count == 0:
-                return failed(f"paper_id = {paper_id} is ready but has no chunks")
+            if rag_status == "success" and chunk_count == 0:
+                return failed(f"paper_id = {paper_id} was indexed but has no chunks")
 
             seen_paper_ids.add(paper_id)
 
@@ -112,6 +114,8 @@ class LoadTaskCorpusNode:
                     ).strip() or None,
                     "rag_status": rag_status,
                     "chunk_count": chunk_count,
+                    "paper_profile": raw_paper.get("paper_profile"),
+                    "profile_status": raw_paper.get("profile_status") or "pending",
                 }
             )
 
@@ -119,7 +123,7 @@ class LoadTaskCorpusNode:
             paper["rag_status"]
             for paper in papers
         )
-        task_status = str(result.get("task_status") or "").strip().lower()
+        task_rag_status = str(result.get("rag_status") or "").strip().lower()
 
         warnings = list(state.get("warnings", []))
 
@@ -127,7 +131,7 @@ class LoadTaskCorpusNode:
             warnings.append(f"Removed {duplicate_count} duplicate task-paper relation(s).")
 
         if (
-            task_status != "rag_completed"
+            task_rag_status != "rag_completed"
             or rag_status_counts["pending"]
             or rag_status_counts["indexing"]
         ):
@@ -144,7 +148,7 @@ class LoadTaskCorpusNode:
         review_papers = [
             paper
             for paper in papers
-            if paper["rag_status"] == "ready"
+            if paper["rag_status"] == "success"
         ]
 
         if not review_papers:
@@ -163,6 +167,29 @@ class LoadTaskCorpusNode:
                 "Excluded failed or skipped papers from the review corpus."
             )
 
+        pending_profiles = []
+        unavailable_profiles = []
+        for paper in review_papers:
+            profile_status = paper["profile_status"]
+            if profile_status in {"pending", "running"}:
+                pending_profiles.append(str(paper["paper_id"]))
+            elif profile_status != "success" or not paper["paper_profile"]:
+                unavailable_profiles.append(str(paper["paper_id"]))
+
+        if unavailable_profiles:
+            return failed(
+                f"以下论文的画像生成失败或内容不可用：{', '.join(unavailable_profiles)}。",
+                error_code="PROFILE_UNAVAILABLE",
+                warnings=warnings,
+            )
+        if pending_profiles:
+            return failed(
+                f"以下论文的画像尚未就绪：{', '.join(pending_profiles)}。",
+                error_code="PROFILE_NOT_READY",
+                retryable=True,
+                warnings=warnings,
+            )
+
         paper_ids_snapshot = [
             str(paper["paper_id"])
             for paper in review_papers
@@ -172,11 +199,10 @@ class LoadTaskCorpusNode:
             run_id = child_run_id,
             step_key = "load_task_corpus",
             source = "task_review",
-            kind = "task_review_corpus_json",
-            count = len(review_papers),
             payload = {
                 "task_id": task_id,
-                "task_status": task_status,
+                "search_status": result.get("search_status"),
+                "rag_status": task_rag_status,
                 "paper_ids_snapshot": paper_ids_snapshot,
                 "papers": review_papers,
                 "summary": {
@@ -194,6 +220,6 @@ class LoadTaskCorpusNode:
 
             "warnings": warnings,
             "error": None,
-            "stage": "extracting_studies",
+            "stage": "generating_framework",
             "status": "running",
         }

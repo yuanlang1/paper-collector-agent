@@ -1,17 +1,17 @@
 from typing import Any
+from langchain.tools import ToolRuntime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.infrastructure.grpc.task_service_grpc_client import (
-    task_service_grpc_client,
+from app.infrastructure.paper_service.task_client import (
+    task_service_client,
 )
 from app.llm.graph.workflows.paper_search_schemas import (
     NonBlankString,
     PromptUnderstandingArgs,
     SearchTagArgs,
 )
-from app.llm.tools.base import BaseTool, as_tool
-from app.llm.tools.registry import ToolExecutionContext
+from langchain_core.tools import ToolException, tool
 
 
 class AddQueryTaskArgs(BaseModel):
@@ -24,9 +24,8 @@ class AddQueryTaskArgs(BaseModel):
 
 async def add_query_task_handler(
     params: dict[str, Any],
-    context: ToolExecutionContext,
+    context: object | None = None,
 ) -> dict[str, Any]:
-    del context
     request = AddQueryTaskArgs.model_validate(params)
 
     payload = request.model_dump(
@@ -34,25 +33,38 @@ async def add_query_task_handler(
         exclude_none=False,
     )
 
-    result = await task_service_grpc_client.add_query_task(payload)
+    if context is None:
+        raise ToolException("创建检索任务缺少用户上下文。")
+    result = await task_service_client.add_query_task(payload, user_id=context.user_id)
     if not result.get("ok"):
-        raise RuntimeError(str(result.get("error") or "创建检索任务失败。"))
+        raise ToolException(str(result.get("error") or "创建检索任务失败。"))
     return result
 
 
-ADD_QUERY_TASK_TOOL = BaseTool(
-    name="add_query_task",
+@tool(
+    "add_query_task",
     description=(
-        "创建并保存论文查询任务。"
-        "该工具会通过 Nacos 发现 paper-service，"
-        "调用 addQueryTask 接口持久化用户的原始检索要求、"
-        "检索标签和结构化查询理解。"
-        "仅当用户明确要求创建、提交、启动或保存论文查询任务时使用；"
-        "如果用户只是咨询检索方案、要求推荐关键词或预览查询条件，"
-        "不得调用该工具。"
+        "通过 paper-service 创建并保存论文查询任务。"
+        "仅当用户明确要求创建、提交、启动或保存论文查询任务时，调用此工具。"
+        "输入应包含用户原始检索要求 prompt、检索标签 searchTag 和结构化查询理解 queryUnderstanding。"
+        "用户仅咨询检索方法、推荐关键词或预览查询条件时，不调用此工具。"
     ),
-    input_schema=AddQueryTaskArgs.model_json_schema(),
-    fn=as_tool(add_query_task_handler),
-    requires_confirmation=True,
-    params_model=AddQueryTaskArgs,
+    args_schema=AddQueryTaskArgs,
 )
+async def add_query_task_tool(
+    *,
+    runtime: ToolRuntime,
+    prompt: NonBlankString,
+    searchTag: SearchTagArgs,
+    queryUnderstanding: PromptUnderstandingArgs,
+) -> dict[str, Any]:
+    """创建并保存论文查询任务。该工具会通过固定地址调用 paper-service 的  addQueryTask 接口持久化用户的原始检索要求、检索标签和结构化查询理解。仅当用户明确要求创建、提交、启动或保存论文查询任务时使用；如果用户只是咨询检索方案、要求推荐关键词或预览查询条件，不得调用该工具。"""
+    params = {
+        "prompt": prompt,
+        "searchTag": searchTag,
+        "queryUnderstanding": queryUnderstanding,
+    }
+    return await add_query_task_handler(params, runtime.context)
+
+
+ADD_QUERY_TASK_TOOL = add_query_task_tool

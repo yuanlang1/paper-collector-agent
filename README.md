@@ -1,106 +1,280 @@
 # paper-collector-agent
 
-## 在 Docker 中运行 Nacos
-
-项目仅通过 Nacos 做服务注册与发现，当前 `.env` 的
-`NACOS_SERVER_ADDR="127.0.0.1:8848"` 可保持不变。根目录的
-`compose.nacos.yml` 使用与本机安装一致的 Nacos `3.2.0` 单机 Derby
-模式；数据和日志存放在 Docker 命名卷中，重建容器不会丢失。
-
-在 PowerShell 中启动：
-
-```powershell
-docker compose -f compose.nacos.yml up -d
-```
-
-随后可访问 [Nacos 控制台](http://127.0.0.1:8080/)，或使用以下命令检查容器：
-
-```powershell
-docker compose -f compose.nacos.yml ps
-docker compose -f compose.nacos.yml logs -f nacos
-```
-
-该配置保持本机 Nacos 的 `NACOS_AUTH_ENABLE=false`。它只适用于本机开发；若将端口暴露到非受信任网络，应先启用认证，并替换 Compose 中的三个 `NACOS_AUTH_*` 值及限制端口访问范围。
-
-停止服务时保留数据：
-
-```powershell
-docker compose -f compose.nacos.yml down
-```
-
-若要连同 Nacos 的 Docker 数据一并移除，执行 `docker compose -f compose.nacos.yml down -v`。
-
 ## 安装 Python 依赖
 
-本项目以 Python 3.11 为基准。请使用锁定文件安装完整的直接与传递依赖：
+本项目使用 Python 3.11 和 uv。`pyproject.toml` 声明依赖，`uv.lock` 锁定
+Windows/Linux 的解析结果。默认安装 `app` 依赖组，保留当前应用运行环境；
+不安装该组时，仅安装后台 Worker 所需的依赖。
 
 ```powershell
-python -m pip install -r requirements.venv311.lock.txt
+$env:UV_PROJECT_ENVIRONMENT = ".venv311"
+uv sync --locked --inexact
+uv pip check --python .\.venv311\Scripts\python.exe
 ```
 
-该文件包含 CUDA 12.8 版 PyTorch 的官方 wheel 源；没有 NVIDIA/CUDA 环境时，请按目标环境重新生成锁定文件。
+`--inexact` 保留现有环境中额外安装的工具。`app` 组沿用 CUDA 12.8 版
+PyTorch，uv 已为 `torch` 和 `torchvision` 配置独立官方源；Windows 专有包
+包含平台标记。依赖配置统一维护在 `pyproject.toml` 与 `uv.lock`，
+后续依赖更新使用 `uv add`，并提交这两个文件。
 
-## 内部 gRPC 接口
+## Linux 新环境部署
 
-本服务只暴露根路径 `/` 和健康检查 `/health` 作为 HTTP 接口。主服务完成用户鉴权和权限判断后，通过内网 gRPC 调用本服务；业务 HTTP 接口、Swagger、ReDoc 和 OpenAPI 均已关闭。
-
-默认监听 `0.0.0.0:50052`，可通过 `.env` 配置以下值：
+`docker-compose-environment.yml` 创建 PostgreSQL、Redis 和 Qdrant。应用进程在宿主机通过 uv 运行。将完整的应用配置写入 `.env.deploy`，并设置以下连接参数。用 `openssl rand -hex 24` 生成密码，将同一个值填入 PostgreSQL 密码和连接 URL。
 
 ```dotenv
-AGENT_GRPC_HOST=0.0.0.0
-AGENT_GRPC_PORT=50052
-AGENT_GRPC_MAX_MESSAGE_LENGTH=16777216
+POSTGRES_PASSWORD=replace_with_generated_hex_password
+DATABASE_POSTGRES_URL=postgresql://yl:replace_with_generated_hex_password@127.0.0.1:5432/agent_db
+REDIS_URL=redis://127.0.0.1:6380/2
+CELERY_BROKER_URL=redis://127.0.0.1:6380/0
+CELERY_RESULT_BACKEND=redis://127.0.0.1:6380/1
+QDRANT_URL=http://127.0.0.1:6333
+QDRANT_API_KEY=
+PAPER_SERVICE_BASE_URL=http://paper-service.internal:8080
+ARTIFACT_BASE_DIR=./data/artifacts
 ```
 
-服务以 `SERVICE_NAME` 注册一次；注册 metadata 中的 `grpc_port` 表示内部 gRPC 端口。主服务发现 `paper-collector-agent` 实例后，使用实例 IP 和该 metadata 端口建立 gRPC 连接。必须通过网络策略限制该端口只允许主服务访问。
+将 `PAPER_SERVICE_BASE_URL` 换成宿主机可访问的实际地址。在项目根目录启动基础设施，安装依赖，然后初始化记忆存储。
 
-协议位于 [`app/protos/agent/v1/agent.proto`](app/protos/agent/v1/agent.proto)，包括：
+```bash
+docker compose --env-file .env.deploy -f docker-compose-environment.yml up -d --build --wait
+uv sync --locked
+mkdir -p data/artifacts
+uv run --locked --no-sync --env-file .env.deploy python -m app.memory.init_store
+```
 
-- `AgentService`：启动、恢复、查询和订阅运行事件；运行与事件请求均要求非空 `user_id`、`conversation_id`、`run_id`。
-- `ConversationService`：会话与消息查询、会话删除。
-- `SettingsService`：检索来源限制和 LLM 配置档案管理。
+在项目根目录分别启动 FastAPI、Worker 和 Beat。FastAPI 的 `/health` 返回 HTTP 200 后，再启动 Worker 和 Beat。
 
-主服务可使用以下命令生成 Python 客户端：
+```bash
+# FastAPI
+uv run --locked --no-sync --env-file .env.deploy python -m uvicorn app.main:app --host 127.0.0.1 --port 8002
+
+# Celery Worker
+uv run --locked --no-sync --env-file .env.deploy celery -A app.tasks.celery_app:celery_app worker \
+  --pool=prefork --concurrency=1 --queues=memory,paper_search,rag --loglevel=INFO
+
+# Celery Beat
+uv run --locked --no-sync --env-file .env.deploy celery -A app.tasks.celery_app:celery_app beat \
+  --schedule data/celerybeat-schedule --loglevel=INFO
+```
+
+## PostgreSQL 与 Redis
+
+记忆存储复用 PostgreSQL 17 的 `agent_db` 和现有数据卷
+`paper_agent_pgdata`。`Dockerfile.postgres` 基于原镜像安装 pgvector 0.8.7、
+SCWS 和固定提交的 zhparser；Compose 将该数据卷声明为 external，不新建空库。
+首次接管独立启动的 `paper-agent-postgres` 容器时，须先备份、停止并重命名
+原容器，再由 Compose 启动；同一数据卷不可同时运行两个 PostgreSQL 实例。
+
+在本机 `.env` 配置以下变量，数据库凭据沿用现有配置，宿主机地址为
+`127.0.0.1:5432`：
+
+```dotenv
+DATABASE_POSTGRES_URL='postgresql://yl:URL编码后的原密码@127.0.0.1:5432/agent_db'
+SILICONFLOW_API_KEY='你的密钥'
+SILICONFLOW_EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
+DENSE_EMBEDDING_MODEL_NAME=BAAI/bge-m3
+```
+
+在 Docker Desktop 的 Linux 容器模式下启动 PostgreSQL 和 Redis：
 
 ```powershell
-python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. app/protos/agent/v1/agent.proto
+docker compose -f compose.memory.yml up -d --build
+docker compose -f compose.memory.yml exec redis redis-cli ping
 ```
 
-最小调用示例：
-
-```python
-import grpc
-from app.protos.agent.v1 import agent_pb2, agent_pb2_grpc
-
-async with grpc.aio.insecure_channel("agent-service:50052") as channel:
-    agent = agent_pb2_grpc.AgentServiceStub(channel)
-    started = await agent.StartRun(agent_pb2.StartRunRequest(
-        user_id="verified-user-id",
-        conversation_id="conversation-1",
-        run_id="run-1",
-        message="检索多模态大模型视觉 token 压缩论文",
-    ))
-    async for event in agent.SubscribeRunEvents(
-        agent_pb2.SubscribeRunEventsRequest(
-            user_id="verified-user-id",
-            conversation_id=started.conversation_id,
-            run_id=started.run_id,
-        )
-    ):
-        print(event.sequence, event.event_name, event.data_json)
-```
-
-## LLM 配置档案
-
-主服务通过 `SettingsService` 管理 OpenAI-compatible 与 DeepSeek 的多个 LLM 配置档案，并在 `AgentService.StartRun` 中传入可选 `llm_profile_id`。未指定时使用默认档案，未创建默认档案时回退到现有 `.env` 配置。
-
-启用配置档案前，必须在服务端 `.env` 设置用于加密 API Key 的 Fernet 密钥：
+PostgreSQL 已运行时，可以单独启动 Redis：
 
 ```powershell
-.\.venv311\Scripts\python.exe -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+docker compose -f compose.memory.yml up -d redis
 ```
 
-将输出写入 `LLM_PROFILE_ENCRYPTION_KEY`。请妥善保管该密钥；更换或丢失后，现有档案中的 API Key 将无法解密。
+Redis 使用 `127.0.0.1:6380`，与已有的 6379 实例分开；AOF 文件保存在
+`memory-redis-data` 命名卷中。本地 Celery 默认连接 `redis://127.0.0.1:6380/0`。
+可用环境变量 `CELERY_BROKER_URL` 和 `CELERY_RESULT_BACKEND` 覆盖地址。
+任务结果保存在 Redis 的 DB 1，保留一小时。
+
+FastAPI、Celery Worker 和 Beat 分别作为本地独立进程运行，Compose 仅管理
+PostgreSQL 和 Redis。每个 completed run 在同一事务内创建 UserProfile、Fact
+两个 job，提交后分别派发。Beat 每分钟检查空闲超过 10 分钟、最后一个 run 为
+completed 的 thread，创建 Episode job，并补派发 pending job、恢复过期租约。
+
+确认 PostgreSQL、Redis 已运行，并完成下方记忆存储初始化后，在三个独立
+PowerShell 终端中按 FastAPI、Worker、Beat 的顺序启动。FastAPI 启动时创建缺失的
+业务表，包括 `memory_job`；等待日志显示 `Application startup complete` 后，再启动
+Worker 和 Beat。每个终端先执行：
+
+```powershell
+cd E:\FastAPI_project\paper-collector-agent
+$env:UV_PROJECT_ENVIRONMENT = ".venv311"
+```
+
+终端 1：启动 FastAPI；Windows 使用 Selector 事件循环以支持 Psycopg 异步连接：
+
+```powershell
+uv run --locked --no-sync --env-file .env python -m uvicorn app.main:app --loop asyncio:SelectorEventLoop --host 127.0.0.1 --port 8000
+```
+
+终端 2：启动串行 Worker，执行 UserProfile、Fact 和 Episode 提取任务：
+
+```powershell
+uv run --locked --no-sync --env-file .env celery -A app.tasks.celery_app:celery_app worker --pool=solo --concurrency=1 --queues=memory --loglevel=INFO
+```
+
+终端 3：启动 Beat，定期扫描 Episode、补派发 pending job 并恢复过期租约：
+
+```powershell
+uv run --locked --no-sync --env-file .env celery -A app.tasks.celery_app:celery_app beat --schedule data/celerybeat-schedule --loglevel=INFO
+```
+
+提取使用对应用户配置中 `is_small_model=true` 的小模型。当前只运行一个 `solo`
+Worker 和一个 Beat，避免同一用户的
+画像被并发覆盖；增加 Worker 前需要用户级串行控制。租约为 5 分钟，每分钟续租，
+失败最多尝试 3 次。任务只传递 job_id，根据固定 checkpoint 与 end_id 读取消息。
+提取采用至少一次执行；Store 写入与 job 完成不属于同一个事务，崩溃重试存在重复
+写入窗口。主图前的记忆检索与提示词注入尚未接入。
+
+Worker 通过 `worker_process_init` 创建进程专属事件循环、AsyncEngine 和
+`async_sessionmaker`，数据库使用 `NullPool`。三个提取任务和维护任务统一通过
+`run_async_task` 在该循环执行，每个任务使用独立 AsyncSession；领取、续租和完成
+分别提交短事务，续租协程使用另一个 Session。正常退出时清理遗留协程、数据库连接
+和事件循环，`solo` 模式同时通过 `worker_shutdown` 完成清理。
+
+任务模块统一列在 `app/tasks/celery_app.py` 的 `TASK_MODULES` 中，由 Worker
+启动时自动导入。`app/tasks/modules/memory/` 下的 `extract_userprofile.py`、
+`extract_fact.py`、`extract_episode.py`、`maintain.py`、`healthcheck.py` 各注册
+一个任务，`common.py` 保存公共辅助函数。新增任务文件时同步加入模块清单。
+
+首次启动记忆模块前，从项目根目录在本地初始化记忆存储：
+
+```powershell
+$env:UV_PROJECT_ENVIRONMENT = ".venv311"
+uv run --locked --no-sync --env-file .env python -m app.memory.init_store
+```
+
+记忆数据库初始化命令可重复执行：由原生 LangGraph Store 创建 `halfvec(1024)`
+表和 cosine HNSW 索引，并检查实际列类型和索引。该命令负责 Store 相关表，
+`memory_job` 等业务表由 FastAPI 启动时创建。需要同时验证 embedding 时，在命令末尾
+添加 `--check-embedding`，会调用一次 SiliconFlow；不带此参数时只初始化数据库。
+现有其他维度或不同类型的索引须单独迁移。
+PostgreSQL 设置 `hnsw.ef_search=100`、`hnsw.iterative_scan=strict_order`；
+当前使用 Store 原生语义检索，初始化命令不会启动记忆提取。
+原有论文 RAG 的 Qdrant 配置保留。
+
+切换前备份保存在 Git 忽略的 `data/backups/postgres/`；不要删除原数据卷。
+
+查看日志或停止服务并保留数据：
+
+```powershell
+docker compose -f compose.memory.yml logs --tail 100 postgres redis
+docker compose -f compose.memory.yml down
+```
+
+## 内部 HTTP 接口
+
+HTTP 提供根路径 `/`、健康检查 `/health`、Agent SSE 与历史接口、thread 操作和 run 查询。主服务负责用户鉴权和权限判断。内部检索数量配置使用 `GET /internal/settings/source-limits` 和 `PUT /internal/settings/source-limits`；更新请求为 `{"arxiv": 20, "dblp": 20, "google_scholar": 20}`，返回 `ServiceResponse`，其中 `data` 包含 `limits`、`page_sizes` 和 `maximum_limits`。Swagger、ReDoc 和 OpenAPI 均已关闭。
+
+Agent 监听 HTTP 端口。主服务通过配置的 Agent HTTP 地址调用内部配置接口；网关不得对外转发 `/internal/**`，需通过网络策略限制内部接口只允许可信服务访问。旧配置调用方需同步切换到 HTTP，不再提供业务 gRPC 服务。
+
+访问 Java paper-service 时复用 `httpx.AsyncClient`，调用 `/internal/**` 接口。`.env` 配置如下：
+
+```dotenv
+PAPER_SERVICE_BASE_URL=http://paper-service:8080
+PAPER_SERVICE_CONNECT_TIMEOUT_SECONDS=5.0
+PAPER_SERVICE_TIMEOUT_SECONDS=10.0
+```
+
+`PAPER_SERVICE_BASE_URL` 必填，使用 FastAPI 和 Worker 均可访问的 HTTP(S) 地址。客户端同时检查 HTTP 状态和响应体的 `success`、`code`，写操作不自动重试。
+
+协议位于 [app/protos/agent/v1/agent.proto](app/protos/agent/v1/agent.proto)。当前只注册 `SettingsService.GetSourceLimits` 和 `UpdateSourceLimits`。旧主 Agent 图、会话历史和 LLM 配置档案的运行入口已停用；保留协议定义，相关 RPC 返回 `UNIMPLEMENTED`。论文检索和综述生成的业务工作流仍保留；RAG 索引改由内部 HTTP 接口提交 Celery 任务，不再作为 Agent 子图执行。
+
+## 批量论文索引
+
+paper service 调用 `POST /internal/rag/batches`，请求仅包含
+`{"paper_ids": [123, 124]}`；列表长度为 1～20，元素必须为不重复的正整数。
+接口通过 `index_batch.delay(paper_ids=...)` 提交 Celery `rag.index_batch` 任务，返回
+HTTP 202 和 `ServiceResponse.data.job_id`（Celery 生成的 UUID）。不传论文详情、PDF 内容或 chunks。
+
+worker 调用 paper service 新增的 `POST /internal/paper/batch-details`，请求为
+`{"paperIds": [123, 124]}`。响应 `data.papers` 包含 `paperId`、`title`、
+`paperAbstract`、`pdfUrl`、`ossName`、`publishedDate`（`yyyy-MM-dd` 或 null），
+`data.missingPaperIds` 列出未找到的 ID。worker 按 ID 匹配详情，从发布日期提取年份，
+再执行 OSS 地址获取、MinerU 解析、Markdown 保存、内容切分和 Qdrant 论文级及正文索引。
+索引任务不领取 paper service 租约，不调用状态更新或批次完成接口。
+
+调用 `GET /internal/rag/batches/{job_id}` 查询结果，内部通过
+`celery_app.AsyncResult(job_id)` 读取状态和结果，响应 `data` 包含：
+
+```json
+{
+  "job_id": "00000000-0000-0000-0000-000000000001",
+  "execution_status": "SUCCESS",
+  "results": [
+    {"paper_id": 123, "status": "ready", "chunk_count": 36, "error": null},
+    {"paper_id": 124, "status": "failed", "chunk_count": 0, "error": "PAPER_NOT_FOUND"}
+  ],
+  "error": null
+}
+```
+
+执行状态包括 `PENDING`、`STARTED`、`SUCCESS`、`FAILURE`；未结束时 `results` 为 null。
+`SUCCESS` 表示批次已返回逐篇结果，可能包含 `failed` 或 `skipped`，由 paper service
+读取后更新业务状态并决定重试。详情接口整体失败、协议不匹配或批次超时会使任务失败；
+单篇缺失或处理失败保留在逐篇结果中，其他论文继续处理。结果按请求 ID 顺序返回。
+结果保存在 Redis result backend，保留一小时。使用 Celery 原生状态，不额外保存受理记录；
+未开始、未知及结果已过期的任务 ID 均可能返回 `PENDING`，调用方需自行限制轮询时间。
+队列或结果后端不可用返回 503。调用方应在保留期内读取并持久化结果。
+
+RAG worker 需要默认 `app` 依赖组及预下载的 RAG 模型。在独立 PowerShell 终端启动：
+
+```powershell
+$env:UV_PROJECT_ENVIRONMENT = ".venv311"
+uv run --locked --no-sync --env-file .env celery -A app.tasks.celery_app:celery_app worker --pool=solo --concurrency=1 --queues=rag --hostname=rag@%h --loglevel=INFO
+```
+
+每个任务只处理传入的一批论文。首版不自动重试整批，同一论文的并发提交由 paper service
+协调。任务复用 worker 专属事件循环，使用固定地址访问 Paper Service。Worker 退出时释放共享 HTTP 客户端和向量客户端。`TASK_RAG_WORKFLOW_TIMEOUT_SECONDS` 继续作为批次执行超时，默认
+1800 秒；Redis 队列可见性超时为 7200 秒。
+
+离线检查（HTTP、解析及索引使用替身，不调用外部服务）：
+
+```powershell
+.\.venv311\Scripts\python.exe -B -m unittest tests.test_rag_batch tests.test_paper_rag_processor tests.test_paper_service_http tests.test_celery_runtime tests.test_rag_oss -q
+```
+
+## 数据库生命周期
+
+数据库引擎和异步会话工厂由 FastAPI `lifespan` 调用 `create_database()` 创建，关闭时释放连接池。会话工厂使用 `async_sessionmaker(bind=engine, expire_on_commit=False)`。HTTP 从 `app.state.session_factory` 取得工厂；每次操作创建独立 `AsyncSession`。Celery Worker 创建自己的 AsyncEngine 和会话工厂，与 Web 服务分开管理。
+
+`app/database.py` 统一定义 ORM 基类、数据库引擎工厂和异步会话依赖；`app/core/database.py`、`app/db/session.py` 复用同一工厂。`app/db/models/` 按表定义模型，`app/db/repositories/` 使用 `AsyncSession` 执行原生 SQL。业务服务负责校验和事务，仓储不自行 commit。
+
+业务数据库统一使用 `DATABASE_POSTGRES_URL=postgresql://user:password@host:5432/database`。SQLAlchemy 使用 `postgresql+psycopg` 异步驱动，LangGraph checkpointer 和 store 使用原始连接地址。启动时通过 `Base.metadata.create_all()` 创建缺失业务表，不升级已有表结构，也不搬迁旧数据库数据。
+
+Windows 上 Psycopg 异步连接需要 Selector 事件循环。使用当前锁定的 Uvicorn 启动时指定：`python -m uvicorn app.main:app --loop asyncio:SelectorEventLoop`；自行使用 `asyncio.run()` 时，需在创建循环前设置 `asyncio.WindowsSelectorEventLoopPolicy()`。
+
+七张业务表统一继承 `EntityBase`，共用自增 ID、创建人、修改人、创建时间和修改时间。时间字段使用带时区类型；SQLAlchemy 更新时维护 `modification_time`，原生 SQL 和 Upsert 需显式赋值。`llm_setting` 保存模型配置，主图按请求的 `metadata.model_id` 和 `user_id` 读取；SQLite 事件回放存储继续独立使用。
+
+`llm_setting.user_id` 表示配置所属用户，与审计操作人独立；配置 CRUD 和 `get_llm_config()` 均要求显式传入 `user_id`。已有空表可执行 [新增用户字段 SQL](migrations/20261020_add_llm_setting_user_id.sql)。有历史数据的表需要单独新增该列、按实际归属回填历史记录，再设置非空约束和索引；启动建表不会升级已有表，也不会根据创建人自动推断归属。
+
+`agent_thread` 和 `agent_run` 显式保存并按 `user_id` 过滤；`config_setting` 继续保持系统级配置。run 执行由 `agent_run_service` 管理，历史查询由 `thread_service` 校验会话归属后读取 LangGraph checkpoint，消息及图状态保存在 checkpoint 中。
+
+`agent_run` 为每次被接受的 Agent 请求保存独立 `run_id`、模型参数、状态及起止时间。`POST /api/agent/run` 接收正整数 `user_id`、可选的字符串 `thread_id`、必填的 `metadata`，以及二选一的 `message` 或 `resume`。`metadata` 包含正整数 `model_id` 和可选的 `think_effort`，直接保存到 `agent_run.metadata` JSON 列；消息和恢复值仅通过请求传给 Runner，不存入 run 表。ORM 使用 `run_metadata` 属性映射该列，避免覆盖 SQLAlchemy 的 `metadata`；run 查询对外返回平铺的 `metadata` 字段。恢复请求同样显式传递 `metadata` 并创建新 run，原 run 保留 `interrupted`。状态包括 `pending`、`running`、`completed`、`failed`、`interrupted`、`cancelled`。创建及状态变化与 thread 更新时间在同一短事务内提交；同一 thread 只允许一个 `pending/running` run，并发执行或删除活跃 thread 返回 `409`。
+
+发送 `message` 时，`thread_id` 未传、为 `null` 或空字符串均表示新会话，服务端生成 ID 并在同一事务内创建 thread 和首个 run，`topic` 为 `null`；run 入库失败时两者一起回滚，执行阶段失败则保留 thread 和 `failed` run。非空 ID 校验会话归属，不存在或属于其他用户时返回 `404`；`resume` 必须提供非空 `thread_id`。SSE 首条状态事件及后续事件携带实际的 `thread_id` 和 `run_id`，前端保存生成的会话 ID 用于后续请求。
+
+已有数据库需要停写后执行 [字段迁移 SQL](migrations/20261020_rename_agent_run_input_to_metadata.sql)，再启动新版代码；`create_all()` 不会自动改列。脚本针对当前 `input.metadata` 的 JSON 格式，将列改名并仅保留其中的模型参数，去掉旧 JSON 中的消息和恢复值；整个迁移在同一事务内执行。
+
+针对本次检查到的空业务表旧结构，可使用 [统一迁移 SQL](migrations/20261020_align_business_tables.sql)：统一字段类型、时间字段和约束，并删除 `agent_session`、`agent_message`、`agent_summary`。它包含上述两份独立迁移的改动，不应重复执行；脚本在同一事务内锁定目标表，发现任何业务记录时中止，LangGraph 自有表不参与迁移。
+
+主图在创建 `AgentRunner` 前调用 `agent_build.get_model()` 和 `build_tools()`，分别注入模型和工具注册表。模型使用所选配置的 `model`、`base_url`、`api_key` 直接构建 `ChatOpenAI(streaming=True)`；`metadata.think_effort` 映射到 `reasoning_effort`，合法取值复用当前 SDK 的 `ReasoningEffort` 类型，不传或传 `null` 时不向模型接口发送该参数。具体模型不支持该参数时沿用 run 的失败处理。`provider` 字段保留，暂不参与主图模型构建。子代理内部的模型构建继续使用各自现有逻辑。
+
+`GET /api/agent/threads/{thread_id}/runs` 支持 `user_id`、`limit`、`offset`，按 ID 倒序分页；`GET /api/agent/threads/{thread_id}/runs/{run_id}` 查询单次请求。SSE 事件包含 `run_id` 和 `thread_id`，终止事件在最终状态提交后发送。图中断时先发送 `type: "interrupt"`，包含 `status: "interrupted"` 和完整的 `interrupts: [{id, value}]`，再发送保留相同中断数据的 `done` 事件；`done` 表示本次流结束，执行结果以 `status` 为准。前端按 SSE JSON `data` 中的 `type` 分发事件。断连取消会关闭图流并将尚未结束的 run 记录为 `cancelled`；已提交的 `interrupted` 等终态保持不变。进程被强制终止后的遗留状态恢复尚未实现。
+
+数据库集成测试只读取显式设置的独立测试库地址，在随机隔离 schema 内运行并清理；没有该变量时跳过数据库测试：
+
+```powershell
+$env:TEST_DATABASE_POSTGRES_URL = "postgresql://user:password@localhost:5432/paper_collector_test"
+.\.venv311\Scripts\python.exe -m unittest tests.test_async_database tests.test_postgres_models tests.test_agent_runs -v
+```
 
 ## 预下载 RAG 模型
 
@@ -130,12 +304,17 @@ python -m app.rag.evaluation run --dataset paper-content-v1 --top-k 20
 Ragas 指标使用独立 Python 3.11 虚拟环境，避免升级服务运行时的 LangChain 依赖：
 
 ```powershell
-python -m venv .venv-rag-eval
-.\.venv-rag-eval\Scripts\python.exe -m pip install -r requirements.venv311.lock.txt
-.\.venv-rag-eval\Scripts\python.exe -m pip install -r requirements.rag-eval.venv311.txt
+$env:UV_PROJECT_ENVIRONMENT = ".venv-rag-eval"
+uv sync --locked --inexact
+uv pip install --python .\.venv-rag-eval\Scripts\python.exe ragas
+$env:UV_PROJECT_ENVIRONMENT = ".venv311"
 ```
 
-随后使用该环境执行 `python -m app.rag.evaluation run --metrics deterministic ragas`。
+评测附加依赖只安装到独立环境，不修改主服务的锁定文件。随后执行：
+
+```powershell
+.\.venv-rag-eval\Scripts\python.exe -m app.rag.evaluation run --metrics deterministic ragas
+```
 
 ## 综述生成流程
 
@@ -154,3 +333,27 @@ python -m venv .venv-rag-eval
 ```powershell
 .\.venv311\Scripts\python.exe -m unittest discover -s tests -p 'test_review*.py' -q
 ```
+
+
+### 论文检索 Celery Group
+
+`enrich` 节点筛掉无 PDF 链接的候选后，把 Crossref 查询逐篇提交为
+`paper_search.query_crossref` 任务，由同一个 `paper_search` 队列消费。
+节点合并查询结果后进入 `venue`。单篇查询和 Group 等待上限分别由
+`PAPER_CROSSREF_TASK_TIMEOUT_SECONDS`（默认 100 秒）和
+`PAPER_CROSSREF_GROUP_TIMEOUT_SECONDS`（默认 300 秒）控制。
+
+`abstract_enrich` 节点将每篇论文提交为 `paper_search.enrich_abstract` 任务，
+由 `paper_search` 队列消费。任务在 service 中读取用户小模型配置，结果由任务模块汇总，
+节点统一写入摘要清单。API 和 worker 必须使用相同的 `ARTIFACT_BASE_DIR` 并可访问同一目录。
+
+Windows 启动专用 worker（需要并行处理时，在独立终端启动多个实例并使用不同名称）：
+
+```powershell
+uv run --locked --no-sync --env-file .env celery -A app.tasks.celery_app:celery_app worker --pool=solo --queues=paper_search --hostname=abstract1@%h --loglevel=INFO
+```
+
+初始可启动 3 个实例，名称分别为 `abstract1@%h`、`abstract2@%h`、`abstract3@%h`。
+单篇超时使用 `PAPER_ABSTRACT_TASK_TIMEOUT_SECONDS`（默认 180 秒），
+Group 等待上限使用 `PAPER_ABSTRACT_GROUP_TIMEOUT_SECONDS`（默认 900 秒）。
+取消时撤销尚未执行的任务；已运行任务可能继续至结束，其晚到结果不再合并。

@@ -1,37 +1,41 @@
 import asyncio
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-import inspect
 import logging
+from dataclasses import dataclass
 from typing import Literal
 
 from langchain_core.documents import Document
 from pydantic import ValidationError
 
 from app.infrastructure.oss import (
-    AliyunOssObjectStore,
+    oss_store as shared_oss_store,
     OssObjectStore,
     normalize_pdf_sha256,
 )
 from app.rag.data_preparation.data_preparation import DataPreparationModule
 from app.rag.file_parser.file_parser import FileParser
-from app.rag.index_construction.paper_content_index_construction import PaperContentIndexConstructionModule
-from app.rag.index_construction.paper_index_construction import PaperIndexConstructionModule
+from app.rag.index_construction.paper_content_index_construction import (
+    PaperContentIndexConstructionModule,
+)
+from app.rag.index_construction.paper_index_construction import (
+    PaperIndexConstructionModule,
+)
 from app.schemas.file_parser import FileParseRequest, ParsedFileDocument
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen = True, slots = True)
+@dataclass(frozen=True, slots=True)
 class PaperRagInput:
     paper_id: int
+    user_id: str
     title: str
     abstract: str
     pdf_url: str
     oss_name: str = ""
     year: int | None = None
 
-@dataclass(frozen = True, slots = True)
+
+@dataclass(frozen=True, slots=True)
 class PaperRagResult:
     paper_id: int
     status: Literal["ready", "skipped", "failed"]
@@ -39,31 +43,27 @@ class PaperRagResult:
     error: str | None = None
 
 
-PaperResultListener = Callable[[PaperRagResult], Awaitable[None] | None]
-
 class PaperRagProcessor:
     def __init__(
         self,
         *,
         file_parser: FileParser,
         data_preparation: DataPreparationModule,
-        paper_index: PaperIndexConstructionModule,
-        paper_content_index: PaperContentIndexConstructionModule,
+        paper_index: PaperIndexConstructionModule | None = None,
+        paper_content_index: PaperContentIndexConstructionModule | None = None,
         oss_store: OssObjectStore | None = None,
     ) -> None:
         self.file_parser = file_parser
         self.data_preparation = data_preparation
         self.paper_index = paper_index
         self.paper_content_index = paper_content_index
-        self.oss_store = oss_store or AliyunOssObjectStore()
+        self.oss_store = oss_store or shared_oss_store
 
         self._index_lock = asyncio.Lock()
 
     async def process_many(
         self,
         papers: list[PaperRagInput],
-        *,
-        on_paper_result: PaperResultListener | None = None,
     ) -> list[PaperRagResult]:
         paper_ids = [paper.paper_id for paper in papers]
 
@@ -80,45 +80,42 @@ class PaperRagProcessor:
             oss_name = normalize_pdf_sha256(paper.oss_name)
             if not paper.pdf_url.strip() and oss_name is None:
                 result = PaperRagResult(
-                    paper_id = paper_id,
-                    status = "skipped",
-                    error = "missing PDF source",
+                    paper_id=paper_id,
+                    status="skipped",
+                    error="missing PDF source",
                 )
                 results_by_paper_id[paper_id] = result
-                await self._notify_paper_result(on_paper_result, result)
                 continue
-            
+
             file_id = f"paper-{paper_id}"
             uri = await self._source_uri(paper, oss_name)
             if not uri:
                 result = PaperRagResult(
-                    paper_id = paper_id,
-                    status = "skipped",
-                    error = "missing readable PDF source",
+                    paper_id=paper_id,
+                    status="skipped",
+                    error="missing readable PDF source",
                 )
                 results_by_paper_id[paper_id] = result
-                await self._notify_paper_result(on_paper_result, result)
                 continue
 
             try:
                 request = FileParseRequest(
-                    file_id = file_id,
-                    uri = uri,
-                    file_name = f"{file_id}.pdf",
-                    metadata = {
+                    file_id=file_id,
+                    uri=uri,
+                    file_name=f"{file_id}.pdf",
+                    metadata={
                         "source": paper.pdf_url.strip() or f"oss://{oss_name}",
                     },
                 )
             except ValidationError as error:
                 result = PaperRagResult(
-                    paper_id = paper.paper_id,
-                    status = "failed",
-                    error = str(error),
+                    paper_id=paper.paper_id,
+                    status="failed",
+                    error=str(error),
                 )
                 results_by_paper_id[paper.paper_id] = result
-                await self._notify_paper_result(on_paper_result, result)
                 continue
-            
+
             requests.append(request)
             papers_by_file_id[file_id] = paper
 
@@ -127,17 +124,18 @@ class PaperRagProcessor:
         for file_id, error in parse_result.errors.items():
             paper = papers_by_file_id[file_id]
             result = PaperRagResult(
-                paper_id = paper.paper_id,
-                status = "failed",
-                error = error,
+                paper_id=paper.paper_id,
+                status="failed",
+                error=error,
             )
             results_by_paper_id[paper.paper_id] = result
-            await self._notify_paper_result(on_paper_result, result)
 
-        parsed_documents = [
-            self._as_parsed_file_document(document)
-            for document in parse_result.documents
-        ]
+        if parse_result.documents:
+            if self.paper_index is None:
+                self.paper_index = PaperIndexConstructionModule()
+            if self.paper_content_index is None:
+                self.paper_content_index = PaperContentIndexConstructionModule()
+
         index_tasks = [
             asyncio.create_task(
                 self._index_parsed_document(
@@ -145,48 +143,30 @@ class PaperRagProcessor:
                     parsed,
                 )
             )
-            for parsed in parsed_documents
+            for parsed in parse_result.documents
         ]
 
-        for task in asyncio.as_completed(index_tasks):
-            result = await task
-            results_by_paper_id[result.paper_id] = result
-            await self._notify_paper_result(on_paper_result, result)
+        try:
+            for task in asyncio.as_completed(index_tasks):
+                result = await task
+                results_by_paper_id[result.paper_id] = result
+        finally:
+            for task in index_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*index_tasks, return_exceptions=True)
 
         for paper in papers:
             if paper.paper_id not in results_by_paper_id:
                 result = PaperRagResult(
-                    paper_id = paper.paper_id,
-                    status = "failed",
-                    error = "parser returned no document or error",
+                    paper_id=paper.paper_id,
+                    status="failed",
+                    error="parser returned no document or error",
                 )
                 results_by_paper_id[paper.paper_id] = result
-                await self._notify_paper_result(on_paper_result, result)
-        
-        return [
-            results_by_paper_id[paper.paper_id]
-            for paper in papers
-        ]
 
-    @staticmethod
-    async def _notify_paper_result(
-        listener: PaperResultListener | None,
-        result: PaperRagResult,
-    ) -> None:
-        if listener is None:
-            return
+        return [results_by_paper_id[paper.paper_id] for paper in papers]
 
-        try:
-            value = listener(result)
-            if inspect.isawaitable(value):
-                await value
-        except Exception:
-            logger.warning(
-                "Paper RAG progress listener failed: paper_id=%s",
-                result.paper_id,
-                exc_info=True,
-            )
-    
     async def _index_parsed_document(
         self,
         paper: PaperRagInput,
@@ -199,7 +179,9 @@ class PaperRagProcessor:
                 parsed_document.document,
                 paper,
             )
+
             await self._save_markdown(paper, parent_document.page_content)
+
             chunks = (
                 self.data_preparation.prepare_pdf_document(
                     parent_document,
@@ -214,25 +196,29 @@ class PaperRagProcessor:
 
                 if chunks:
                     await self.paper_content_index.build_index(chunks)
+                else:
+                    await self.paper_content_index.delete_paper_contents(
+                        [str(paper.paper_id)], user_id=paper.user_id
+                    )
 
             if not chunks:
                 return PaperRagResult(
-                    paper_id = paper.paper_id,
-                    status = "skipped",
-                    error = "no indexable document content",
+                    paper_id=paper.paper_id,
+                    status="skipped",
+                    error="no indexable document content",
                 )
-            
+
             return PaperRagResult(
-                paper_id = paper.paper_id,
-                status = "ready",
-                chunk_count = len(chunks),
+                paper_id=paper.paper_id,
+                status="ready",
+                chunk_count=len(chunks),
             )
 
         except Exception as error:
             return PaperRagResult(
-                paper_id = paper.paper_id,
-                status = "failed",
-                error = str(error),
+                paper_id=paper.paper_id,
+                status="failed",
+                error=str(error),
             )
 
     async def _source_uri(
@@ -281,23 +267,13 @@ class PaperRagProcessor:
             )
 
     @staticmethod
-    def _as_parsed_file_document(
-        value: ParsedFileDocument | Document,
-    ) -> ParsedFileDocument:
-        if isinstance(value, ParsedFileDocument):
-            return value
-        if isinstance(value, Document):
-            return ParsedFileDocument(document = value)
-        raise TypeError(f"Unexpected parsed document type: {type(value)!r}")
-
-    
-    @staticmethod
     def _bind_paper_metadata(
         parsed_document: Document,
         paper: PaperRagInput,
     ) -> Document:
         metadata = {
             **parsed_document.metadata,
+            "user_id": paper.user_id,
             "paper_id": str(paper.paper_id),
             "parent_id": str(paper.paper_id),
             "title": paper.title,
@@ -308,6 +284,6 @@ class PaperRagProcessor:
             metadata["year"] = paper.year
 
         return Document(
-            page_content = parsed_document.page_content,
-            metadata = metadata,
+            page_content=parsed_document.page_content,
+            metadata=metadata,
         )

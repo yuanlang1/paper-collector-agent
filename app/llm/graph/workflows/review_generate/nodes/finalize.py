@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.graph.main.nodes.tool import build_action_result_update
+from app.llm.graph.workflows.review_generate.state import TaskReviewOutputState
 
 
 logger = logging.getLogger(__name__)
@@ -22,9 +22,7 @@ def failed(error: str, **details: Any) -> dict[str, Any]:
     }
 
 
-async def finalize_task_review_node(state: Mapping[str, Any],) -> dict[str, Any]:
-    call = state["active_tool_call"]
-
+async def finalize_task_review_node(state: Mapping[str, Any],) -> TaskReviewOutputState:
     stage = state["stage"]
     success = stage == "completed"
     blocked = stage == "blocked"
@@ -43,26 +41,18 @@ async def finalize_task_review_node(state: Mapping[str, Any],) -> dict[str, Any]
         "WRITING_REVIEW_BLOCKED",
     }:
         summary = "综述写作质量审核未通过。"
-    return build_action_result_update(
-        call=call,
-        status="success" if success else "error",
-        summary=summary,
-        data={
-            "task_id": state.get("task_id"),
-            "review_id": state.get("review_id"),
-            "version_number": state.get("review_version_number"),
-            "warnings": state.get("warnings", []),
-        },
-        artifact_refs=(
-            [state["claim_verification_artifact_ref"]]
-            if not success and state.get("claim_verification_artifact_ref")
-            else []
-        ),
-        retryable=False if success else blocked or state.get("retryable", False),
-        error_code=None
-        if success
-        else "RAG_NOT_READY"
-        if blocked
-        else state.get("error_code", stage),
-        error_message=state.get("error"),
-    )
+    lines = [summary]
+    if state.get("task_id") is not None:
+        lines.append(f"检索任务 ID：{state['task_id']}。")
+    if state.get("review_id") is not None:
+        lines.append(f"综述 ID：{state['review_id']}，版本：{state.get('review_version_number', 1)}。")
+    if state.get("error"):
+        code = "RAG_NOT_READY" if blocked else state.get("error_code") or stage
+        lines.append(f"失败原因（{code}）：{state['error']}")
+    if not success and state.get("claim_verification_artifact_ref"):
+        lines.append(f"论点核验报告：{state['claim_verification_artifact_ref']}")
+    lines.extend(f"警告：{warning}" for warning in state.get("warnings", []))
+    return {
+        "content": "\n".join(lines),
+        "status": "success" if success else "timed_out" if stage == "timed_out" else "failed",
+    }

@@ -5,17 +5,15 @@ import hashlib
 import os
 import tempfile
 import time
-from pathlib import Path
-from pathlib import PurePosixPath
-from typing import Any, Dict, Literal
+from pathlib import Path, PurePosixPath
+from typing import Any, Literal
 from urllib.parse import urljoin
 
 import httpx
+from langchain_core.tools import ToolException, tool
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.tools.base import BaseTool, as_tool
-from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.common import (
     RETRYABLE_STATUS_CODES,
     elapsed_ms,
@@ -74,13 +72,7 @@ class DownloadFileArgs(BaseModel):
     @classmethod
     def validate_file_name(cls, value: str) -> str:
         name = value.strip()
-        if (
-            not name
-            or "/" in name
-            or "\\" in name
-            or ".." in name
-            or ":" in name
-        ):
+        if not name or "/" in name or "\\" in name or ".." in name or ":" in name:
             raise ValueError("file_name 只能是文件名，不能包含路径。")
         return name
 
@@ -94,7 +86,7 @@ def _failure(
     retryable: bool = False,
     status_code: int | None = None,
 ) -> None:
-    raise RuntimeError(message)
+    raise ToolException(message)
 
 
 def _target_path(
@@ -129,18 +121,13 @@ def _is_pdf(
     content_type: str | None,
     prefix: bytes,
 ) -> bool:
-    normalized_content_type = (
-        (content_type or "").split(";")[0].strip().lower()
-    )
+    normalized_content_type = (content_type or "").split(";")[0].strip().lower()
 
-    return (
-        prefix.startswith(b"%PDF-")
-        and normalized_content_type in {
-            "",
-            "application/pdf",
-            "application/octet-stream",
-        }
-    )
+    return prefix.startswith(b"%PDF-") and normalized_content_type in {
+        "",
+        "application/pdf",
+        "application/octet-stream",
+    }
 
 
 def _inspect_existing_file(
@@ -223,10 +210,7 @@ async def _download(
                 response.raise_for_status()
 
                 content_length = response.headers.get("content-length")
-                if (
-                    content_length
-                    and int(content_length) > MAX_FILE_SIZE_BYTES
-                ):
+                if content_length and int(content_length) > MAX_FILE_SIZE_BYTES:
                     raise ValueError("文件大小超过 50 MB 限制。")
 
                 temp_path: Path | None = None
@@ -251,9 +235,7 @@ async def _download(
                             size_bytes += len(chunk)
 
                             if size_bytes > MAX_FILE_SIZE_BYTES:
-                                raise ValueError(
-                                    "文件大小超过 50 MB 限制。"
-                                )
+                                raise ValueError("文件大小超过 50 MB 限制。")
 
                             if len(prefix) < 8:
                                 prefix += chunk[: 8 - len(prefix)]
@@ -274,9 +256,7 @@ async def _download(
                     return {
                         "final_url": str(response.url),
                         "redirect_count": redirect_count,
-                        "content_type": response.headers.get(
-                            "content-type"
-                        ),
+                        "content_type": response.headers.get("content-type"),
                         "size_bytes": size_bytes,
                         "sha256": sha256.hexdigest(),
                     }
@@ -284,11 +264,7 @@ async def _download(
                 finally:
                     # 无论超时、网络断开、文件过大、校验失败或取消任务，
                     # 均清理本次尝试产生的临时文件。
-                    if (
-                        not committed
-                        and temp_path is not None
-                        and temp_path.exists()
-                    ):
+                    if not committed and temp_path is not None and temp_path.exists():
                         temp_path.unlink()
 
 
@@ -298,9 +274,7 @@ async def _download_with_retry(**kwargs: Any) -> dict[str, Any]:
             return await _download(**kwargs)
 
         except httpx.HTTPStatusError as exc:
-            retryable = (
-                exc.response.status_code in RETRYABLE_STATUS_CODES
-            )
+            retryable = exc.response.status_code in RETRYABLE_STATUS_CODES
             if not retryable or attempt == MAX_DOWNLOAD_ATTEMPTS - 1:
                 raise
 
@@ -311,13 +285,13 @@ async def _download_with_retry(**kwargs: Any) -> dict[str, Any]:
         # 第 1、2 次失败后，分别等待 1 秒和 2 秒。
         await asyncio.sleep(2**attempt)
 
-    raise RuntimeError("下载失败，已超过最大重试次数。")
+    raise ToolException("下载失败，已超过最大重试次数。")
 
 
 async def download_file_handler(
-    params: Dict[str, Any],
-    context: ToolExecutionContext,
-) -> Dict[str, Any]:
+    params: dict[str, Any],
+    context: object | None = None,
+) -> dict[str, Any]:
     del context
 
     args = DownloadFileArgs.model_validate(params)
@@ -395,9 +369,7 @@ async def download_file_handler(
             started_at=started_at,
             code="UPSTREAM_HTTP_ERROR",
             message=f"下载站点返回 HTTP {exc.response.status_code}。",
-            retryable=(
-                exc.response.status_code in RETRYABLE_STATUS_CODES
-            ),
+            retryable=(exc.response.status_code in RETRYABLE_STATUS_CODES),
             status_code=exc.response.status_code,
         )
 
@@ -427,15 +399,33 @@ async def download_file_handler(
         )
 
 
-DOWNLOAD_FILE_TOOL = BaseTool(
-    name="download_file",
+@tool(
+    "download_file",
     description=(
-        "根据 HTTP 或 HTTPS 下载链接下载文件。"
-        "必须提供保存目录 save_dir 和文件名 file_name。"
-        "默认仅下载并校验 PDF，单个文件最大 50 MB。"
+        "将 HTTP 或 HTTPS 链接指向的文件下载并保存到本地。"
+        "当用户明确要求下载文件时，调用此工具。"
+        "输入应包含文件链接 url、相对于产物目录的 save_dir 和文件名 file_name。"
+        "默认下载并校验 PDF，单个文件最大 50 MB；需要其他类型时使用 expected_type=any。"
     ),
-    input_schema=DownloadFileArgs.model_json_schema(),
-    fn=as_tool(download_file_handler),
-    requires_confirmation=True,
-    params_model=DownloadFileArgs,
+    args_schema=DownloadFileArgs,
 )
+async def download_file_tool(
+    *,
+    url: str,
+    save_dir: str,
+    file_name: str,
+    expected_type: Literal["pdf", "any"] = "pdf",
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """根据 HTTP 或 HTTPS 下载链接下载文件。必须提供保存目录 save_dir 和文件名 file_name。默认仅下载并校验 PDF，单个文件最大 50 MB。"""
+    params = {
+        "url": url,
+        "save_dir": save_dir,
+        "file_name": file_name,
+        "expected_type": expected_type,
+        "overwrite": overwrite,
+    }
+    return await download_file_handler(params, None)
+
+
+DOWNLOAD_FILE_TOOL = download_file_tool

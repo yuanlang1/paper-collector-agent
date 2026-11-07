@@ -1,49 +1,48 @@
-from sqlalchemy import create_engine, text
-import logging
-import app.config as settings
-from typing import Generator
-from sqlalchemy.orm import Session, sessionmaker, declarative_base
+from collections.abc import AsyncIterator
 
-logger = logging.getLogger(__name__)
-
-# 创建数据库引擎
-engine = create_engine(
-    settings.DATABASE_URL,
-    pool_pre_ping=True,
-    pool_recycle=3600,
-    echo=settings.SQL_ECHO,
+from fastapi import Request
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
 )
+from sqlalchemy.orm import declarative_base
+from sqlalchemy.pool import Pool
 
-# 创建会话工厂
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine,
-)
-# 创建基类
+from app.config import settings
+
 Base = declarative_base()
+SessionLocal = async_sessionmaker(
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
 
-def get_db() -> Generator[Session, None, None]:
-    """
-    获取数据库会话
-    用于FastAPI的依赖注入
-    """
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
-# def init_db():
-#     """
-#     初始化数据库
-#     创建所有表 + 执行幂等迁移 + 回填旧数据
-#     """
-#     # 导入所有模型以确保它们被注册
-#     from app import models  # noqa: F401
-    
-#     # 创建所有表（包括新增的 api_usage_logs）
-#     Base.metadata.create_all(bind=engine)
-#     print("✅ 数据库表创建成功！")
+def create_database(
+    *,
+    poolclass: type[Pool] | None = None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
+    url = make_url(settings.DATABASE_POSTGRES_URL).set(drivername="postgresql+psycopg")
+    engine = create_async_engine(
+        url,
+        pool_pre_ping=True,
+        pool_recycle=3600,
+        echo=settings.SQL_ECHO,
+        **({"poolclass": poolclass} if poolclass is not None else {}),
+    )
+    if session_factory is None:
+        session_factory = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+        )
+    else:
+        session_factory.configure(bind=engine)
+    return engine, session_factory
 
-#     logger.info("✅ api_usage_logs 表已就绪（由 create_all 自动管理）")
+
+async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
+    async with request.app.state.session_factory() as session:
+        yield session

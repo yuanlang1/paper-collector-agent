@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import time
-from typing import Any, Dict, Literal
+from typing import Any, Literal
+from contextlib import nullcontext
 
 import httpx
+from langchain_core.tools import ToolException, tool
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import settings
-from app.llm.tools.base import BaseTool, ToolResult
-from app.llm.tools.registry import ToolExecutionContext
-from app.llm.tools.search_tools.common import RETRYABLE_STATUS_CODES, clean_text, elapsed_ms, ensure_list, parse_year
+from app.llm.tools.search_tools.common import (
+    RETRYABLE_STATUS_CODES,
+    clean_text,
+    elapsed_ms,
+    ensure_list,
+    parse_year,
+)
 
 DBLP_API_URL = settings.DBLP_API_URL
 
@@ -43,7 +48,7 @@ class DblpSearchArgs(BaseModel):
     paper_type: DblpPaperType = "all"
 
     @model_validator(mode="after")
-    def validate_year_range(self) -> "DblpSearchArgs":
+    def validate_year_range(self) -> DblpSearchArgs:
         if (
             self.year_from is not None
             and self.year_to is not None
@@ -89,9 +94,7 @@ def _parse_author(author: Any) -> str:
 
     if isinstance(author, dict):
         return clean_text(
-            author.get("text")
-            or author.get("#text")
-            or author.get("@name")
+            author.get("text") or author.get("#text") or author.get("@name")
         )
 
     return ""
@@ -106,12 +109,7 @@ def _parse_authors(info: dict[str, Any]) -> list[str]:
         authors = authors_object
 
     return [
-        name
-        for name in (
-            _parse_author(item)
-            for item in ensure_list(authors)
-        )
-        if name
+        name for name in (_parse_author(item) for item in ensure_list(authors)) if name
     ]
 
 
@@ -120,8 +118,7 @@ def _parse_ee_url(value: Any) -> str | None:
         if isinstance(item, str):
             url = clean_text(item)
         elif isinstance(item, dict):
-            url = clean_text(
-                item.get("text") or item.get("#text") or item.get("@href"))
+            url = clean_text(item.get("text") or item.get("#text") or item.get("@href"))
         else:
             url = ""
 
@@ -186,7 +183,7 @@ def _passes_local_filters(
         if venue.casefold() not in paper_venue:
             return False
 
-    if (paper_type != "all" and paper.get("publication_type") != paper_type):
+    if paper_type != "all" and paper.get("publication_type") != paper_type:
         return False
 
     return True
@@ -198,10 +195,7 @@ def _is_dblp_access_challenge(response: httpx.Response) -> bool:
         return False
 
     body = response.text[:10_000].casefold()
-    return (
-        "making sure you're not a bot" in body
-        or "within.website" in body
-    )
+    return "making sure you're not a bot" in body or "within.website" in body
 
 
 async def _fetch_dblp(
@@ -224,10 +218,7 @@ async def _fetch_dblp(
                 },
             )
 
-            if (
-                response.status_code in retryable_status_codes
-                and attempt < retries
-            ):
+            if response.status_code in retryable_status_codes and attempt < retries:
                 await asyncio.sleep(retry_delay_seconds)
                 continue
 
@@ -295,15 +286,17 @@ def _parse_dblp_result(
             papers.append(paper)
 
     return {
-        "total_results": parse_year(hits_object.get("@total")) or 0,
+        "total_results": int(hits_object.get("@total") or 0),
         "papers": papers,
     }
 
 
 async def dblp_search_service(
-    params: Dict[str, Any],
-    context: ToolExecutionContext,
-) -> Dict[str, Any]:
+    params: dict[str, Any],
+    context: object | None = None,
+    *,
+    http_client: httpx.AsyncClient | None = None,
+) -> dict[str, Any]:
     del context
 
     args = DblpSearchArgs.model_validate(params)
@@ -318,7 +311,7 @@ async def dblp_search_service(
         status_code: int | None = None,
         content_type: str | None = None,
     ) -> None:
-        raise RuntimeError(message)
+        raise ToolException(message)
 
     try:
         if not query:
@@ -333,11 +326,8 @@ async def dblp_search_service(
         stop_reason = "upstream_exhausted"
         page_warning: str | None = None
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            while (
-                len(papers) < args.total_limit
-                and pages_fetched < args.max_pages
-            ):
+        async with (nullcontext(http_client) if http_client is not None else httpx.AsyncClient(timeout=30.0)) as client:
+            while len(papers) < args.total_limit and pages_fetched < args.max_pages:
                 page_size = min(
                     args.h,
                     args.total_limit - len(papers),
@@ -487,34 +477,42 @@ async def dblp_search_service(
             retryable=False,
         )
 
-    except Exception as exc:
-        return failure(
-            code="INTERNAL_ERROR",
-            message=str(exc),
-            retryable=False,
-        )
-
-
-async def dblp_search_handler(
-    params: Dict[str, Any],
-    context: ToolExecutionContext,
-) -> ToolResult:
-    return ToolResult(
-        content=str(await dblp_search_service(params, context))
-    )
-
-
-DBLP_SEARCH_TOOL = BaseTool(
-    name="dblp_search",
+@tool(
+    "dblp_search",
     description=(
-        "从 DBLP 少量检索计算机领域出版物并直接返回论文元数据。"
-        "适用于论文标题、作者、研究主题、会议或期刊查询。"
-        "单次默认返回 5 篇，最多 20 篇。"
-        "DBLP 通常不提供摘要和 PDF，因此这些字段可能为空。"
+        "从 DBLP 少量检索计算机领域出版物并返回论文元数据。"
+        "当需要查找计算机领域某个主题、作者、会议或期刊的论文时，调用此工具。"
+        "输入 query 应为明确的论文标题、作者或研究关键词，可附加年份、出版场所和论文类型筛选。"
+        "默认返回 5 篇，少量检索最多取 20 篇；DBLP 通常不提供摘要和 PDF。"
         "不用于批量检索、分页、文件导出或跨来源去重。"
     ),
-    input_schema=DblpSearchArgs.model_json_schema(),
-    fn=dblp_search_handler,
-    requires_confirmation=False,
-    params_model=DblpSearchArgs,
+    args_schema=DblpSearchArgs,
 )
+async def dblp_search_tool(
+    *,
+    query: str,
+    f: int = 0,
+    h: int = 5,
+    total_limit: int = 5,
+    max_pages: int = 1,
+    year_from: int | None = None,
+    year_to: int | None = None,
+    venue: str | None = None,
+    paper_type: DblpPaperType = "all",
+) -> dict[str, Any]:
+    """从 DBLP 少量检索计算机领域出版物并直接返回论文元数据。适用于论文标题、作者、研究主题、会议或期刊查询。单次默认返回 5 篇，最多 20 篇。DBLP 通常不提供摘要和 PDF，因此这些字段可能为空。不用于批量检索、分页、文件导出或跨来源去重。"""
+    params = {
+        "query": query,
+        "f": f,
+        "h": h,
+        "total_limit": total_limit,
+        "max_pages": max_pages,
+        "year_from": year_from,
+        "year_to": year_to,
+        "venue": venue,
+        "paper_type": paper_type,
+    }
+    return await dblp_search_service(params, None)
+
+
+DBLP_SEARCH_TOOL = dblp_search_tool

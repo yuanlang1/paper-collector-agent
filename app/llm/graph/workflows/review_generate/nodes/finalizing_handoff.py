@@ -56,8 +56,6 @@ class FinalizingHandoffNode:
             run_id=state["child_run_id"],
             step_key="finalizing_handoff",
             source="task_review",
-            kind="task_review_final_json",
-            count=len(final_review["citation_paper_ids"]),
             payload=final_review,
         )
 

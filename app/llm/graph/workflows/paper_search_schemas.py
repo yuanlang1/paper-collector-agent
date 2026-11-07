@@ -77,6 +77,8 @@ class PaperTypeCode(IntEnum):
 
 
 class SourceTypeValue(str, Enum):
+    ARXIV = "arXiv"
+    DBLP = "DBLP"
     GOOGLE_SCHOLAR = "Google Scholar"
 
 
@@ -148,13 +150,13 @@ class PromptUnderstandingArgs(BaseModel):
         return self
 
 
-class GoogleScholarQueryPlanArgs(BaseModel):
+class ProviderQueryPlanArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     display_query: NonBlankString = Field(
         ...,
         max_length=1000,
-        description="展示给用户的 Google Scholar 实际检索式。",
+        description="展示给用户的实际检索式。",
     )
     reasoning: NonBlankString = Field(
         ...,
@@ -164,7 +166,7 @@ class GoogleScholarQueryPlanArgs(BaseModel):
     arguments: dict[str, Any] = Field(
         default_factory=dict,
         description=(
-            "Google Scholar 查询参数，仅可包含 query、year_from、year_to、review_only；"
+            "对应来源的查询参数；不得包含 start、f、num、h、max_results、total_limit、max_pages；"
             "分页参数由代码注入。"
         ),
     )
@@ -185,9 +187,8 @@ class SearchPlanningArgs(BaseModel):
         min_length=1,
         description="论文类型整数编码；未限定时使用 1（期刊论文）和 2（会议论文）。",
     )
-    query_plan: GoogleScholarQueryPlanArgs = Field(
-        ...,
-        description="唯一的 Google Scholar 查询草案；来源由代码固定，不在模型输出中声明。",
+    query_plans: dict[Literal["arxiv", "dblp", "google_scholar"], ProviderQueryPlanArgs] = Field(
+        ..., description="每个可用 Provider 的查询草案，必须覆盖输入提供的来源。",
     )
 
 
@@ -210,7 +211,7 @@ class SearchTagArgs(BaseModel):
     sourceTag: list[SourceTypeValue] = Field(
         default_factory=lambda: [SourceTypeValue.GOOGLE_SCHOLAR],
         min_length=1,
-        description="允许的检索来源，当前仅支持 Google Scholar。",
+        description="允许的检索来源。",
     )
 
     @model_validator(mode="after")

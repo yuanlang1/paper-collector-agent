@@ -658,7 +658,7 @@ class NormalizeDeduplicateFilterNode:
                 await self._resolve_cached_papers(normalized_papers)
             )
 
-            new_papers, existing_papers, lookup_warning, lookup_count = (
+            new_papers, existing_papers, lookup_warning, _ = (
                 await self._lookup_existing_papers(lookup_papers, cached_existing_by_key)
             )
 
@@ -666,26 +666,16 @@ class NormalizeDeduplicateFilterNode:
                 run_id=child_run_id,
                 step_key="find_existing_papers",
                 source="database",
-                kind="existing_paper_manifest_json",
                 payload={
                     "run_id": child_run_id,
                     "step_key": "find_existing_papers",
                     "papers": existing_papers,
                 },
-                count=len(existing_papers),
-                metadata={
-                    "lookup_candidate_count": lookup_count,
-                    "paper_cache_existing_count": len(
-                        cached_existing_by_key
-                    ),
-                    "paper_cache_miss_count": cache_miss_count,
-                    "existing_count": len(existing_papers),
-                },
             )
 
             source_stats = {
                 source: dict(summary)
-                for source, summary in (state.get("source_search_stats") or {}).items()
+                for source, summary in (state.get("provider_stats") or {}).items()
                 if isinstance(source, str) and isinstance(summary, dict)
             }
             for source, summary in source_stats.items():
@@ -693,7 +683,7 @@ class NormalizeDeduplicateFilterNode:
                     1
                     for paper in [*new_papers, *existing_papers]
                     if any(
-                        ref.get("source") == source
+                        ref.get("source") == _normalize_source(source)
                         for ref in paper.get("source_refs", [])
                         if isinstance(ref, dict)
                     )
@@ -702,7 +692,6 @@ class NormalizeDeduplicateFilterNode:
                 run_id=child_run_id,
                 step_key="search_quality",
                 source="filter",
-                kind="search_quality_report_json",
                 payload={
                     "effective_count": len(new_papers) + len(existing_papers),
                     "source_stats": source_stats,
@@ -729,16 +718,7 @@ class NormalizeDeduplicateFilterNode:
                 run_id=child_run_id,
                 step_key="normalize_deduplicate_filter",
                 source="normalized",
-                kind="paper_info_manifest_json",
                 payload=manifest,
-                count=len(new_papers),
-                metadata={
-                    "input_artifact_refs": artifact_uris,
-                    "identity_conflict_count": len(identity_conflicts),
-                    "filtered_count": filtered_count,
-                    "rejected_count": len(rejected),
-                    "existing_count": len(existing_papers),
-                },
             )
 
         except Exception as exc:
@@ -756,7 +736,7 @@ class NormalizeDeduplicateFilterNode:
                 existing_artifact.artifact_uri
             ),
             "search_quality_artifact_ref": quality_artifact.artifact_uri,
-            "source_search_stats": source_stats,
+            "provider_stats": source_stats,
             "progress": {
                 **state.get("progress", {}),
                 "deduplicated": len(normalized_papers),

@@ -4,24 +4,22 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from app.config import settings
-from app.infrastructure.grpc.paper_service_grpc_client import (
-    paper_service_grpc_client,
+from app.infrastructure.paper_service.paper_client import (
+    paper_service_client,
 )
-from app.infrastructure.grpc.task_service_grpc_client import (
-    task_service_grpc_client,
+from app.infrastructure.paper_service.task_client import (
+    task_service_client,
 )
-from app.infrastructure.grpc.venue_service_grpc_client import (
-    venue_service_grpc_client,
+from app.infrastructure.paper_service.venue_client import (
+    venue_service_client,
 )
 from app.infrastructure.oss import normalize_pdf_sha256
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.paper_search.paper_cache import (
     PaperCacheStore,
 )
-from app.llm.graph.workflows.paper_search.nodes.venue import (
-    VenueCacheStore,
-    VenueInfoDraft,
-)
+from app.schemas.venue import VenueInfoDraft
+from app.services.venue_service import VenueService
 
 
 BatchSave = Callable[[list[dict[str, Any]]], Awaitable[dict[str, Any]]]
@@ -54,24 +52,22 @@ class PersistRecommendedPapersNode:
         save_venues: BatchSave | None = None,
         save_papers: BatchSave | None = None,
         save_task_papers: BatchSave | None = None,
-        venue_cache_store: VenueCacheStore | None = None,
+        venue_service: VenueService | None = None,
         paper_cache_store: PaperCacheStore | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
         cache_dir = self.artifact_store.base_dir.parent
         self.save_venues = (
-            save_venues or venue_service_grpc_client.batch_save_venues
+            save_venues or venue_service_client.batch_save_venues
         )
         self.save_papers = (
-            save_papers or paper_service_grpc_client.batch_save_papers
+            save_papers or paper_service_client.batch_save_papers
         )
         self.save_task_papers = (
             save_task_papers
-            or task_service_grpc_client.batch_save_task_paper_relations
+            or task_service_client.batch_save_task_paper_relations
         )
-        self.venue_cache_store = venue_cache_store or VenueCacheStore(
-            cache_dir / "venue_cache.json"
-        )
+        self.venue_service = venue_service or VenueService()
         self.paper_cache_store = paper_cache_store or PaperCacheStore(
             cache_dir / "paper_cache.json"
         )
@@ -172,9 +168,8 @@ class PersistRecommendedPapersNode:
                 entry["outcome"]["venue_save_status"] = "not_available"
                 continue
 
-            cached_id = await self.venue_cache_store.get_venue_id(
-                venue.standard_name
-            )
+            record, _ = await self.venue_service.get_by_name(venue.standard_name)
+            cached_id = record.id if record is not None else None
             if cached_id is not None:
                 paper_info["venue_id"] = cached_id
                 resolution["venue_id"] = cached_id
@@ -206,6 +201,7 @@ class PersistRecommendedPapersNode:
         saved_count = 0
         failed_count = 0
 
+        refreshed_names: set[str] = set()
         for entry in entries:
             venue = entry.get("venue")
             if not isinstance(venue, VenueInfoDraft):
@@ -221,7 +217,9 @@ class PersistRecommendedPapersNode:
             entry["paper"]["venue_resolution"]["venue_id"] = venue_id
             entry["outcome"]["venue_id"] = venue_id
             entry["outcome"]["venue_save_status"] = "saved"
-            await self.venue_cache_store.set_venue_id(venue, venue_id)
+            if venue.standard_name not in refreshed_names:
+                await self.venue_service.get_by_name(venue.standard_name)
+                refreshed_names.add(venue.standard_name)
             saved_count += 1
 
         return cache_hits, saved_count, failed_count
@@ -422,14 +420,12 @@ class PersistRecommendedPapersNode:
             if not isinstance(papers, list):
                 raise ValueError("recommendation manifest papers must be a list")
 
-            entries, outcomes, invalid_count = self._prepare_entries(papers, child_run_id, task_id)
+            entries, outcomes, _ = self._prepare_entries(papers, child_run_id, task_id)
 
-            venue_cache_hits, venue_saved, venue_failed = await self._resolve_venues(
-                entries
-            )
+            await self._resolve_venues(entries)
             await self._save_new_papers(entries)
 
-            cache_updated, cache_failed = await self._update_paper_cache(entries)
+            _, cache_failed = await self._update_paper_cache(entries)
 
             await self._save_relations(entries)
 
@@ -442,27 +438,11 @@ class PersistRecommendedPapersNode:
                 run_id=child_run_id,
                 step_key="persist_recommended_papers",
                 source="paper_service",
-                kind="persisted_papers_manifest_json",
                 payload={
                     "run_id": child_run_id,
                     "step_key": "persist_recommended_papers",
                     "input_manifest": artifact_uri,
                     "results": outcomes,
-                },
-                count=persisted_count,
-                metadata={
-                    "input_count": len(papers),
-                    "invalid_input_count": invalid_count,
-                    "venue_cache_hit_count": venue_cache_hits,
-                    "venue_saved_count": venue_saved,
-                    "venue_failed_count": venue_failed,
-                    "paper_saved_count": sum(
-                        outcome["paper_save_status"] == "saved"
-                        for outcome in outcomes
-                    ),
-                    "paper_cache_updated_count": cache_updated,
-                    "paper_cache_failed_count": cache_failed,
-                    "relation_saved_count": persisted_count,
                 },
             )
         except Exception as exc:

@@ -11,8 +11,8 @@ from urllib.parse import quote
 import httpx
 
 from app.config import settings
-from app.llm.tools.base import BaseTool, ToolResult
-from app.llm.tools.registry import ToolExecutionContext
+from app.infrastructure.http import http_manager
+from langchain_core.tools import ToolException, tool
 from app.llm.tools.search_tools.common import (
     RETRYABLE_STATUS_CODES,
     clean_text,
@@ -294,7 +294,7 @@ def _query_label(args: CrossrefSearchArgs) -> str:
 
 async def crossref_search_service(
     params: Dict[str, Any],
-    context: ToolExecutionContext,
+    context: object | None = None,
 ) -> Dict[str, Any]:
     del context
 
@@ -309,48 +309,38 @@ async def crossref_search_service(
         retryable: bool,
         status_code: int | None = None,
     ) -> None:
-        raise RuntimeError(message)
+        raise ToolException(message)
 
     try:
-        headers = {
-            "User-Agent": (
-                "paper-collector-agent/1.0 "
-                f"(mailto:{settings.CROSSREF_MAILTO or 'not-configured'})"
-            ),
-        }
-
-        async with httpx.AsyncClient(
-            timeout=settings.CROSSREF_TIMEOUT_SECONDS,
-            headers=headers,
-        ) as client:
-            if args.doi:
-                doi = _normalize_doi(args.doi)
-                payload = await _fetch_crossref(
-                    client=client,
-                    url=f"{CROSSREF_API_URL}/works/{quote(doi, safe='')}",
-                    params=(
-                        {"mailto": settings.CROSSREF_MAILTO}
-                        if settings.CROSSREF_MAILTO
-                        else {}
-                    ),
+        client = http_manager.crossref_client
+        if args.doi:
+            doi = _normalize_doi(args.doi)
+            payload = await _fetch_crossref(
+                client=client,
+                url=f"{CROSSREF_API_URL}/works/{quote(doi, safe='')}",
+                params=(
+                    {"mailto": settings.CROSSREF_MAILTO}
+                    if settings.CROSSREF_MAILTO
+                    else {}
+                ),
+            )
+            message = payload.get("message")
+            items = [message] if isinstance(message, Mapping) else []
+            total_results = len(items)
+        else:
+            payload = await _fetch_crossref(
+                client=client,
+                url=f"{CROSSREF_API_URL}/works",
+                params=_request_params(args),
+            )
+            message = payload.get("message")
+            if not isinstance(message, Mapping):
+                raise CrossrefResponseParseError(
+                    "Crossref response is missing message"
                 )
-                message = payload.get("message")
-                items = [message] if isinstance(message, Mapping) else []
-                total_results = len(items)
-            else:
-                payload = await _fetch_crossref(
-                    client=client,
-                    url=f"{CROSSREF_API_URL}/works",
-                    params=_request_params(args),
-                )
-                message = payload.get("message")
-                if not isinstance(message, Mapping):
-                    raise CrossrefResponseParseError(
-                        "Crossref response is missing message"
-                    )
-                raw_items = message.get("items")
-                items = raw_items if isinstance(raw_items, list) else []
-                total_results = int(message.get("total-results") or 0)
+            raw_items = message.get("items")
+            items = raw_items if isinstance(raw_items, list) else []
+            total_results = int(message.get("total-results") or 0)
 
         papers = [
             paper
@@ -423,24 +413,40 @@ async def crossref_search_service(
         )
 
 
-async def crossref_search_handler(
-    params: Dict[str, Any],
-    context: ToolExecutionContext,
-) -> ToolResult:
-    return ToolResult(
-        content=str(await crossref_search_service(params, context))
-    )
-
-
-CROSSREF_SEARCH_TOOL = BaseTool(
-    name="crossref_search",
+@tool(
+    "crossref_search",
     description=(
-        "通过 Crossref 查询论文元数据。支持 DOI 精确查询，或按标题、"
-        "关键词、作者、ISSN、发表日期和作品类型检索。"
-        "返回 DOI、作者、期刊或会议、发表日期、引用数及可用 PDF 链接。"
+        "通过 Crossref 查询论文的 DOI、作者、期刊或会议、发表日期、引用量及可用 PDF 链接等元数据。"
+        "当需要核对论文书目信息，或按标题、关键词、作者、ISSN、发表日期和作品类型查找论文时，调用此工具。"
+        "输入应为精确的 doi，或 query、title、author 等检索条件；DOI 查询不能与其他筛选条件混用。"
     ),
-    input_schema=CrossrefSearchArgs.model_json_schema(),
-    fn=crossref_search_handler,
-    requires_confirmation=False,
-    params_model=CrossrefSearchArgs,
+    args_schema=CrossrefSearchArgs,
 )
+async def crossref_search_tool(
+    *,
+    doi: str | None = None,
+    query: str | None = None,
+    title: str | None = None,
+    author: str | None = None,
+    issn: str | None = None,
+    from_pub_date: date | None = None,
+    until_pub_date: date | None = None,
+    work_type: str | None = None,
+    limit: int = 5,
+) -> dict[str, Any]:
+    """通过 Crossref 查询论文元数据。支持 DOI 精确查询，或按标题、关键词、作者、ISSN、发表日期和作品类型检索。返回 DOI、作者、期刊或会议、发表日期、引用数及可用 PDF 链接。"""
+    params = {
+        "doi": doi,
+        "query": query,
+        "title": title,
+        "author": author,
+        "issn": issn,
+        "from_pub_date": from_pub_date,
+        "until_pub_date": until_pub_date,
+        "work_type": work_type,
+        "limit": limit,
+    }
+    return await crossref_search_service(params, None)
+
+
+CROSSREF_SEARCH_TOOL = crossref_search_tool

@@ -6,14 +6,12 @@ from typing import Any
 from pydantic import ValidationError
 
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
-from app.llm.subagents.task_review import TaskReviewDelegation
+from app.llm.subagents.task_review import TaskReviewParams
 
 
 async def initialize_review_node(state: Mapping[str, Any],) -> dict[str, Any]:
-    raw_request = state["active_tool_call"]["args"]
-
     try:
-        request = TaskReviewDelegation.model_validate(raw_request)
+        request = TaskReviewParams.model_validate(state)
     except ValidationError as exc:
         return failed(f"invalid review request: {exc}", warnings=[])
 
@@ -24,8 +22,6 @@ async def initialize_review_node(state: Mapping[str, Any],) -> dict[str, Any]:
         "citation_style": request.citation_style,
         "review_type": request.review_type,
         "allow_abstract_evidence": False,
-        "max_reflection_rounds": request.max_reflection_rounds,
-        "max_writing_revision_rounds": request.max_writing_revision_rounds,
         "stage": "loading_corpus",
         "status": "running",
         "error": None,
@@ -39,12 +35,7 @@ async def initialize_review_node(state: Mapping[str, Any],) -> dict[str, Any]:
         "writing_revision_round": 0,
         "paper_ids_snapshot": [],
         "corpus_artifact_ref": None,
-        "study_records_artifact_ref": None,
-        "study_extraction_report_artifact_ref": None,
-        "reading_summary": {"total": 0, "succeeded": 0, "failed": 0},
         "framework_artifact_ref": None,
-        "framework_hash": None,
-        "changed_section_ids": [],
         "claims_artifact_ref": None,
         "evidence_ledger_artifact_ref": None,
         "section_draft_artifact_refs": {},

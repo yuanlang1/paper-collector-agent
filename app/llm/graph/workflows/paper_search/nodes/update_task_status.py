@@ -3,11 +3,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from app.infrastructure.grpc.task_service_grpc_client import (
-    TaskServiceGrpcClient,
-    TaskState,
-    task_service_grpc_client,
+from app.infrastructure.paper_service.task_client import (
+    TaskServiceClient,
+    task_service_client,
 )
+from app.infrastructure.paper_service.types import TaskState
 
 
 def _is_valid_task_id(value: Any) -> bool:
@@ -18,9 +18,9 @@ class UpdatePaperSearchTaskStatusNode:
 
     def __init__(
         self,
-        client: TaskServiceGrpcClient | None = None,
+        client: TaskServiceClient | None = None,
     ) -> None:
-        self.client = client or task_service_grpc_client
+        self.client = client or task_service_client
 
     async def __call__(
         self,

@@ -1,20 +1,23 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
 from langchain_core.documents import Document
-from langchain_core.embeddings import Embeddings
-from qdrant_client import AsyncQdrantClient, models
+from qdrant_client import models
 
 from app.config import settings
-from app.rag.index_construction.base import BaseQdrantIndexConstructionModule, IndexConstructionResult
+from app.rag.index_construction.base import (
+    BaseQdrantIndexConstructionModule,
+    IndexConstructionResult,
+    user_filter,
+)
 
 logger = logging.getLogger(__name__)
 
-class PaperContentIndexConstructionModule(
-    BaseQdrantIndexConstructionModule
-):
+
+class PaperContentIndexConstructionModule(BaseQdrantIndexConstructionModule):
     def __init__(
         self,
         *,
@@ -22,9 +25,9 @@ class PaperContentIndexConstructionModule(
         batch_size: int = 32,
     ) -> None:
         super().__init__(
-            collection_name = collection_name,
-            batch_size = batch_size,
-            distance = models.Distance.COSINE,
+            collection_name=collection_name,
+            batch_size=batch_size,
+            distance=models.Distance.COSINE,
         )
 
     async def build_index(
@@ -32,22 +35,24 @@ class PaperContentIndexConstructionModule(
         documents: list[Document],
         *,
         replace_existing: bool = True,
-    ) -> IndexConstructionResult:    
+    ) -> IndexConstructionResult:
         result = await super().build_index(documents)
 
         if replace_existing and documents:
-            chunk_ids_by_paper: dict[str, set[str]] = {}
+            chunk_ids_by_paper: dict[tuple[str, str], set[str]] = {}
 
             for document in documents:
                 paper_id = str(document.metadata["paper_id"])
-                chunk_ids_by_paper.setdefault(paper_id, set()).add(
+                user_id = str(document.metadata["user_id"])
+                chunk_ids_by_paper.setdefault((user_id, paper_id), set()).add(
                     str(document.metadata["chunk_id"])
                 )
 
-            for paper_id, chunk_ids in chunk_ids_by_paper.items():
+            for (user_id, paper_id), chunk_ids in chunk_ids_by_paper.items():
                 await self._delete_stale_paper_contents(
                     paper_id,
                     chunk_ids,
+                    user_id=user_id,
                 )
 
         return result
@@ -56,7 +61,9 @@ class PaperContentIndexConstructionModule(
         self,
         document: Document,
     ) -> str:
-        return str(document.metadata["chunk_id"])
+        return json.dumps(
+            [str(document.metadata["user_id"]), str(document.metadata["chunk_id"])]
+        )
 
     def _build_embedding_text(
         self,
@@ -72,15 +79,13 @@ class PaperContentIndexConstructionModule(
         paper_id = str(metadata["paper_id"])
 
         payload: dict[str, Any] = {
+            "user_id": str(metadata["user_id"]),
             "paper_id": paper_id,
-            "parent_id": str(
-                metadata.get("parent_id")
-                or paper_id
-            ),
+            "parent_id": str(metadata.get("parent_id") or paper_id),
             "chunk_id": str(metadata["chunk_id"]),
             "chunk_index": int(metadata["chunk_index"]),
             "content": document.page_content,
-            "section_path": str(metadata.get("section_path") or "")
+            "section_path": str(metadata.get("section_path") or ""),
         }
 
         if metadata.get("year") is not None:
@@ -90,21 +95,33 @@ class PaperContentIndexConstructionModule(
             payload["page_start"] = int(metadata["page_start"])
             payload["page_end"] = int(metadata["page_end"])
             payload["page_numbers"] = [
-                int(page)
-                for page in metadata.get("page_numbers", [])
+                int(page) for page in metadata.get("page_numbers", [])
             ]
-            payload["source_spans"] = list(
-                metadata.get("source_spans", [])
-            )
+            payload["source_spans"] = list(metadata.get("source_spans", []))
 
         return payload
 
     def _payload_indexes(
         self,
-    ) -> list[
-        tuple[str, models.PayloadSchemaType]
-    ]:
+    ) -> list[tuple[str, models.PayloadFieldSchema]]:
         return [
+            (
+                "user_id",
+                models.KeywordIndexParams(
+                    type=models.KeywordIndexType.KEYWORD,
+                    is_tenant=True,
+                ),
+            ),
+            (
+                "content",
+                models.TextIndexParams(
+                    type=models.TextIndexType.TEXT,
+                    tokenizer=models.TokenizerType.MULTILINGUAL,
+                    lowercase=True,
+                    scoring=models.TextScoringParams(type=models.TextScoringType.BM25),
+                    enable_hnsw=False,
+                ),
+            ),
             (
                 "paper_id",
                 models.PayloadSchemaType.KEYWORD,
@@ -118,59 +135,63 @@ class PaperContentIndexConstructionModule(
     async def delete_paper_contents(
         self,
         paper_ids: list[str],
+        *,
+        user_id: str,
     ) -> None:
+        tenant_filter = user_filter(user_id)
         if not paper_ids:
             return
 
-        exists = await self.client.collection_exists(collection_name = self.collection_name)
+        exists = await self.client.collection_exists(
+            collection_name=self.collection_name
+        )
 
         if not exists:
             return
 
         await self.client.delete(
-            collection_name = self.collection_name,
-            points_selector = models.FilterSelector(
-                filter = models.Filter(
-                    must = [
+            collection_name=self.collection_name,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        tenant_filter,
                         models.FieldCondition(
-                            key = "paper_id",
-                            match = models.MatchAny(
-                                any = [
-                                    str(paper_id)
-                                    for paper_id in paper_ids
-                                ]
+                            key="paper_id",
+                            match=models.MatchAny(
+                                any=[str(paper_id) for paper_id in paper_ids]
                             ),
-                        )
+                        ),
                     ]
                 )
             ),
-            wait = True,
+            wait=True,
         )
-    
+
     async def _delete_stale_paper_contents(
         self,
         paper_id: str,
         retained_chunk_ids: set[str],
+        *,
+        user_id: str,
     ) -> None:
         await self.client.delete(
-            collection_name = self.collection_name,
-            points_selector = models.FilterSelector(
-                filter = models.Filter(
-                    must = [
+            collection_name=self.collection_name,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        user_filter(user_id),
                         models.FieldCondition(
-                            key = "paper_id",
-                            match = models.MatchValue(value = paper_id),
-                        )
+                            key="paper_id",
+                            match=models.MatchValue(value=paper_id),
+                        ),
                     ],
-                    must_not = [
+                    must_not=[
                         models.FieldCondition(
-                            key = "chunk_id",
-                            match = models.MatchAny(
-                                any = sorted(retained_chunk_ids)
-                            ),
+                            key="chunk_id",
+                            match=models.MatchAny(any=sorted(retained_chunk_ids)),
                         )
                     ],
                 )
             ),
-            wait = True,
+            wait=True,
         )

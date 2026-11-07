@@ -1,23 +1,20 @@
 from __future__ import annotations
 
-import asyncio
 import re
 import time
 from collections.abc import Mapping
 from typing import Any
 
 import httpx
+from langchain_core.tools import ToolException, tool
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.config import settings
-from app.llm.tools.base import BaseTool, as_tool
-from app.llm.tools.registry import ToolExecutionContext
 from app.llm.tools.search_tools.common import (
     RETRYABLE_STATUS_CODES,
     clean_text,
     elapsed_ms,
 )
-
 
 MAX_MARKDOWN_CHARACTERS = 6_000
 DOMAIN_PATTERN = re.compile(
@@ -57,9 +54,11 @@ class SearchWebArgs(BaseModel):
         return list(dict.fromkeys(domains))
 
     @model_validator(mode="after")
-    def validate_domain_filters(self) -> "SearchWebArgs":
+    def validate_domain_filters(self) -> SearchWebArgs:
         if self.include_domains and self.exclude_domains:
-            raise ValueError("include_domains and exclude_domains are mutually exclusive")
+            raise ValueError(
+                "include_domains and exclude_domains are mutually exclusive"
+            )
         return self
 
 
@@ -92,34 +91,15 @@ async def _post_search(
     *,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    for attempt in range(2):
-        try:
-            response = await client.post(
-                settings.FIRECRAWL_SEARCH_URL,
-                json=payload,
-            )
-            if (
-                response.status_code in RETRYABLE_STATUS_CODES
-                and attempt == 0
-            ):
-                await asyncio.sleep(1)
-                continue
-            response.raise_for_status()
-            try:
-                data = response.json()
-            except ValueError as exc:
-                raise FirecrawlResponseError(
-                    "Firecrawl returned invalid JSON"
-                ) from exc
-            if not isinstance(data, Mapping):
-                raise FirecrawlResponseError("Firecrawl response must be an object")
-            return dict(data)
-        except httpx.RequestError:
-            if attempt == 1:
-                raise
-            await asyncio.sleep(1)
-
-    raise RuntimeError("Firecrawl search retry loop ended unexpectedly")
+    response = await client.post(settings.FIRECRAWL_SEARCH_URL, json=payload)
+    response.raise_for_status()
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise FirecrawlResponseError("Firecrawl returned invalid JSON") from exc
+    if not isinstance(data, Mapping):
+        raise FirecrawlResponseError("Firecrawl response must be an object")
+    return dict(data)
 
 
 def _markdown(value: Any) -> str | None:
@@ -164,15 +144,14 @@ def _failure(
     message: str,
     retryable: bool,
     status_code: int | None = None,
+    cause: Exception | None = None,
 ) -> None:
-    raise RuntimeError(message)
+    raise ToolException(message) from cause
 
 
 async def search_web_handler(
     params: dict[str, Any],
-    context: ToolExecutionContext,
 ) -> dict[str, Any]:
-    del context
     args = SearchWebArgs.model_validate(params)
     started_at = time.perf_counter()
     if not settings.FIRECRAWL_API_KEY:
@@ -214,7 +193,8 @@ async def search_web_handler(
                     item,
                     include_markdown=args.include_markdown,
                 )
-            ) is not None
+            )
+            is not None
         ]
         return {
             "ok": True,
@@ -264,14 +244,16 @@ async def search_web_handler(
             message=message,
             retryable=retryable,
             status_code=status_code,
+            cause=exc,
         )
-    except httpx.RequestError:
+    except httpx.RequestError as exc:
         return _failure(
             args=args,
             started_at=started_at,
             code="FIRECRAWL_REQUEST_ERROR",
             message="无法连接 Firecrawl。",
             retryable=True,
+            cause=exc,
         )
     except FirecrawlResponseError as exc:
         return _failure(
@@ -283,15 +265,37 @@ async def search_web_handler(
         )
 
 
-SEARCH_WEB_TOOL = BaseTool(
-    name="search_web",
+@tool(
+    "search_web",
     description=(
-        "通过 Firecrawl 搜索实时网页、官网文档或新闻。"
-        "默认只返回标题、链接和摘要；仅在需要阅读页面内容时设置 include_markdown=true。"
-        "完整论文检索仍应使用 paper_search_agent。"
+        "通过 Firecrawl 检索实时网页、官方文档和新闻。"
+        "当需要查找网络资料、核实最新信息或获取相关页面时，调用此工具。"
+        "输入 query 应为明确的检索关键词，可附加域名及时间筛选条件。"
+        "默认返回标题、链接和摘要，仅在需要阅读页面正文时设置 include_markdown=true。"
+        "完整论文检索流程应使用 paper_search_agent。"
     ),
-    input_schema=SearchWebArgs.model_json_schema(),
-    fn=as_tool(search_web_handler),
-    requires_confirmation=False,
-    params_model=SearchWebArgs,
+    args_schema=SearchWebArgs,
 )
+async def search_web_tool(
+    *,
+    query: str,
+    limit: int = 5,
+    include_domains: list[str] | None = None,
+    exclude_domains: list[str] | None = None,
+    tbs: str | None = None,
+    include_markdown: bool = False,
+) -> dict[str, Any]:
+    params = {
+        "query": query,
+        "limit": limit,
+        "tbs": tbs,
+        "include_markdown": include_markdown,
+    }
+    if include_domains is not None:
+        params["include_domains"] = include_domains
+    if exclude_domains is not None:
+        params["exclude_domains"] = exclude_domains
+    return await search_web_handler(params)
+
+
+SEARCH_WEB_TOOL = search_web_tool

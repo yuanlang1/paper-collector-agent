@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import nullcontext
 from typing import Any
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import settings
-from app.llm.tools.base import BaseTool, ToolResult
-from app.llm.tools.registry import ToolExecutionContext
+from langchain_core.tools import ToolException, tool
 from app.llm.tools.search_tools.common import RETRYABLE_STATUS_CODES, clean_text, elapsed_ms, parse_year
 
 SERPAPI_SEARCH_URL = settings.SERPAPI_SEARCH_URL
@@ -38,15 +38,15 @@ class GoogleScholarSearchArgs(BaseModel):
         return self
 
 
-class SerpApiResponseParseError(Exception):
+class SerpApiResponseParseError(ToolException):
     """SerpApi 响应无法解析为有效 JSON。"""
 
 
-class SerpApiSearchError(Exception):
+class SerpApiSearchError(ToolException):
     """SerpApi 返回了业务错误。"""
 
 
-class SerpApiConfigurationError(Exception):
+class SerpApiConfigurationError(ToolException):
     """SerpApi 配置缺失或无效。"""
 
 
@@ -226,8 +226,10 @@ async def _request_serpapi(
 
 def _build_serpapi_params(
     args: GoogleScholarSearchArgs,
+    *, api_key: str | None = None,
 ) -> dict[str, Any]:
-    if not settings.SERPAPI_API_KEY:
+    resolved_key = settings.SERPAPI_API_KEY if api_key is None else api_key
+    if not resolved_key:
         raise SerpApiConfigurationError(
             "SERPAPI_API_KEY is not configured"
         )
@@ -235,7 +237,7 @@ def _build_serpapi_params(
     params: dict[str, Any] = {
         "engine": "google_scholar",
         "q": args.query,
-        "api_key": settings.SERPAPI_API_KEY,
+        "api_key": resolved_key,
         "output": "json",
         "hl": "en",
         "start": args.start,
@@ -279,7 +281,10 @@ def _validate_serpapi_result(
 
 async def google_scholar_search_service(
     params: dict[str, Any],
-    context: ToolExecutionContext,
+    context: object | None = None,
+    *,
+    http_client: httpx.AsyncClient | None = None,
+    api_key: str | None = None,
 ) -> dict[str, Any]:
     del context
     args = GoogleScholarSearchArgs.model_validate(params)
@@ -287,13 +292,13 @@ async def google_scholar_search_service(
     if not query:
         raise ValueError("query cannot be empty")
     try:
-        return await _fetch_scholar_pages(args.model_copy(update={"query": query}))
+        return await _fetch_scholar_pages(args.model_copy(update={"query": query}), api_key=api_key, http_client=http_client)
     except httpx.HTTPStatusError as exc:
         # HTTPStatusError 包含带 API key 的请求 URL，不进入下游的用户可见错误。
         raise SerpApiSearchError(exc.response.text[:500]) from exc
 
 
-async def _fetch_scholar_pages(args: GoogleScholarSearchArgs) -> dict[str, Any]:
+async def _fetch_scholar_pages(args: GoogleScholarSearchArgs, *, api_key: str | None = None, http_client: httpx.AsyncClient | None = None) -> dict[str, Any]:
     started_at = time.perf_counter()
     papers: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
@@ -305,7 +310,7 @@ async def _fetch_scholar_pages(args: GoogleScholarSearchArgs) -> dict[str, Any]:
     stop_reason = "upstream_exhausted"
     page_warning: str | None = None
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with (nullcontext(http_client) if http_client is not None else httpx.AsyncClient(timeout=30.0)) as client:
         while (
             len(papers) < args.total_limit
             and pages_fetched < args.max_pages
@@ -317,7 +322,7 @@ async def _fetch_scholar_pages(args: GoogleScholarSearchArgs) -> dict[str, Any]:
             page_args = args.model_copy(
                 update={"start": current_start, "num": page_size}
             )
-            request_params = _build_serpapi_params(page_args)
+            request_params = _build_serpapi_params(page_args, api_key=api_key)
 
             try:
                 raw_result = await _request_serpapi(
@@ -435,26 +440,40 @@ async def _fetch_scholar_pages(args: GoogleScholarSearchArgs) -> dict[str, Any]:
     }
 
 
-async def google_scholar_search_handler(
-    params: dict[str, Any],
-    context: ToolExecutionContext,
-) -> ToolResult:
-    return ToolResult(
-        content=str(await google_scholar_search_service(params, context))
-    )
-
-
-GOOGLE_SCHOLAR_SEARCH_TOOL = BaseTool(
-    name="google_scholar_search",
+@tool(
+    "google_scholar_search",
     description=(
         "通过 SerpApi 的 Google Scholar 接口少量检索学术论文。"
-        "适用于补充跨领域候选论文、获取引用量、版本数及 PDF 候选链接。"
-        "单次默认返回 5 篇，最多 10 篇。"
-        "Google Scholar 返回的是摘要片段 snippet，而非完整论文摘要。"
+        "当需要补充跨领域候选论文、获取引用量、版本数或 PDF 候选链接时，调用此工具。"
+        "输入 query 应为明确的研究主题、论文标题或关键词，可附加年份及综述筛选条件。"
+        "默认返回 5 篇，少量检索最多取 10 篇；返回的 snippet 是摘要片段，不是完整摘要。"
         "不用于批量检索、分页、文件导出或跨来源补全。"
     ),
-    input_schema=GoogleScholarSearchArgs.model_json_schema(),
-    fn=google_scholar_search_handler,
-    requires_confirmation=False,
-    params_model=GoogleScholarSearchArgs,
+    args_schema=GoogleScholarSearchArgs,
 )
+async def google_scholar_search_tool(
+    *,
+    query: str,
+    start: int = 0,
+    num: int = 5,
+    total_limit: int = 5,
+    max_pages: int = 1,
+    year_from: int | None = None,
+    year_to: int | None = None,
+    review_only: bool = False,
+) -> dict[str, Any]:
+    """通过 SerpApi 的 Google Scholar 接口少量检索学术论文。适用于补充跨领域候选论文、获取引用量、版本数及 PDF 候选链接。单次默认返回 5 篇，最多 10 篇。Google Scholar 返回的是摘要片段 snippet，而非完整论文摘要。不用于批量检索、分页、文件导出或跨来源补全。"""
+    params = {
+        "query": query,
+        "start": start,
+        "num": num,
+        "total_limit": total_limit,
+        "max_pages": max_pages,
+        "year_from": year_from,
+        "year_to": year_to,
+        "review_only": review_only,
+    }
+    return await google_scholar_search_service(params, None)
+
+
+GOOGLE_SCHOLAR_SEARCH_TOOL = google_scholar_search_tool

@@ -105,7 +105,7 @@ class SiliconFlowEmbeddings(Embeddings):
                 except httpx.TransportError:
                     if attempt == self.max_retries - 1:
                         raise
-                    await asyncio.sleep(0.5 * (2 ** attempt))
+                    await asyncio.sleep(0.5 * (2**attempt))
 
         raise RuntimeError("SiliconFlow embedding request failed")
 
@@ -167,14 +167,10 @@ class SiliconFlowEmbeddings(Embeddings):
 
         ordered_data = sorted(data, key=lambda item: int(item["index"]))
         vectors = [
-            [float(value) for value in item["embedding"]]
-            for item in ordered_data
+            [float(value) for value in item["embedding"]] for item in ordered_data
         ]
 
-        return [
-            SiliconFlowEmbeddings._normalize(vector)
-            for vector in vectors
-        ]
+        return [SiliconFlowEmbeddings._normalize(vector) for vector in vectors]
 
     @staticmethod
     def _normalize(
@@ -185,17 +181,14 @@ class SiliconFlowEmbeddings(Embeddings):
         if norm == 0:
             raise RuntimeError("SiliconFlow returned a zero embedding vector")
 
-        return [
-            value / norm
-            for value in vector
-        ]
+        return [value / norm for value in vector]
 
     def _chunked(
         self,
         texts: list[str],
     ) -> list[list[str]]:
         return [
-            texts[index:index + self.batch_size]
+            texts[index : index + self.batch_size]
             for index in range(0, len(texts), self.batch_size)
         ]
 
@@ -210,8 +203,8 @@ class SiliconFlowEmbeddings(Embeddings):
         retry_after = response.headers.get("Retry-After")
 
         try:
-            delay = float(retry_after) if retry_after else 0.5 * (2 ** attempt)
+            delay = float(retry_after) if retry_after else 0.5 * (2**attempt)
         except ValueError:
-            delay = 0.5 * (2 ** attempt)
+            delay = 0.5 * (2**attempt)
 
         await asyncio.sleep(delay)

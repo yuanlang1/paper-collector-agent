@@ -7,14 +7,17 @@ from typing import Literal
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, model_validator
 
+from app.config import settings
+from app.database import SessionLocal
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.citations import (
     citation_paper_ids,
     unsupported_synthesis_citation_ids,
 )
-from app.llm.graph.workflows.review_generate.contracts import UNTRUSTED_INPUT_GUARD, save
+from app.llm.graph.workflows.review_generate.contracts import save
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
+from app.services import llm_setting_service
 
 
 WRITING_REVIEW_PROMPT = """
@@ -122,11 +125,10 @@ class WritingReviewResult(BaseModel):
 
 
 class ReflectReviewNode:
-    def __init__(self, *, artifact_store=None, model=None, chat: ChatClient | None = None):
+    def __init__(self, *, artifact_store=None, model=None, user_id: int | None = None):
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = model or (chat or ChatClient()).structured(
-            WritingReviewResult, options=ModelOptions(temperature=0)
-        )
+        self.user_id = user_id
+        self.model = model
 
     async def __call__(self, state):
         try:
@@ -154,8 +156,14 @@ class ReflectReviewNode:
                 framework=framework,
                 require_citations=bool(supported_claims),
             )
+            if self.model is None:
+                async with SessionLocal() as db:
+                    config = await llm_setting_service.get_small_llm_config(db, user_id=self.user_id)
+                self.model = ChatClient(runtime_config=config).structured(
+                    WritingReviewResult, options=ModelOptions(temperature=0),
+                )
             result = (await self.model.ainvoke([
-                SystemMessage(content=WRITING_REVIEW_PROMPT + UNTRUSTED_INPUT_GUARD),
+                SystemMessage(content=WRITING_REVIEW_PROMPT),
                 HumanMessage(content=json.dumps({
                     "review_mode": "acceptance" if previous_plan else "initial",
                     "framework": {
@@ -229,7 +237,7 @@ class ReflectReviewNode:
             stop_reason = "hard_constraints_failed"
         elif (
             decision == "revise"
-            and state["writing_revision_round"] >= state["max_writing_revision_rounds"]
+            and state["writing_revision_round"] >= settings.TASK_REVIEW_MAX_WRITING_REVISION_ROUNDS
         ):
             effective_decision = "blocked"
             stop_reason = "writing_revision_limit_reached"

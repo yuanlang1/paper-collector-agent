@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import asyncio
-from collections import defaultdict
 import logging
+from collections import defaultdict
 from pathlib import PurePosixPath
-from typing import Any, TypeVar, cast
+from typing import Any, cast
 from urllib.parse import urlparse
 
 from langchain_core.documents import Document
 
-from app.config import settings
 from app.infrastructure.mineru.mineru_client import MinerUClient
 from app.schemas.file_parser import (
     BatchDocumentParseResult,
@@ -19,22 +17,22 @@ from app.schemas.file_parser import (
     PdfSourceBlock,
 )
 
-T = TypeVar("T")
-
 logger = logging.getLogger(__name__)
 
-PDF_CONTENT_BLOCK_TYPES = frozenset({
-    "text",
-    "title",
-    "equation",
-    "table",
-    "image",
-    "chart",
-    "code",
-    "algorithm",
-    "list",
-    "index",
-})
+PDF_CONTENT_BLOCK_TYPES = frozenset(
+    {
+        "text",
+        "title",
+        "equation",
+        "table",
+        "image",
+        "chart",
+        "code",
+        "algorithm",
+        "list",
+        "index",
+    }
+)
 
 GENERAL_FILE_TYPES: set[FileType] = {
     FileType.PDF,
@@ -61,19 +59,12 @@ class BatchFileParseError(RuntimeError):
 
 
 class FileParser:
-    MAX_BATCH_SIZE = settings.MINERU_MAX_BATCH_SIZE
-
     def __init__(
         self,
         *,
         mineru_client: MinerUClient,
-        max_parallel_batches: int = settings.MINERU_MAX_PARALLEL_BATCHES,
     ) -> None:
-        if max_parallel_batches < 1:
-            raise ValueError("max_parallel_batches must be greater than 0")
-
         self.mineru_client = mineru_client
-        self.max_parallel_batches = max_parallel_batches
 
     async def parse_one(
         self,
@@ -89,76 +80,44 @@ class FileParser:
 
         if not requests:
             return BatchDocumentParseResult(
-                total = 0,
-                documents = [],
-                errors = {},
+                total=0,
+                documents=[],
+                errors={},
             )
 
-        normalized = [
-            self._normalize_request(request)
-            for request in requests
-        ]
+        normalized = [self._normalize_request(request) for request in requests]
 
-        file_ids = [
-            request.file_id
-            for request in normalized
-        ]
+        file_ids = [request.file_id for request in normalized]
         if len(file_ids) != len(set(file_ids)):
             raise ValueError("file_id must be unique within one parse operation")
-
-        batches = [
-            batch
-            for group in self._group_compatible_requests(normalized)
-            for batch in self._chunked(group, self.MAX_BATCH_SIZE)
-        ]
-
-        semaphore = asyncio.Semaphore(self.max_parallel_batches)
-
-        async def execute_batch(
-            batch: list[FileParseRequest],
-        ) -> tuple[list[ParsedFileDocument], dict[str, str]]:
-            async with semaphore:
-                return await self._parse_batch(batch)
-
-        batch_results = await asyncio.gather(
-            *(execute_batch(batch) for batch in batches),
-            return_exceptions = True,
-        )
 
         documents: list[ParsedFileDocument] = []
         errors: dict[str, str] = {}
 
-        for batch, result in zip(
-            batches,
-            batch_results,
-            strict = True,
-        ):
-            if isinstance(result, Exception):
+        for batch in self._group_compatible_requests(normalized):
+            try:
+                batch_documents, batch_errors = await self._parse_batch(batch)
+            except Exception as error:
                 errors.update(
-                    {
-                        request.file_id: self._format_error(result)
-                        for request in batch
-                    }
+                    {request.file_id: self._format_error(error) for request in batch}
                 )
                 continue
 
-            batch_documents, batch_errors = result
             documents.extend(batch_documents)
             errors.update(batch_errors)
 
         documents_by_id = {
-            str(parsed.document.metadata["file_id"]): parsed
-            for parsed in documents
+            str(parsed.document.metadata["file_id"]): parsed for parsed in documents
         }
 
         return BatchDocumentParseResult(
-            total = len(normalized),
-            documents = [
+            total=len(normalized),
+            documents=[
                 documents_by_id[request.file_id]
                 for request in normalized
                 if request.file_id in documents_by_id
             ],
-            errors = errors,
+            errors=errors,
         )
 
     async def parse_files(
@@ -180,19 +139,19 @@ class FileParser:
         model_version = self._select_model(file_type)
 
         task_id = await self.mineru_client.submit_single_url(
-            uri = str(request.uri),
-            data_id = request.file_id,
-            model_version = model_version,
-            options = self._build_single_options(request),
+            uri=str(request.uri),
+            data_id=request.file_id,
+            model_version=model_version,
+            options=self._build_single_options(request),
         )
 
         result = await self.mineru_client.wait_single(task_id)
 
         return await self._build_document(
-            request = request,
-            result = result,
-            model_version = model_version,
-            task_id = task_id,
+            request=request,
+            result=result,
+            model_version=model_version,
+            task_id=task_id,
         )
 
     async def _parse_batch(
@@ -200,21 +159,13 @@ class FileParser:
         requests: list[FileParseRequest],
     ) -> tuple[list[ParsedFileDocument], dict[str, str]]:
         if len(requests) == 1:
-            request = requests[0]
-
-            try:
-                document = await self._parse_single(request)
-                return [document], {}
-            except Exception as error:
-                return [], {
-                    request.file_id: self._format_error(error),
-                }
+            return [await self._parse_single(requests[0])], {}
 
         file_type = cast(FileType, requests[0].file_type)
         model_version = self._select_model(file_type)
 
         batch_id = await self.mineru_client.submit_batch_urls(
-            files = [
+            files=[
                 {
                     "url": str(request.uri),
                     "data_id": request.file_id,
@@ -222,8 +173,8 @@ class FileParser:
                 }
                 for request in requests
             ],
-            model_version = model_version,
-            options = self._build_batch_options(requests[0]),
+            model_version=model_version,
+            options=self._build_batch_options(requests[0]),
         )
 
         results = await self.mineru_client.wait_batch(batch_id)
@@ -245,15 +196,17 @@ class FileParser:
                 continue
 
             if result["state"] == "failed":
-                errors[request.file_id] = result.get("err_msg") or "MinerU parsing failed"
+                errors[request.file_id] = (
+                    result.get("err_msg") or "MinerU parsing failed"
+                )
                 continue
 
             try:
                 document = await self._build_document(
-                    request = request,
-                    result = result,
-                    model_version = model_version,
-                    batch_id = batch_id,
+                    request=request,
+                    result=result,
+                    model_version=model_version,
+                    batch_id=batch_id,
                 )
                 documents.append(document)
             except Exception as error:
@@ -291,9 +244,9 @@ class FileParser:
                 )
 
         return ParsedFileDocument(
-            document = Document(
-                page_content = markdown,
-                metadata = {
+            document=Document(
+                page_content=markdown,
+                metadata={
                     **request.metadata,
                     "file_id": request.file_id,
                     "file_name": request.file_name,
@@ -307,7 +260,7 @@ class FileParser:
                     "mineru_batch_id": batch_id,
                 },
             ),
-            pdf_source_blocks = pdf_source_blocks,
+            pdf_source_blocks=pdf_source_blocks,
         )
 
     @classmethod
@@ -337,11 +290,11 @@ class FileParser:
             bbox = item.get("bbox")
             blocks.append(
                 PdfSourceBlock(
-                    markdown = markdown,
-                    page_no = page_idx + 1,
-                    bbox = bbox if isinstance(bbox, list) else None,
-                    block_type = block_type,
-                    source_index = source_index,
+                    markdown=markdown,
+                    page_no=page_idx + 1,
+                    bbox=bbox if isinstance(bbox, list) else None,
+                    block_type=block_type,
+                    source_index=source_index,
                 )
             )
 
@@ -392,9 +345,7 @@ class FileParser:
     @staticmethod
     def _join_text_values(*values: Any) -> str:
         return "\n\n".join(
-            text
-            for value in values
-            if (text := FileParser._text_value(value))
+            text for value in values if (text := FileParser._text_value(value))
         )
 
     @staticmethod
@@ -403,9 +354,7 @@ class FileParser:
             return value.strip()
         if isinstance(value, list):
             return "\n".join(
-                item.strip()
-                for item in value
-                if isinstance(item, str) and item.strip()
+                item.strip() for item in value if isinstance(item, str) and item.strip()
             )
         return ""
 
@@ -417,7 +366,7 @@ class FileParser:
         file_type = request.file_type or self._detect_file_type(file_name)
 
         return request.model_copy(
-            update = {
+            update={
                 "file_name": file_name,
                 "file_type": file_type,
             }
@@ -537,12 +486,12 @@ class FileParser:
     def _filename_from_uri(
         uri: str,
     ) -> str:
-        file_name = PurePosixPath(
-            urlparse(uri).path
-        ).name
+        file_name = PurePosixPath(urlparse(uri).path).name
 
         if not file_name:
-            raise ValueError("Cannot determine file name from URI; provide file_name explicitly")
+            raise ValueError(
+                "Cannot determine file name from URI; provide file_name explicitly"
+            )
 
         return file_name
 
@@ -555,21 +504,4 @@ class FileParser:
         try:
             return FileType(suffix.removeprefix("."))
         except ValueError as error:
-            raise ValueError(
-                f"Unsupported file type: "
-                f"{suffix or file_name}"
-            ) from error
-
-    @staticmethod
-    def _chunked(
-        items: list[T],
-        size: int,
-    ) -> list[list[T]]:
-        return [
-            items[index:index + size]
-            for index in range(
-                0,
-                len(items),
-                size,
-            )
-        ]
+            raise ValueError(f"Unsupported file type: {suffix or file_name}") from error

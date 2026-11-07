@@ -11,7 +11,7 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from app.config import settings
-from app.history.chat_log import InvalidRunIdError, validate_run_id
+from app.core.identifiers import InvalidRunIdError, validate_run_id
 from app.llm.artifacts.schemas import ArtifactRef
 
 
@@ -155,10 +155,7 @@ class LocalArtifactStore:
         run_id: str,
         step_key: str,
         source: str,
-        kind: str,
         payload: dict[str, Any],
-        count: int = 0,
-        metadata: dict[str, Any] | None = None,
     ) -> ArtifactRef:
         path = self.build_json_path(
             run_id=run_id,
@@ -172,22 +169,10 @@ class LocalArtifactStore:
             payload,
         )
 
-        artifact_id = f"artifact_{uuid.uuid4().hex[:16]}"
-
-        return ArtifactRef(
-            artifact_id=artifact_id,
-            artifact_uri=self.to_artifact_uri(path),
-            path=str(path),
-            kind=kind,
-            source=source,
-            run_id=run_id,
-            step_key=step_key,
-            count=count,
-            metadata=metadata or {},
-        )
+        return ArtifactRef(artifact_uri=self.to_artifact_uri(path))
 
     def read_json(self, artifact: ArtifactRef) -> dict[str, Any]:
-        path = Path(artifact.path)
+        _, path = self.resolve_json_uri(artifact.artifact_uri)
 
         with path.open("r", encoding="utf-8") as f:
             return json.load(f)

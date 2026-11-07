@@ -4,16 +4,19 @@ import json
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
+from app.database import SessionLocal
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import (
     CandidateClaim,
-    claim_hash,
     UNTRUSTED_INPUT_GUARD,
+    claim_hash,
+    review_batch,
     revisions_for,
     save,
 )
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
+from app.services import llm_setting_service
 
 
 CLAIM_GENERATION_PROMPT = """
@@ -154,22 +157,41 @@ class GenerateClaimsNode:
         artifact_store=None,
         model=None,
         revision_model=None,
-        chat: ChatClient | None = None,
-        max_concurrency: int = 4,
+        user_id: int | None = None,
     ):
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.max_concurrency = max_concurrency
-        client = chat or ChatClient()
-        self.model = model or client.structured(ClaimsPlan, options=ModelOptions(temperature=0))
-        self.revision_model = revision_model or client.structured(
-            ClaimRevisionPlan, options=ModelOptions(temperature=0)
-        )
+        self._model_lock = asyncio.Lock()
+        self.user_id = user_id
+        self.model = model
+        self.revision_model = revision_model
+
+    async def _load_models(self):
+        async with SessionLocal() as db:
+            config = await llm_setting_service.get_small_llm_config(db, user_id=self.user_id)
+        client = ChatClient(runtime_config=config)
+        options = ModelOptions(temperature=0)
+        if self.model is None:
+            self.model = client.structured(ClaimsPlan, options=options)
+        if self.revision_model is None:
+            self.revision_model = client.structured(ClaimRevisionPlan, options=options)
+
+    async def _ensure_model(self, *, revise=False):
+        if (self.revision_model if revise else self.model) is None:
+            async with self._model_lock:
+                if (self.revision_model if revise else self.model) is None:
+                    await self._load_models()
 
     async def _generate_for_section(
         self, state, section, studies, existing, additions, claim_budget=MAX_CLAIMS_PER_SECTION
     ):
         relevant = [
-            study for study in studies if study["paper_id"] in section["relevant_paper_ids"]
+            {
+                "paper_id": str(paper["paper_id"]),
+                "title": paper["title"],
+                "paper_profile": paper["paper_profile"],
+            }
+            for paper in studies
+            if str(paper["paper_id"]) in section["relevant_paper_ids"]
         ]
         result = (await self.model.ainvoke([
             SystemMessage(content=CLAIM_GENERATION_PROMPT + UNTRUSTED_INPUT_GUARD),
@@ -184,191 +206,176 @@ class GenerateClaimsNode:
         ])).model_dump(mode="json")
         return result["claims"], result["unanswered_reason"]
 
-    async def __call__(self, state):
-        try:
-            framework_payload = await self.artifact_store.read_json_uri(
-                state["framework_artifact_ref"]
-            )
-            framework = framework_payload["framework"]
-            sections = {section["section_id"]: section for section in framework["sections"]}
-            studies = (
-                await self.artifact_store.read_json_uri(state["study_records_artifact_ref"])
-            )["studies"]
-            payload = (
-                await self.artifact_store.read_json_uri(state["claims_artifact_ref"])
-                if state.get("claims_artifact_ref")
-                else {"claims": [], "unanswered": []}
-            )
-            section_ids = set(sections)
-            changed = set(state.get("changed_section_ids", []))
-            claims = [
-                claim
-                for claim in payload["claims"]
-                if claim["section_id"] in section_ids and claim["section_id"] not in changed
-            ]
-            unanswered = [
-                item
-                for item in payload["unanswered"]
-                if item["section_id"] in section_ids and item["section_id"] not in changed
-            ]
-            claim_revisions = revisions_for(state, "claim")
-            targets = {item["target_id"] for item in claim_revisions}
-
-            async def wait_for(tasks):
-                try:
-                    return await asyncio.gather(*tasks)
-                except (asyncio.CancelledError, Exception):
-                    for task in tasks:
-                        task.cancel()
-                    await asyncio.gather(*tasks, return_exceptions=True)
-                    raise
-
-            replacements_by_claim = {}
-            if targets:
-                evidence_by_claim = {
-                    item["claim_id"]: item
-                    for item in (
-                        await self.artifact_store.read_json_uri(
-                            state["evidence_ledger_artifact_ref"]
-                        )
-                    )["claims"]
+    async def prepare(self, state):
+        framework = (await self.artifact_store.read_json_uri(state["framework_artifact_ref"]))["framework"]
+        sections = {section["section_id"]: section for section in framework["sections"]}
+        studies = (await self.artifact_store.read_json_uri(state["corpus_artifact_ref"]))["papers"]
+        payload = (
+            await self.artifact_store.read_json_uri(state["claims_artifact_ref"])
+            if state.get("claims_artifact_ref")
+            else {"claims": [], "unanswered": []}
+        )
+        claims = [claim for claim in payload["claims"] if claim["section_id"] in sections]
+        unanswered = [item for item in payload["unanswered"] if item["section_id"] in sections]
+        targets = {item["target_id"] for item in revisions_for(state, "claim")}
+        if targets:
+            evidence_by_claim = {
+                item["claim_id"]: item
+                for item in (await self.artifact_store.read_json_uri(
+                    state["evidence_ledger_artifact_ref"]
+                ))["claims"]
+            }
+            jobs = [
+                {
+                    "item_id": claim["claim_id"],
+                    "revision": {
+                        "old_claim": claim,
+                        "section": sections[claim["section_id"]],
+                        "output_language": state["language"],
+                        "revisions": revisions_for(state, "claim", claim["claim_id"]),
+                        "evidence": evidence_by_claim[claim["claim_id"]],
+                    },
                 }
-                semaphore = asyncio.Semaphore(self.max_concurrency)
-
-                async def revise(claim):
-                    async with semaphore:
-                        result = (await self.revision_model.ainvoke([
-                            SystemMessage(content=CLAIM_REVISION_PROMPT + UNTRUSTED_INPUT_GUARD),
-                            HumanMessage(content=json.dumps({
-                                "old_claim": claim,
-                                "section": sections[claim["section_id"]],
-                                "output_language": state["language"],
-                                "revisions": revisions_for(
-                                    state, "claim", claim["claim_id"]
-                                ),
-                                "evidence": evidence_by_claim[claim["claim_id"]],
-                            }, ensure_ascii=False)),
-                        ])).model_dump(mode="json")
-                    return claim["claim_id"], result["claims"]
-
-                replacements_by_claim = dict(
-                    await wait_for(
-                        [
-                            asyncio.create_task(revise(claim))
-                            for claim in claims
-                            if claim["claim_id"] in targets
-                        ]
-                    )
+                for claim in claims
+                if claim["claim_id"] in targets
+            ]
+            if jobs:
+                await self._ensure_model(revise=True)
+                return review_batch(
+                    jobs, mode="revise", sections=framework["sections"], studies=studies,
+                    claims=claims, unanswered=unanswered, first_generation=not payload["claims"],
                 )
+        return await self._plan_generation(
+            state, framework["sections"], studies, claims, unanswered, not payload["claims"],
+        )
 
-            revised = []
-            for claim in claims:
-                replacements = replacements_by_claim.get(claim["claim_id"])
-                if replacements is None:
-                    revised.append(claim)
-                    continue
-                replacement = replacements[0]
-                replacement.update(
-                    claim_id=claim["claim_id"], section_id=claim["section_id"]
-                )
-                replacement["claim_hash"] = claim_hash(replacement)
-                revised.append(replacement)
-            claims = revised
+    async def _plan_generation(self, state, sections, studies, claims, unanswered, first_generation):
+        budgets = claim_budgets(sections, claims)
+        jobs = []
+        sections_to_generate = []
+        for section in sections:
+            section_id = section["section_id"]
+            additions = revisions_for(state, "add_claim", section_id)
+            if not first_generation and not additions:
+                continue
+            sections_to_generate.append(section_id)
+            if budgets[section_id]:
+                jobs.append({
+                    "item_id": section_id,
+                    "language": state["language"],
+                    "section": section,
+                    "studies": [
+                        paper for paper in studies
+                        if str(paper["paper_id"]) in section["relevant_paper_ids"]
+                    ],
+                    "existing": [claim for claim in claims if claim["section_id"] == section_id],
+                    "additions": additions,
+                    "budget": budgets[section_id],
+                })
+        if jobs:
+            await self._ensure_model()
+        return review_batch(
+            jobs, mode="generate", sections=sections, sections_to_generate=sections_to_generate,
+            budgets=budgets, claims=claims, unanswered=unanswered,
+        )
 
-            additions = {
-                section["section_id"]: revisions_for(state, "add_claim", section["section_id"])
-                for section in framework["sections"]
-            }
-            sections_to_generate = changed | {
-                section_id for section_id, items in additions.items() if items
-            }
-            if not payload["claims"]:
-                sections_to_generate = section_ids
-            budgets = claim_budgets(framework["sections"], claims)
-            semaphore = asyncio.Semaphore(self.max_concurrency)
+    async def run_item(self, item):
+        if "revision" in item:
+            await self._ensure_model(revise=True)
+            result = await self.revision_model.ainvoke([
+                SystemMessage(content=CLAIM_REVISION_PROMPT + UNTRUSTED_INPUT_GUARD),
+                HumanMessage(content=json.dumps(item["revision"], ensure_ascii=False)),
+            ])
+            return result.model_dump(mode="json")["claims"][0]
+        await self._ensure_model()
+        candidates, reason = await self._generate_for_section(
+            item, item["section"], item["studies"], item["existing"], item["additions"], item["budget"],
+        )
+        return {"candidates": candidates, "reason": reason}
 
-            async def generate(section):
-                async with semaphore:
-                    candidates, reason = await self._generate_for_section(
-                        state,
-                        section,
-                        studies,
-                        [
-                            claim
-                            for claim in claims
-                            if claim["section_id"] == section["section_id"]
-                        ],
-                        additions[section["section_id"]],
-                        budgets[section["section_id"]],
-                    )
-                return section["section_id"], candidates, reason
-
-            generated = {
-                section["section_id"]: ([], "Claim budget exhausted for this section.")
-                for section in framework["sections"]
-                if section["section_id"] in sections_to_generate
-                and not budgets[section["section_id"]]
-            }
-            generated.update(dict(
-                (
-                    section_id,
-                    (candidates, reason),
-                )
-                for section_id, candidates, reason in await wait_for(
-                    [
-                        asyncio.create_task(generate(section))
-                        for section in framework["sections"]
-                        if section["section_id"] in sections_to_generate
-                        and budgets[section["section_id"]]
-                    ]
-                )
-            ))
-            next_index = max(
-                (int(claim["claim_id"].removeprefix("claim_")) for claim in claims),
-                default=0,
-            ) + 1
-            warnings = list(state["warnings"])
-            for section in framework["sections"]:
-                if section["section_id"] not in sections_to_generate:
-                    continue
-                candidates, reason = generated[section["section_id"]]
-                budget = budgets[section["section_id"]]
-                if len(candidates) > budget:
-                    warnings.append(
-                        f"Claim budget limited section {section['section_id']} to {budget} claims."
-                    )
-                    candidates = candidates[:budget]
-                unanswered = [
-                    item for item in unanswered if item["section_id"] != section["section_id"]
-                ]
-                if reason:
-                    unanswered.append({"section_id": section["section_id"], "reason": reason})
-                for claim in candidates:
-                    claim_id = f"claim_{next_index:03d}"
-                    next_index += 1
-                    claim.update(claim_id=claim_id, section_id=section["section_id"])
+    async def collect(self, state, results, failure):
+        if failure:
+            return self.failure(state, failure)
+        context = state["batch_context"]
+        if context["mode"] == "revise":
+            claims = []
+            for claim in context["claims"]:
+                if claim["claim_id"] in results:
+                    claim = {
+                        **results[claim["claim_id"]],
+                        "claim_id": claim["claim_id"],
+                        "section_id": claim["section_id"],
+                    }
                     claim["claim_hash"] = claim_hash(claim)
-                    claims.append(claim)
+                claims.append(claim)
+            batch = await self._plan_generation(
+                state, context["sections"], context["studies"], claims,
+                context["unanswered"], context["first_generation"],
+            )
+            if batch["batch_jobs"]:
+                return batch
+            context = batch["batch_context"]
+            results = {}
+        return await self._save_claims(state, context, results)
 
-            paper_ids = set(state["paper_ids_snapshot"])
-            if any(not set(claim["candidate_paper_ids"]) <= paper_ids for claim in claims):
-                raise ValueError("claim references papers outside task")
-            ref = await save(
-                self.artifact_store, state, "claims", {"claims": claims, "unanswered": unanswered}
-            )
-            return {
-                "claims_artifact_ref": ref,
-                "changed_section_ids": [],
-                "revision_items": [
-                    item
-                    for item in state.get("revision_items", [])
-                    if item["target_type"] not in {"claim", "add_claim"}
-                ],
-                "warnings": warnings,
-                "stage": "retrieving_evidence",
-                "status": "running",
-            }
-        except Exception as exc:
-            return failed(
-                f"claim generation failed: {exc}", error_code="CLAIMS_FAILED", retryable=True
-            )
+    async def _save_claims(self, state, context, results):
+        claims = list(context["claims"])
+        unanswered = context["unanswered"]
+        budgets = context["budgets"]
+        sections_to_generate = set(context["sections_to_generate"])
+        next_index = max(
+            (int(claim["claim_id"].removeprefix("claim_")) for claim in claims),
+            default=0,
+        ) + 1
+        warnings = list(state["warnings"])
+        for section in context["sections"]:
+            section_id = section["section_id"]
+            if section_id not in sections_to_generate:
+                continue
+            budget = budgets[section_id]
+            if budget:
+                candidates = results[section_id]["candidates"]
+                reason = results[section_id]["reason"]
+            else:
+                candidates, reason = [], "Claim budget exhausted for this section."
+            if len(candidates) > budget:
+                warnings.append(
+                    f"Claim budget limited section {section['section_id']} to {budget} claims."
+                )
+                candidates = candidates[:budget]
+            unanswered = [
+                item for item in unanswered if item["section_id"] != section["section_id"]
+            ]
+            if reason:
+                unanswered.append({"section_id": section["section_id"], "reason": reason})
+            for claim in candidates:
+                claim_id = f"claim_{next_index:03d}"
+                next_index += 1
+                claim = {**claim, "claim_id": claim_id, "section_id": section_id}
+                claim["claim_hash"] = claim_hash(claim)
+                claims.append(claim)
+
+        paper_ids = set(state["paper_ids_snapshot"])
+        if any(not set(claim["candidate_paper_ids"]) <= paper_ids for claim in claims):
+            raise ValueError("claim references papers outside task")
+        ref = await save(
+            self.artifact_store, state, "claims", {"claims": claims, "unanswered": unanswered}
+        )
+        return {
+            "claims_artifact_ref": ref,
+            "revision_items": [
+                item
+                for item in state.get("revision_items", [])
+                if item["target_type"] not in {"claim", "add_claim"}
+            ],
+            "warnings": warnings,
+            "stage": "retrieving_evidence",
+            "status": "running",
+        }
+
+    @staticmethod
+    def failure(state, error):
+        return failed(
+            f"claim generation failed: {error['error']}",
+            error_code="CLAIMS_FAILED", retryable=True,
+        )

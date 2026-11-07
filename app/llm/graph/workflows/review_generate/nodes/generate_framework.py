@@ -4,16 +4,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.database import SessionLocal
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.graph.workflows.review_generate.contracts import (
-    content_hash,
-    framework_input_hash,
-    UNTRUSTED_INPUT_GUARD,
-    read_optional_json,
-    save,
-)
+from app.llm.graph.workflows.review_generate.contracts import UNTRUSTED_INPUT_GUARD, save
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
+from app.services import llm_setting_service
 
 
 FRAMEWORK_PROMPT = """
@@ -112,45 +108,49 @@ class ReviewFramework(BaseModel):
 
 
 class GenerateFrameworkNode:
-    def __init__(self, *, artifact_store=None, model=None, chat: ChatClient | None = None):
+    def __init__(self, *, artifact_store=None, model=None, user_id: int | None = None):
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = model or (chat or ChatClient()).structured(
-            ReviewFramework, options=ModelOptions(temperature=0)
-        )
+        self.user_id = user_id
+        self.model = model
 
     async def __call__(self, state):
+        if state.get("framework_artifact_ref"):
+            return {"stage": "generating_claims", "status": "running"}
         try:
-            studies = (
-                await self.artifact_store.read_json_uri(state["study_records_artifact_ref"])
-            )["studies"]
-            old_payload = await read_optional_json(
-                self.artifact_store, state.get("framework_artifact_ref")
-            )
-            input_hash = framework_input_hash(
-                state["topic"], state["language"], state["review_type"], studies
-            )
-            if (
-                old_payload
-                and old_payload.get("framework_input_hash") == input_hash
-            ):
-                return {"stage": "generating_claims", "status": "running"}
+            corpus = await self.artifact_store.read_json_uri(state["corpus_artifact_ref"])
+            studies = [
+                {
+                    "paper_id": str(paper["paper_id"]),
+                    "title": paper["title"],
+                    "paper_profile": paper["paper_profile"],
+                }
+                for paper in corpus["papers"]
+            ]
+            if self.model is None:
+                async with SessionLocal() as db:
+                    config = await llm_setting_service.get_small_llm_config(db, user_id=self.user_id)
+                self.model = ChatClient(runtime_config=config).structured(
+                    ReviewFramework, options=ModelOptions(temperature=0),
+                )
+            framework = await self.model.ainvoke([
+                SystemMessage(content = FRAMEWORK_PROMPT + UNTRUSTED_INPUT_GUARD),
+                HumanMessage(
+                    content = json.dumps({
+                        "topic": state["topic"],
+                        "output_language": state["language"],
+                        "review_type": state["review_type"],
+                        "overview": studies,
+                    }, ensure_ascii=False)),
+            ])
 
-            framework = (await self.model.ainvoke([
-                SystemMessage(content=FRAMEWORK_PROMPT + UNTRUSTED_INPUT_GUARD),
-                HumanMessage(content=json.dumps({
-                    "topic": state["topic"],
-                    "output_language": state["language"],
-                    "review_type": state["review_type"],
-                    "overview": studies,
-                }, ensure_ascii=False)),
-            ])).model_dump(mode="json")
-            return await self._save_framework(state, old_payload, framework, input_hash)
+            return await self._save_framework(state, framework.model_dump(mode="json"))
+            
         except Exception as exc:
             return failed(
                 f"framework generation failed: {exc}", error_code="FRAMEWORK_FAILED", retryable=True
             )
 
-    async def _save_framework(self, state, old_payload, framework, input_hash):
+    async def _save_framework(self, state, framework):
         paper_ids = set(state["paper_ids_snapshot"])
         mapped = {
             paper_id
@@ -167,31 +167,16 @@ class GenerateFrameworkNode:
         if framework["corpus_scope_mismatch"]:
             return failed(framework["adjustment_reason"], error_code="CORPUS_SCOPE_MISMATCH")
 
-        old_sections = {
-            section["section_id"]: section
-            for section in (old_payload["framework"]["sections"] if old_payload else [])
-        }
-        changed_sections = [
-            section["section_id"]
-            for section in framework["sections"]
-            if old_sections.get(section["section_id"]) != section
-        ]
-        digest = content_hash(framework)
         ref = await save(
             self.artifact_store,
             state,
             "framework",
             {
                 "framework": framework,
-                "framework_hash": digest,
-                "framework_input_hash": input_hash,
-                "changed_section_ids": changed_sections,
             },
         )
         return {
             "framework_artifact_ref": ref,
-            "framework_hash": digest,
-            "changed_section_ids": changed_sections,
             "stage": "generating_claims",
             "status": "running",
         }

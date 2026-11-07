@@ -11,11 +11,11 @@ from app.llm.graph.workflows.progress import (
 _PHASES = {
     "initialize": ("prepare", "准备检索"),
     "plan_search": ("prepare", "理解并生成检索计划"),
-    "search": ("search", "Google Scholar 检索"),
+    "search": ("search", "检索论文"),
+    "collect_search": ("search", "汇总检索结果"),
     "filter": ("normalize", "清洗检索结果"),
     "review": ("review", "审核结果并规划补充检索"),
     "enrich": ("enrich", "补充论文信息"),
-    "crossref_enrich": ("enrich", "补充 Crossref 信息"),
     "venue": ("enrich", "解析期刊或会议"),
     "download_pdf": ("enrich", "下载 PDF"),
     "abstract_enrich": ("enrich", "补充摘要"),
@@ -55,12 +55,11 @@ def _data(
         },
     }
     source_stats = (update or {}).get(
-        "source_search_stats",
-        state.get("source_search_stats"),
+        "provider_stats",
+        state.get("provider_stats"),
     )
     if node_name == "search" and isinstance(source_stats, Mapping):
-        data["source"] = "Google Scholar"
-        data["source_stats"] = source_stats.get("Google Scholar", {})
+        data["provider_stats"] = source_stats
     return data
 
 
@@ -73,12 +72,15 @@ def instrument_paper_search_node(*, node_name: str, node: Node) -> Node:
         node=node,
         phase=phase,
         phase_label=phase_label,
+        label_resolver=lambda state: (
+            f"{phase_label}（{state['search_task']['provider_id']}）" if "search_task" in state else phase_label
+        ),
         data_builder=lambda state, update: _data(
             node_name=node_name,
             state=state,
             update=update,
         ),
         iteration_resolver=lambda state: (
-            int(state.get("supplemental_search_round", 0) or 0) or None
+            int(state.get("search_task", {}).get("round", state.get("supplemental_search_round", 0))) or None
         ),
     )

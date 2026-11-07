@@ -8,12 +8,14 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
+from app.database import SessionLocal
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.citations import (
     citation_paper_ids as cited_paper_ids,
 )
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
+from app.services import llm_setting_service
 from app.llm.graph.workflows.review_generate.contracts import revisions_for
 
 
@@ -66,12 +68,11 @@ class ReviewSynthesis(BaseModel):
 class AssembleReviewNode:
     def __init__(
         self, *, artifact_store: LocalArtifactStore | None = None, model: Any | None = None,
-        chat: ChatClient | None = None,
+        user_id: int | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.model = model or (chat or ChatClient()).structured(
-            ReviewSynthesis, options=ModelOptions(temperature=0),
-        )
+        self.user_id = user_id
+        self.model = model
 
     async def __call__(self, state: Mapping[str, Any],) -> dict[str, Any]:
         try:
@@ -134,6 +135,15 @@ class AssembleReviewNode:
         }
 
         if sections:
+            if self.model is None:
+                try:
+                    async with SessionLocal() as db:
+                        config = await llm_setting_service.get_small_llm_config(db, user_id=self.user_id)
+                    self.model = ChatClient(runtime_config=config).structured(
+                        ReviewSynthesis, options=ModelOptions(temperature=0),
+                    )
+                except Exception as exc:
+                    return failed(f"review assembly failed: {exc}")
             synthesis_revisions = revisions_for(state, "synthesis")
             synthesis = await self.model.ainvoke(
                 [
@@ -206,7 +216,6 @@ class AssembleReviewNode:
 
         review_draft = {
             "task_id": state["task_id"],
-            "framework_hash": state["framework_hash"],
             "title": framework["title"],
             "scope": framework["scope"],
             "abstract": abstract,
@@ -224,8 +233,6 @@ class AssembleReviewNode:
                 run_id=state["child_run_id"],
                 step_key="assemble_review",
                 source="task_review",
-                kind="task_review_draft_json",
-                count=len(sections),
                 payload=review_draft,
             )
         except Exception as exc:
