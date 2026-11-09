@@ -120,7 +120,7 @@ async def load_job_messages(
 
 
 async def get_model(db: AsyncSession, user_id: int) -> ChatOpenAI:
-    config = await get_small_llm_config(db, user_id=user_id)
+    config = await get_small_llm_config(user_id=user_id, db=db)
 
     return ChatOpenAI(
         model=config.model,

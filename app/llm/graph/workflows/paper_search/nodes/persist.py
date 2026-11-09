@@ -15,9 +15,6 @@ from app.infrastructure.paper_service.venue_client import (
 )
 from app.infrastructure.oss import normalize_pdf_sha256
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.graph.workflows.paper_search.paper_cache import (
-    PaperCacheStore,
-)
 from app.schemas.venue import VenueInfoDraft
 from app.services.venue_service import VenueService
 
@@ -43,7 +40,7 @@ def _venue_key(venue: VenueInfoDraft) -> str:
 
 
 class PersistRecommendedPapersNode:
-    """Persist venues, papers, caches, and task-paper relations in order."""
+    """Persist venues, papers, and task-paper relations in order."""
 
     def __init__(
         self,
@@ -53,10 +50,8 @@ class PersistRecommendedPapersNode:
         save_papers: BatchSave | None = None,
         save_task_papers: BatchSave | None = None,
         venue_service: VenueService | None = None,
-        paper_cache_store: PaperCacheStore | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        cache_dir = self.artifact_store.base_dir.parent
         self.save_venues = (
             save_venues or venue_service_client.batch_save_venues
         )
@@ -68,9 +63,6 @@ class PersistRecommendedPapersNode:
             or task_service_client.batch_save_task_paper_relations
         )
         self.venue_service = venue_service or VenueService()
-        self.paper_cache_store = paper_cache_store or PaperCacheStore(
-            cache_dir / "paper_cache.json"
-        )
 
     @staticmethod
     def _outcome(
@@ -87,7 +79,6 @@ class PersistRecommendedPapersNode:
             "paper_save_status": (
                 "not_required" if _is_valid_id(paper_id) else "pending"
             ),
-            "paper_cache_status": "not_started",
             "task_paper_save_status": "pending",
             "oss_name": None,
             "error": None,
@@ -304,8 +295,9 @@ class PersistRecommendedPapersNode:
             if pdf_sha256:
                 info["oss_name"] = pdf_sha256
                 entry["outcome"]["oss_name"] = pdf_sha256
+            authors = entry["paper"].get("author_names") or info.get("authors")
             new_requests.append(
-                {"client_key": entry["client_key"], "paper_info": info}
+                {"client_key": entry["client_key"], "paper_info": {**info, "authors": authors}}
             )
 
         paper_response = await self.save_papers(new_requests) if new_requests else {"ok": True, "result": {"papers": []}}
@@ -333,33 +325,6 @@ class PersistRecommendedPapersNode:
                 entry["relation"]["paper_id"] = paper_id
                 entry["outcome"]["paper_id"] = paper_id
                 entry["outcome"]["paper_save_status"] = "saved"
-
-    async def _update_paper_cache(self, entries: list[dict[str, Any]]) -> tuple[int, int]:
-        cache_updated = 0
-        cache_failed = 0
-        for entry in entries:
-            if not _is_valid_id(entry["paper_id"]):
-                continue
-            try:
-                paper_for_cache = dict(entry["paper"])
-                paper_for_cache["paper_id"] = entry["paper_id"]
-                pdf_download = paper_for_cache.get("pdf_download")
-                if isinstance(pdf_download, dict):
-                    paper_for_cache["pdf_download"] = {
-                        key: value
-                        for key, value in pdf_download.items()
-                        if key not in {"local_pdf_path", "artifact_uri"}
-                    }
-                await self.paper_cache_store.upsert_saved_paper(
-                    paper_for_cache
-                )
-                entry["outcome"]["paper_cache_status"] = "saved"
-                cache_updated += 1
-            except Exception as exc:
-                entry["outcome"]["paper_cache_status"] = "failed"
-                _add_error(entry["outcome"], f"paper cache failed: {exc}")
-                cache_failed += 1
-        return cache_updated, cache_failed
 
     async def _save_relations(self, entries: list[dict[str, Any]]) -> None:
         relation_requests_by_key: dict[
@@ -425,8 +390,6 @@ class PersistRecommendedPapersNode:
             await self._resolve_venues(entries)
             await self._save_new_papers(entries)
 
-            _, cache_failed = await self._update_paper_cache(entries)
-
             await self._save_relations(entries)
 
             persisted_count = sum(
@@ -453,10 +416,6 @@ class PersistRecommendedPapersNode:
         if failure_count:
             warnings.append(
                 f"{failure_count} papers were not fully persisted"
-            )
-        if cache_failed:
-            warnings.append(
-                f"{cache_failed} papers were not written to paper cache"
             )
         return {
             "stage": stage,

@@ -24,7 +24,6 @@ class DblpAdapter:
         self,
         *,
         query_args: Mapping[str, Any],
-        settings: Mapping[str, Any],
         credentials: Mapping[str, str],
         cursor: Mapping[str, Any] | None,
         limit: int,
@@ -35,13 +34,11 @@ class DblpAdapter:
             raise ValueError("This provider does not accept credentials")
         arguments = source_arguments(
             query_args,
-            settings,
             cursor,
             limit,
             max_pages,
             page_field="h",
             offset_field="f",
-            page_max=1000,
         )
         arguments = DblpSearchArgs.model_validate(arguments).model_dump()
         try:

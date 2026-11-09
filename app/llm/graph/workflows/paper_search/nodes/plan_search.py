@@ -13,7 +13,7 @@ from app.llm.context import PaperSearchContext
 from app.llm.graph.workflows.paper_search_schemas import SearchPlanningArgs, SearchTagArgs, SourceTypeValue
 from app.llm.provider import ValidatedJsonInvoker
 from app.services.search_connection_executor import search_executor as shared_search_executor, validate_query
-from app.services.setting_service import default_source_limits
+from app.utils.search_adapters.contracts import SEARCH_PAGE_SIZE
 
 
 PLAN_SEARCH_SYSTEM_PROMPT = """
@@ -57,7 +57,6 @@ class PlanSearchNode:
             if set(output.query_plans) != set(available):
                 raise ValueError("query_plans must exactly match available providers")
             understanding = output.query_understanding
-            limits = state.get("paper_search_source_limits") or default_source_limits()
             tasks = {}
             for provider, connection in available.items():
                 arguments = dict(output.query_plans[provider].arguments)
@@ -66,13 +65,13 @@ class PlanSearchNode:
                 arguments.pop("year_to", None)
                 if understanding.yearFrom is not None:
                     arguments.update(year_from=understanding.yearFrom, year_to=understanding.yearTo)
-                validate_query(provider, arguments, connection["settings"])
-                page_size = connection["settings"].get("page_size", 5)
+                validate_query(provider, arguments)
+                initial_limit = connection["initial_limit"]
                 tasks[provider] = {
                     "provider_id": provider, "round": 0, "query_args": arguments,
                     "configuration_version": connection["configuration_version"],
-                    "cursor": None, "page_size": page_size, "limit": limits[provider],
-                    "max_pages": min(20, ceil(limits[provider] / page_size)),
+                    "cursor": None, "limit": initial_limit,
+                    "max_pages": ceil(initial_limit / SEARCH_PAGE_SIZE),
                 }
             year_tag = (date.today().year - understanding.yearFrom + 1
                         if understanding.yearTo == date.today().year else 0)

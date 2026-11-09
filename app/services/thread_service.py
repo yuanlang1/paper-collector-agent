@@ -56,7 +56,7 @@ async def create_thread(db, user_id: int, message: str | None = None) -> ThreadI
     message = message.strip() if message is not None else ""
     topic = message[:40] if message else None
     if message:
-        llm_config = await llm_setting_service.get_small_llm_config(db, user_id=user_id)
+        llm_config = await llm_setting_service.get_small_llm_config(user_id=user_id, db=db)
         model = ChatOpenAI(
             model=llm_config.model,
             base_url=llm_config.base_url,

@@ -6,10 +6,17 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 
+SEARCH_PAGE_SIZE = 5
+MAX_SEARCH_PAGES = 20
+DEFAULT_INITIAL_LIMITS = {"arxiv": 10, "dblp": 10, "google_scholar": 20}
+
+
 class SearchSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    page_size: int = Field(default=5, strict=True, ge=1)
+    initial_limit: int = Field(
+        default=10, strict=True, ge=1, le=SEARCH_PAGE_SIZE * MAX_SEARCH_PAGES,
+    )
 
 
 class OffsetCursor(BaseModel):
@@ -40,7 +47,6 @@ class SearchAdapter(Protocol):
         self,
         *,
         query_args: Mapping[str, Any],
-        settings: Mapping[str, Any],
         credentials: Mapping[str, str],
         cursor: Mapping[str, Any] | None,
         limit: int,
@@ -51,31 +57,26 @@ class SearchAdapter(Protocol):
 
 def source_arguments(
     query_args: Mapping[str, Any],
-    settings: Mapping[str, Any],
     cursor: Mapping[str, Any] | None,
     limit: int,
     max_pages: int,
     *,
     page_field: str,
     offset_field: str,
-    page_max: int,
 ) -> dict[str, Any]:
     forbidden = {"start", "f", "num", "h", "max_results", "total_limit", "max_pages"}
     if forbidden.intersection(query_args):
         raise ValueError("query_args must not contain pagination fields")
     if type(limit) is not int or limit < 1:
         raise ValueError("limit must be a positive integer")
-    if type(max_pages) is not int or not 1 <= max_pages <= 20:
-        raise ValueError("max_pages must be between 1 and 20")
-    config = SearchSettings.model_validate(dict(settings))
-    if config.page_size > page_max:
-        raise ValueError(f"page_size must not exceed {page_max}")
+    if type(max_pages) is not int or not 1 <= max_pages <= MAX_SEARCH_PAGES:
+        raise ValueError(f"max_pages must be between 1 and {MAX_SEARCH_PAGES}")
     offset = (
         OffsetCursor.model_validate(dict(cursor)).offset if cursor is not None else 0
     )
     return {
         **query_args,
-        page_field: config.page_size,
+        page_field: SEARCH_PAGE_SIZE,
         offset_field: offset,
         "total_limit": limit,
         "max_pages": max_pages,

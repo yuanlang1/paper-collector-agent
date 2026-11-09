@@ -1,9 +1,12 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.exceptions import ConflictException, NotFoundException
+from app.database import SessionLocal
 from app.db.repositories import llm_setting
 from app.db.repositories.llm_setting import LlmSettingRow
 
@@ -137,8 +140,26 @@ async def delete_setting(db: AsyncSession, model_id: int, *, user_id: int) -> bo
         return await llm_setting.delete(db, model_id, user_id=user_id)
 
 
-async def get_llm_config(db: AsyncSession, model_id: int, *, user_id: int) -> LlmConfig:
-    setting = await get_setting(db, model_id, user_id=user_id)
+@asynccontextmanager
+async def _config_session(db: AsyncSession | None) -> AsyncIterator[AsyncSession]:
+    if db is None:
+        async with SessionLocal.begin() as session:
+            yield session
+    elif db.in_transaction():
+        yield db
+    else:
+        async with db.begin():
+            yield db
+
+
+async def get_llm_config(
+    model_id: int,
+    *,
+    user_id: int,
+    db: AsyncSession | None = None,
+) -> LlmConfig:
+    async with _config_session(db) as session:
+        setting = await llm_setting.get_by_id(session, model_id, user_id=user_id)
     if setting is None:
         raise NotFoundException("LLM 配置不存在")
     return LlmConfig(
@@ -149,9 +170,13 @@ async def get_llm_config(db: AsyncSession, model_id: int, *, user_id: int) -> Ll
     )
 
 
-async def get_default_model(db: AsyncSession, *, user_id: int) -> LlmConfig | None:
-    async with db.begin():
-        setting = await llm_setting.get_default_model(db, user_id=user_id)
+async def get_default_model(
+    *,
+    user_id: int,
+    db: AsyncSession | None = None,
+) -> LlmConfig | None:
+    async with _config_session(db) as session:
+        setting = await llm_setting.get_default_model(session, user_id=user_id)
         if setting is None:
             return None
 
@@ -163,11 +188,17 @@ async def get_default_model(db: AsyncSession, *, user_id: int) -> LlmConfig | No
         )
 
 
-async def get_small_llm_config(db: AsyncSession, *, user_id: int) -> LlmConfig:
-    async with db.begin():
-        setting = await llm_setting.get_small_model(db, user_id=user_id)
+async def get_small_llm_config(
+    *,
+    user_id: int,
+    db: AsyncSession | None = None,
+) -> LlmConfig:
+    async with _config_session(db) as session:
+        setting = await llm_setting.get_small_model(session, user_id=user_id)
         if setting is None:
-            settings = await llm_setting.list_settings(db, user_id=user_id, limit=1)
+            settings = await llm_setting.list_settings(
+                session, user_id=user_id, limit=1
+            )
             if not settings:
                 raise NotFoundException("小模型配置不存在")
             setting = settings[0]

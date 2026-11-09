@@ -11,7 +11,6 @@ from pydantic import (
     model_validator,
 )
 
-
 NonBlankString = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1),
@@ -140,7 +139,7 @@ class PromptUnderstandingArgs(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_year_range(self) -> "PromptUnderstandingArgs":
+    def validate_year_range(self) -> PromptUnderstandingArgs:
         if self.yearFrom is None and self.yearTo is None:
             return self
         if self.yearFrom is None or self.yearTo is None:
@@ -187,8 +186,11 @@ class SearchPlanningArgs(BaseModel):
         min_length=1,
         description="论文类型整数编码；未限定时使用 1（期刊论文）和 2（会议论文）。",
     )
-    query_plans: dict[Literal["arxiv", "dblp", "google_scholar"], ProviderQueryPlanArgs] = Field(
-        ..., description="每个可用 Provider 的查询草案，必须覆盖输入提供的来源。",
+    query_plans: dict[
+        Literal["arxiv", "dblp", "google_scholar"], ProviderQueryPlanArgs
+    ] = Field(
+        ...,
+        description="每个可用 Provider 的查询草案，必须覆盖输入提供的来源。",
     )
 
 
@@ -215,7 +217,7 @@ class SearchTagArgs(BaseModel):
     )
 
     @model_validator(mode="after")
-    def remove_duplicate_tags(self) -> "SearchTagArgs":
+    def remove_duplicate_tags(self) -> SearchTagArgs:
         self.paperTag = list(dict.fromkeys(self.paperTag))
         self.sourceTag = list(dict.fromkeys(self.sourceTag))
         return self

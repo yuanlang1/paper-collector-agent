@@ -1,9 +1,28 @@
+import json
 from typing import Any
 
-from sqlalchemy import case, delete, or_, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import case, delete, or_, select, text, update
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from app.db.models.search_connection import SearchConnection, SearchConnectionStatus
+from app.utils.search_adapters.contracts import DEFAULT_INITIAL_LIMITS
+
+
+async def migrate_connection_limits(connection: AsyncConnection) -> None:
+    # ponytail: apply the idempotent JSONB update with the existing startup schema setup.
+    await connection.execute(text("""
+        WITH defaults AS (SELECT CAST(:limits AS jsonb) AS limits)
+        UPDATE search_connection AS c
+        SET settings = (c.settings - 'page_size') ||
+            CASE WHEN c.settings ? 'initial_limit' OR NOT (defaults.limits ? c.provider_id)
+                THEN '{}'::jsonb
+                ELSE jsonb_build_object('initial_limit', defaults.limits -> c.provider_id)
+            END,
+            modification_time = now()
+        FROM defaults
+        WHERE c.settings ? 'page_size'
+           OR (defaults.limits ? c.provider_id AND NOT (c.settings ? 'initial_limit'))
+    """), {"limits": json.dumps(DEFAULT_INITIAL_LIMITS)})
 
 
 async def create(db: AsyncSession, *, user_id: int, values: dict[str, Any]) -> SearchConnection:

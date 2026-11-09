@@ -17,7 +17,6 @@ class SearchTask(TypedDict):
     query_args: dict[str, Any]
     configuration_version: str
     cursor: dict[str, Any] | None
-    page_size: int
     limit: int
     max_pages: int
 
@@ -66,7 +65,6 @@ class PaperSearchWorkflowState(TypedDict, total=False):
     prompt: str
     task_id: int | None
     content: str
-    paper_search_source_limits: dict[str, int] | None
     original_prompt: str
 
     provider_ids: list[ProviderId] | None

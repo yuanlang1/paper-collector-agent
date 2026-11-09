@@ -47,3 +47,5 @@ volumes:
   pg-data:
   redis-data:
   qdrant-data:
+    name: paper-collector-qdrant-storage-v120
+    external: true

@@ -57,9 +57,9 @@ async def extract_studies(
         paper_id=paper_id,
     )
 
-    llm_config = await get_default_model(db, user_id=user_id)
+    llm_config = await get_default_model(user_id=user_id, db=db)
     if llm_config is None:
-        llm_config = await get_small_llm_config(db, user_id=user_id)
+        llm_config = await get_small_llm_config(user_id=user_id, db=db)
     model = ChatOpenAI(
         model=llm_config.model,
         base_url=llm_config.base_url,

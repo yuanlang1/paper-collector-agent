@@ -13,7 +13,6 @@ from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.paper_search_schemas import PromptUnderstandingArgs
 from app.llm.provider import ValidatedJsonInvoker
 
-
 RECOMMENDATION_SYSTEM_PROMPT = """
 你负责评估论文与用户检索意图的匹配程度。
 
@@ -60,8 +59,6 @@ class PaperRecommendationResult(BaseModel):
 
 
 class RecommendationNode:
-    """根据检索意图、摘要与 venue 信息筛选当前任务的推荐论文。"""
-
     def __init__(
         self,
         artifact_store: LocalArtifactStore | None = None,
@@ -84,15 +81,11 @@ class RecommendationNode:
         paper_info = paper["paper_info"]
 
         model_input = {
-            "query_understanding": query_understanding.model_dump(
-                mode="json"
-            ),
+            "query_understanding": query_understanding.model_dump(mode="json"),
             "paper": {
                 "title": paper_info.get("title"),
                 "authors": paper_info.get("authors"),
-                "paper_abstract": paper_info.get(
-                    "paper_abstract"
-                ),
+                "paper_abstract": paper_info.get("paper_abstract"),
                 "ai_abstract": paper_info.get("ai_abstract"),
                 "keywords": paper_info.get("keywords"),
                 "source": paper_info.get("source"),
@@ -151,7 +144,8 @@ class RecommendationNode:
 
     @staticmethod
     def _prepare_papers(
-        new_papers: list[dict[str, Any]], existing_papers: list[dict[str, Any]],
+        new_papers: list[dict[str, Any]],
+        existing_papers: list[dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
         skipped_invalid_existing: list[dict[str, str]] = []
         recommend_input: list[dict[str, Any]] = []
@@ -186,9 +180,7 @@ class RecommendationNode:
                             if isinstance(paper_info, dict)
                             else ""
                         ),
-                        "reason": (
-                            "已有论文缺少合法 paper_id 或 paper_info。"
-                        ),
+                        "reason": ("已有论文缺少合法 paper_id 或 paper_info。"),
                     }
                 )
                 continue
@@ -197,9 +189,13 @@ class RecommendationNode:
         return recommend_input, skipped_invalid_existing
 
     async def _score_papers(
-        self, recommend_input: list[dict[str, Any]],
-        query_understanding: PromptUnderstandingArgs, task_id: int | None,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, str]], list[str]]:
+        self,
+        recommend_input: list[dict[str, Any]],
+        query_understanding: PromptUnderstandingArgs,
+        task_id: int | None,
+    ) -> tuple[
+        list[dict[str, Any]], list[dict[str, Any]], list[dict[str, str]], list[str]
+    ]:
         kept_papers = []
         removed_low_recommendation = []
         removed_recommendation_failed = []
@@ -229,9 +225,7 @@ class RecommendationNode:
                         "reason": f"推荐评分失败：{result}",
                     }
                 )
-                warnings.append(
-                    f"{title} 的推荐评分失败，已从当前任务结果移除。"
-                )
+                warnings.append(f"{title} 的推荐评分失败，已从当前任务结果移除。")
                 continue
 
             recommendation = result
@@ -239,12 +233,8 @@ class RecommendationNode:
             relation_draft = {
                 "search_task_id": task_id,
                 "paper_id": paper.get("paper_id"),
-                "recommendation_stars": (
-                    recommendation.recommendation_stars
-                ),
-                "recommendation_reason": (
-                    recommendation.recommendation_reason
-                ),
+                "recommendation_stars": (recommendation.recommendation_stars),
+                "recommendation_reason": (recommendation.recommendation_reason),
             }
 
             if recommendation.recommendation_stars < 3:
@@ -258,28 +248,34 @@ class RecommendationNode:
 
             paper["task_paper_relation_draft"] = relation_draft
             kept_papers.append(paper)
-        return kept_papers, removed_low_recommendation, removed_recommendation_failed, warnings
+        return (
+            kept_papers,
+            removed_low_recommendation,
+            removed_recommendation_failed,
+            warnings,
+        )
 
     async def _load_papers(
-        self, abstract_artifact_uri: str | None, existing_artifact_uri: str | None,
+        self,
+        abstract_artifact_uri: str | None,
+        existing_artifact_uri: str | None,
     ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
         artifact_inputs = [
             ("abstract", abstract_artifact_uri),
             ("existing", existing_artifact_uri),
         ]
         valid_artifact_inputs = [
-            (name, uri)
-            for name, uri in artifact_inputs
-            if uri is not None
+            (name, uri) for name, uri in artifact_inputs if uri is not None
         ]
 
         if not valid_artifact_inputs:
-            raise ValueError(
-                "缺少 abstract 或 existing papers manifest artifact。"
-            )
+            raise ValueError("缺少 abstract 或 existing papers manifest artifact。")
 
         manifests = await asyncio.gather(
-            *(self.artifact_store.read_json_uri(uri) for _, uri in valid_artifact_inputs)
+            *(
+                self.artifact_store.read_json_uri(uri)
+                for _, uri in valid_artifact_inputs
+            )
         )
         manifests_by_name = dict(
             zip(
@@ -290,15 +286,9 @@ class RecommendationNode:
         )
         abstract_manifest = manifests_by_name.get("abstract")
         existing_manifest = manifests_by_name.get("existing")
-        new_papers = (
-            abstract_manifest.get("papers", [])
-            if abstract_manifest
-            else []
-        )
+        new_papers = abstract_manifest.get("papers", []) if abstract_manifest else []
         existing_papers = (
-            existing_manifest.get("papers", [])
-            if existing_manifest
-            else []
+            existing_manifest.get("papers", []) if existing_manifest else []
         )
         manifest = dict(abstract_manifest or existing_manifest or {})
         return manifest, new_papers, existing_papers
@@ -309,38 +299,34 @@ class RecommendationNode:
     ) -> dict[str, Any]:
         try:
             child_run_id = state["child_run_id"]
-            abstract_artifact_uri = state.get(
-                "abstract_manifest_artifact_ref"
-            )
-            existing_artifact_uri = state.get(
-                "existing_papers_manifest_artifact_ref"
-            )
+            abstract_artifact_uri = state.get("abstract_manifest_artifact_ref")
+            existing_artifact_uri = state.get("existing_papers_manifest_artifact_ref")
 
-            query_understanding = PromptUnderstandingArgs.model_validate(state.get("query_understanding"))
+            query_understanding = PromptUnderstandingArgs.model_validate(
+                state.get("query_understanding")
+            )
             manifest, new_papers, existing_papers = await self._load_papers(
-                abstract_artifact_uri, existing_artifact_uri,
+                abstract_artifact_uri,
+                existing_artifact_uri,
             )
 
             recommend_input, skipped_invalid_existing = self._prepare_papers(
                 new_papers, existing_papers
             )
 
-            kept_papers, removed_low_recommendation, removed_recommendation_failed, warnings = (
-                await self._score_papers(
-                    recommend_input, query_understanding, state.get("paper_service_task_id")
-                )
+            (
+                kept_papers,
+                removed_low_recommendation,
+                removed_recommendation_failed,
+                warnings,
+            ) = await self._score_papers(
+                recommend_input, query_understanding, state.get("paper_service_task_id")
             )
 
             manifest["papers"] = kept_papers
-            manifest["removed_low_recommendation"] = (
-                removed_low_recommendation
-            )
-            manifest["removed_recommendation_failed"] = (
-                removed_recommendation_failed
-            )
-            manifest["skipped_invalid_existing"] = (
-                skipped_invalid_existing
-            )
+            manifest["removed_low_recommendation"] = removed_low_recommendation
+            manifest["removed_recommendation_failed"] = removed_recommendation_failed
+            manifest["skipped_invalid_existing"] = skipped_invalid_existing
             manifest["step_key"] = "recommend_papers"
 
             artifact = await self.artifact_store.write_json(
@@ -358,7 +344,9 @@ class RecommendationNode:
             }
 
         if skipped_invalid_existing:
-            warnings.append(f"已跳过 {len(skipped_invalid_existing)} 条无效的已有论文记录。")
+            warnings.append(
+                f"已跳过 {len(skipped_invalid_existing)} 条无效的已有论文记录。"
+            )
         if not kept_papers:
             warnings.append(
                 "所有候选论文的推荐评分均失败。"

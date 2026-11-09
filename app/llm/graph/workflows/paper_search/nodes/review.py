@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.config import settings
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.provider import ValidatedJsonInvoker
+from app.utils.search_adapters.contracts import SEARCH_PAGE_SIZE
 
 
 class ProviderSupplementAction(BaseModel):
@@ -65,7 +66,7 @@ class ReviewNode:
                     pages = min(action.requested_pages, settings.PAPER_SEARCH_MAX_EXTRA_PAGES_PER_SOURCE)
                     tasks[provider] = {
                         **template, "round": round_number + 1, "cursor": eligible[provider],
-                        "limit": template["page_size"] * pages, "max_pages": pages,
+                        "limit": SEARCH_PAGE_SIZE * pages, "max_pages": pages,
                     }
         else:
             decision = SearchReviewDecision(action="finish", reasoning="达到目标、轮数上限或没有可续查来源。")

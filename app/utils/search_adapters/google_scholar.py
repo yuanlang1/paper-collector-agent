@@ -24,7 +24,6 @@ class GoogleScholarAdapter:
         self,
         *,
         query_args: Mapping[str, Any],
-        settings: Mapping[str, Any],
         credentials: Mapping[str, str],
         cursor: Mapping[str, Any] | None,
         limit: int,
@@ -36,13 +35,11 @@ class GoogleScholarAdapter:
             raise ValueError("Google Scholar requires an explicit api_key")
         arguments = source_arguments(
             query_args,
-            settings,
             cursor,
             limit,
             max_pages,
             page_field="num",
             offset_field="start",
-            page_max=20,
         )
         arguments = GoogleScholarSearchArgs.model_validate(arguments).model_dump()
         try:

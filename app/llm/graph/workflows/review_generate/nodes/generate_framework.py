@@ -4,7 +4,6 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.database import SessionLocal
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import UNTRUSTED_INPUT_GUARD, save
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
@@ -127,8 +126,7 @@ class GenerateFrameworkNode:
                 for paper in corpus["papers"]
             ]
             if self.model is None:
-                async with SessionLocal() as db:
-                    config = await llm_setting_service.get_small_llm_config(db, user_id=self.user_id)
+                config = await llm_setting_service.get_small_llm_config(user_id=self.user_id)
                 self.model = ChatClient(runtime_config=config).structured(
                     ReviewFramework, options=ModelOptions(temperature=0),
                 )

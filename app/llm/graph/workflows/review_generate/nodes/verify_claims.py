@@ -1,4 +1,3 @@
-import asyncio
 import json
 from typing import Literal
 
@@ -7,7 +6,6 @@ from langgraph.errors import GraphBubbleUp
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.config import settings
-from app.database import SessionLocal
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import (
     UNTRUSTED_INPUT_GUARD,
@@ -231,7 +229,6 @@ class VerifyClaimsNode:
     ):
         self.artifact_store = artifact_store or LocalArtifactStore()
         self.user_id = user_id
-        self._model_lock = asyncio.Lock()
         self.model = model
 
     @staticmethod
@@ -383,13 +380,11 @@ class VerifyClaimsNode:
 
     async def _ensure_model(self):
         if self.model is None:
-            async with self._model_lock:
-                if self.model is None:
-                    async with SessionLocal() as db:
-                        config = await llm_setting_service.get_small_llm_config(db, user_id=self.user_id)
-                    self.model = ChatClient(runtime_config=config).structured(
-                        Verdict, max_attempts=1, options=ModelOptions(temperature=0),
-                    )
+            config = await llm_setting_service.get_small_llm_config(user_id=self.user_id)
+            if self.model is None:
+                self.model = ChatClient(runtime_config=config).structured(
+                    Verdict, max_attempts=1, options=ModelOptions(temperature=0),
+                )
 
     async def prepare(self, state):
         claims = (await self.artifact_store.read_json_uri(state["claims_artifact_ref"]))["claims"]

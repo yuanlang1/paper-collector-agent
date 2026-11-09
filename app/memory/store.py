@@ -7,7 +7,7 @@ from langgraph.store.postgres.base import PostgresIndexConfig
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.rag.embeddings.siliconflow import SiliconFlowEmbeddings
+from app.rag.embeddings.qwen import create_qwen_embeddings
 
 DENSE_EMBEDDING_DIMS = 1024
 
@@ -19,19 +19,12 @@ class MemorySettings(BaseSettings):
     )
 
     DATABASE_POSTGRES_URL: SecretStr
-    SILICONFLOW_API_KEY: SecretStr
-    SILICONFLOW_EMBEDDING_BASE_URL: str = "https://api.siliconflow.cn/v1"
-    DENSE_EMBEDDING_MODEL_NAME: str = "BAAI/bge-m3"
 
 
-def memory_index(settings: MemorySettings) -> PostgresIndexConfig:
+def memory_index() -> PostgresIndexConfig:
     return {
         "dims": DENSE_EMBEDDING_DIMS,
-        "embed": SiliconFlowEmbeddings(
-            api_key=settings.SILICONFLOW_API_KEY.get_secret_value(),
-            model=settings.DENSE_EMBEDDING_MODEL_NAME,
-            base_url=settings.SILICONFLOW_EMBEDDING_BASE_URL,
-        ),
+        "embed": create_qwen_embeddings(),
         "fields": ["content"],
         "distance_type": "cosine",
         "ann_index_config": {
@@ -51,7 +44,7 @@ async def open_memory_store(
 
     async with AsyncPostgresStore.from_conn_string(
         settings.DATABASE_POSTGRES_URL.get_secret_value(),
-        index=memory_index(settings),
+        index=memory_index(),
         ttl={"omit_expired": True},
         pool_config={
             "min_size": 1,

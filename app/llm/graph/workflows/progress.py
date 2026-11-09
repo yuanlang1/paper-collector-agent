@@ -11,7 +11,6 @@ from langgraph.runtime import Runtime
 
 from app.bus.events import SubagentProgressEvent
 
-
 Node = Callable[..., Awaitable[dict[str, Any]]]
 ProgressDataBuilder = Callable[
     [Mapping[str, Any], Mapping[str, Any] | None],
@@ -43,12 +42,18 @@ def instrument_subagent_progress_node(
         context = runtime.context
 
         def emit(description: str) -> None:
-            runtime.stream_writer(SubagentProgressEvent(
-                **context["event_fields"], ts=datetime.now(UTC).isoformat(), description=description,
-            ))
+            runtime.stream_writer(
+                SubagentProgressEvent(
+                    **context["event_fields"],
+                    ts=datetime.now(UTC).isoformat(),
+                    description=description,
+                )
+            )
 
         iteration = iteration_resolver(state) if iteration_resolver else None
-        label = (label_resolver(state) if label_resolver else phase_label) + (f"（第 {iteration} 轮）" if iteration else "")
+        label = (label_resolver(state) if label_resolver else phase_label) + (
+            f"（第 {iteration} 轮）" if iteration else ""
+        )
         if emit_start:
             emit(f"开始：{label}。")
         kwargs = {}
@@ -72,7 +77,9 @@ def instrument_subagent_progress_node(
         if data_builder:
             counts = data_builder(state, result).get("counts")
             if counts:
-                description += " " + "，".join(f"{key}={value}" for key, value in counts.items())
+                description += " " + "，".join(
+                    f"{key}={value}" for key, value in counts.items()
+                )
         emit(description)
         return result
 

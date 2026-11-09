@@ -12,7 +12,11 @@ from app.llm.tools.search_tools.dblp.search_dblp import DblpSearchArgs
 from app.llm.tools.search_tools.google_scholar.search_google_scholar import (
     GoogleScholarSearchArgs,
 )
-from app.utils.search_adapters.contracts import SearchSettings, source_arguments
+from app.utils.search_adapters.contracts import (
+    DEFAULT_INITIAL_LIMITS,
+    SearchSettings,
+    source_arguments,
+)
 from app.utils.search_adapters.registry import get_adapter, supported_provider_ids
 
 
@@ -21,23 +25,21 @@ class SearchConnectionError(ValueError):
 
 
 _QUERY_SCHEMAS = {
-    "arxiv": (ArxivSearchArgs, "max_results", "start", 2000),
-    "dblp": (DblpSearchArgs, "h", "f", 1000),
-    "google_scholar": (GoogleScholarSearchArgs, "num", "start", 20),
+    "arxiv": (ArxivSearchArgs, "max_results", "start"),
+    "dblp": (DblpSearchArgs, "h", "f"),
+    "google_scholar": (GoogleScholarSearchArgs, "num", "start"),
 }
 
 
-def validate_query(provider_id: str, query_args: dict, settings: dict) -> None:
-    schema, page_field, offset_field, page_max = _QUERY_SCHEMAS[provider_id]
+def validate_query(provider_id: str, query_args: dict) -> None:
+    schema, page_field, offset_field = _QUERY_SCHEMAS[provider_id]
     arguments = source_arguments(
         query_args,
-        settings,
         None,
         1,
         1,
         page_field=page_field,
         offset_field=offset_field,
-        page_max=page_max,
     )
     schema.model_validate(arguments)
 
@@ -97,9 +99,10 @@ class SearchConnectionExecutor:
         if config.provider_id == "google_scholar" and not config.api_key:
             raise SearchConnectionError("google_scholar: api_key is required")
         try:
-            options = SearchSettings.model_validate(config.settings)
-            if options.page_size > _QUERY_SCHEMAS[config.provider_id][3]:
-                raise ValueError("page_size exceeds provider limit")
+            return SearchSettings.model_validate({
+                "initial_limit": DEFAULT_INITIAL_LIMITS[config.provider_id],
+                **config.settings,
+            })
         except ValueError:
             raise SearchConnectionError(
                 f"{config.provider_id}: invalid connection settings"
@@ -120,7 +123,7 @@ class SearchConnectionExecutor:
                     raise SearchConnectionError(
                         f"{provider}: connection is not configured"
                     )
-                self._check(config)
+                options = self._check(config)
             except SearchConnectionError as exc:
                 if provider_ids is not None:
                     raise
@@ -128,7 +131,7 @@ class SearchConnectionExecutor:
                     warnings.append(str(exc))
                 continue
             available[provider] = {
-                "settings": config.settings,
+                "initial_limit": options.initial_limit,
                 "configuration_version": config.version,
             }
         if not available:
@@ -148,7 +151,6 @@ class SearchConnectionExecutor:
             )
         return await adapter.search(
             query_args=task["query_args"],
-            settings=config.settings,
             credentials={"api_key": config.api_key}
             if provider == "google_scholar"
             else {},

@@ -7,7 +7,6 @@ from langchain_core.language_models import BaseChatModel
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import MessageLikeRepresentation
 from langgraph.graph.state import RunnableConfig
-from langgraph.prebuilt import tools_condition
 from langgraph.stream.run_stream import AsyncIterator
 from langgraph.types import Command
 
@@ -43,20 +42,11 @@ class AgentLoop:
 
         builder.add_node("tool", build_tool_node(self.tools))
 
-        compact = CompactNode(
-            model=self.model, tools=self.tools, system_prompt=system_prompt
-        )
-        builder.add_node("compact", compact)
+        builder.add_node("compact", CompactNode())
 
         builder.add_edge(START, "solve")
-        builder.add_conditional_edges(
-            "solve", tools_condition, {"tools": "tool", END: END}
-        )
-
-        builder.add_conditional_edges(
-            "tool", compact.route, {"compact": "compact", "solve": "solve"}
-        )
-        builder.add_edge("compact", "solve")
+        builder.add_edge("tool", "solve")
+        builder.add_edge("compact", END)
 
         self.graph = builder.compile(checkpointer=checkpointer, store=store, name=name)
 

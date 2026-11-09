@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import json
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import date
 from typing import Any
 
+from app.infrastructure.paper_service.paper_client import paper_service_client
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.paper_search_schemas import (
     PromptUnderstandingArgs,
     SearchTagArgs,
-)
-from app.llm.graph.workflows.paper_search.paper_cache import (
-    PaperCacheStore,
 )
 
 
@@ -81,9 +78,7 @@ def _parse_publish_date(value: Any) -> str | None:
 
 
 def _published_at(paper_info: Mapping[str, Any]) -> date:
-    published_date = _parse_publish_date(
-        paper_info.get("publish_date")
-    )
+    published_date = _parse_publish_date(paper_info.get("publish_date"))
     return date.fromisoformat(published_date) if published_date else date.min
 
 
@@ -94,14 +89,22 @@ def _parse_year(value: Any) -> int | None:
 
 def _as_authors(value: Any) -> str | None:
     if isinstance(value, list):
-        authors = [
-            str(author).strip()
-            for author in value
-            if str(author).strip()
-        ]
+        authors = [str(author).strip() for author in value if str(author).strip()]
         return ", ".join(authors) or None
 
     return _text(value)
+
+
+def _author_names(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [name for author in value if (name := _text(author))]
+    return [
+        name.strip()
+        for name in re.split(
+            r"[,，;；]|\band\b", _text(value) or "", flags=re.IGNORECASE
+        )
+        if name.strip()
+    ]
 
 
 def _as_int(value: Any) -> int:
@@ -121,11 +124,7 @@ def _normalize_author(value: str) -> str:
 def _first_author(value: Any) -> str | None:
     if isinstance(value, list):
         return next(
-            (
-                _text(author)
-                for author in value
-                if _text(author)
-            ),
+            (_text(author) for author in value if _text(author)),
             None,
         )
 
@@ -133,12 +132,15 @@ def _first_author(value: Any) -> str | None:
     if not author_text:
         return None
 
-    return re.split(
-        r"\s*(?:;|\band\b)\s*",
-        author_text,
-        maxsplit=1,
-        flags=re.IGNORECASE,
-    )[0] or None
+    return (
+        re.split(
+            r"\s*(?:;|\band\b)\s*",
+            author_text,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
+        or None
+    )
 
 
 def _identity_keys(paper: dict[str, Any]) -> tuple[str | None, str | None]:
@@ -149,8 +151,7 @@ def _identity_keys(paper: dict[str, Any]) -> tuple[str | None, str | None]:
     title_author_key = None
     if title and first_author:
         title_author_key = (
-            f"title_author:{_normalize_title(title)}"
-            f"|{_normalize_author(first_author)}"
+            f"title_author:{_normalize_title(title)}|{_normalize_author(first_author)}"
         )
 
     doi_key = f"doi:{doi}" if doi else None
@@ -190,21 +191,14 @@ def _to_paper_info_draft(
         raise ValueError("论文缺少 title。")
 
     if len(title) > 200:
-        raise ValueError(
-            "论文 title 超过 paper_info.title 最大长度 200。"
-        )
+        raise ValueError("论文 title 超过 paper_info.title 最大长度 200。")
 
     authors = _as_authors(paper.get("authors"))
 
     if authors and len(authors) > 1000:
-        raise ValueError(
-            "论文 authors 超过 paper_info.authors 最大长度 1000。"
-        )
+        raise ValueError("论文 authors 超过 paper_info.authors 最大长度 1000。")
 
-    abstract_url = (
-        _text(paper.get("abstract_url"))
-        or _text(paper.get("landing_url"))
-    )
+    abstract_url = _text(paper.get("abstract_url")) or _text(paper.get("landing_url"))
 
     if abstract_url and len(abstract_url) > 200:
         abstract_url = None
@@ -212,9 +206,7 @@ def _to_paper_info_draft(
     pdf_url = _text(paper.get("pdf_url"))
 
     if pdf_url and len(pdf_url) > 500:
-        raise ValueError(
-            "论文 pdf_url 超过 paper_info.pdf_url 最大长度 500。"
-        )
+        raise ValueError("论文 pdf_url 超过 paper_info.pdf_url 最大长度 500。")
 
     published_date = _parse_publish_date(paper.get("published"))
     year = _parse_year(paper.get("year")) or _parse_year(paper.get("published"))
@@ -252,11 +244,12 @@ def _merge_envelope(
     if incoming_abstract and (
         not current_abstract
         or (current_is_snippet and not incoming_is_snippet)
-        or (current_is_snippet == incoming_is_snippet and len(incoming_abstract) > len(current_abstract))
+        or (
+            current_is_snippet == incoming_is_snippet
+            and len(incoming_abstract) > len(current_abstract)
+        )
     ):
-        current_info["paper_abstract"] = incoming_info[
-            "paper_abstract"
-        ]
+        current_info["paper_abstract"] = incoming_info["paper_abstract"]
         current_info["abstract_source"] = incoming_info.get("abstract_source")
 
     if not current_info.get("doi") and incoming_info["doi"]:
@@ -265,23 +258,20 @@ def _merge_envelope(
     if not current_info.get("authors") and incoming_info["authors"]:
         current_info["authors"] = incoming_info["authors"]
 
-    if (
-        incoming_info["publish_date"]
-        and (
-            not current_info.get("publish_date")
-            or (current_info.get("publish_date_precision") == "year"
-                and incoming_info.get("publish_date_precision") == "day")
+    if incoming_info["publish_date"] and (
+        not current_info.get("publish_date")
+        or (
+            current_info.get("publish_date_precision") == "year"
+            and incoming_info.get("publish_date_precision") == "day"
         )
     ):
-        current_info["publish_date"] = incoming_info[
-            "publish_date"
-        ]
-        current_info["publish_date_precision"] = incoming_info.get("publish_date_precision")
+        current_info["publish_date"] = incoming_info["publish_date"]
+        current_info["publish_date_precision"] = incoming_info.get(
+            "publish_date_precision"
+        )
 
     if not current_info.get("abstract_url") and incoming_info["abstract_url"]:
-        current_info["abstract_url"] = incoming_info[
-            "abstract_url"
-        ]
+        current_info["abstract_url"] = incoming_info["abstract_url"]
 
     if not current_info.get("pdf_url") and incoming_info["pdf_url"]:
         current_info["pdf_url"] = incoming_info["pdf_url"]
@@ -329,33 +319,19 @@ def _merge_envelope(
 
     return current
 
-async def _skip_paper_lookup(
-    candidates: list[dict[str, str | None]],
-) -> dict[str, Any]:
-    del candidates
-
-    return {
-        "ok": False,
-        "result": {"matches": []},
-        "error": "批量论文查询尚未实现，按未命中继续处理",
-    }
-
 
 class NormalizeDeduplicateFilterNode:
     def __init__(
         self,
         artifact_store: LocalArtifactStore | None = None,
         paper_lookup: Callable[
-            [list[dict[str, str | None]]],
+            [list[dict[str, Any]]],
             Awaitable[dict[str, Any]],
-        ] | None = None,
-        paper_cache_store: PaperCacheStore | None = None,
+        ]
+        | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self.paper_lookup = paper_lookup or _skip_paper_lookup
-        self.paper_cache_store = paper_cache_store or PaperCacheStore(
-            self.artifact_store.base_dir.parent / "paper_cache.json"
-        )
+        self.paper_lookup = paper_lookup or paper_service_client.batch_lookup_papers
 
     @staticmethod
     def _normalize_payloads(
@@ -390,16 +366,15 @@ class NormalizeDeduplicateFilterNode:
                     )
 
                     doi_key, title_author_key = _identity_keys(paper)
-                    if not doi_key and not title_author_key:
+                    author_names = _author_names(paper.get("authors"))
+                    if not doi_key and (not title_author_key or not author_names):
                         raise ValueError(
                             "论文缺少 DOI，或缺少标题与第一作者，无法安全去重。"
                         )
                 except ValueError as exc:
                     rejected.append(
                         {
-                            "title": str(
-                                paper.get("title") or ""
-                            ),
+                            "title": str(paper.get("title") or ""),
                             "reason": str(exc),
                         }
                     )
@@ -407,6 +382,7 @@ class NormalizeDeduplicateFilterNode:
 
                 envelope = {
                     "dedup_key": doi_key or title_author_key,
+                    "author_names": author_names,
                     "paper_info": paper_info,
                     "source_refs": [
                         {
@@ -415,8 +391,7 @@ class NormalizeDeduplicateFilterNode:
                             "doi": paper.get("doi"),
                             "arxiv_id": paper.get("arxiv_id"),
                             "landing_url": (
-                                paper.get("landing_url")
-                                or paper.get("abstract_url")
+                                paper.get("landing_url") or paper.get("abstract_url")
                             ),
                         }
                     ],
@@ -440,11 +415,7 @@ class NormalizeDeduplicateFilterNode:
                     "pdf_upload_status": "pending",
                 }
 
-                doi_match = (
-                    papers_by_doi.get(doi_key)
-                    if doi_key
-                    else None
-                )
+                doi_match = papers_by_doi.get(doi_key) if doi_key else None
                 title_author_match = (
                     papers_by_title_author.get(title_author_key)
                     if title_author_key
@@ -464,18 +435,14 @@ class NormalizeDeduplicateFilterNode:
                     and matched_doi
                     and incoming_doi != matched_doi
                 ):
-                    keep_incoming_doi = _published_at(
-                        paper_info
-                    ) > _published_at(
+                    keep_incoming_doi = _published_at(paper_info) > _published_at(
                         title_author_match["paper_info"]
                     )
                     if keep_incoming_doi:
                         old_doi_key = f"doi:{matched_doi}"
                         if papers_by_doi.get(old_doi_key) is title_author_match:
                             papers_by_doi.pop(old_doi_key)
-                        title_author_match["paper_info"]["doi"] = (
-                            incoming_doi
-                        )
+                        title_author_match["paper_info"]["doi"] = incoming_doi
 
                     identity_conflicts.append(
                         {
@@ -484,9 +451,7 @@ class NormalizeDeduplicateFilterNode:
                             "existing_doi": matched_doi,
                             "incoming_doi": incoming_doi,
                             "selected_doi": (
-                                incoming_doi
-                                if keep_incoming_doi
-                                else matched_doi
+                                incoming_doi if keep_incoming_doi else matched_doi
                             ),
                         }
                     )
@@ -495,135 +460,96 @@ class NormalizeDeduplicateFilterNode:
 
                 if target:
                     target = _merge_envelope(target, envelope)
+                    if not target["author_names"]:
+                        target["author_names"] = envelope["author_names"]
                 else:
                     target = envelope
                     normalized_papers.append(target)
 
-                resolved_doi = _normalize_doi(
-                    target["paper_info"].get("doi")
-                )
+                resolved_doi = _normalize_doi(target["paper_info"].get("doi"))
                 if resolved_doi:
                     resolved_doi_key = f"doi:{resolved_doi}"
                     target["dedup_key"] = resolved_doi_key
                     papers_by_doi[resolved_doi_key] = target
 
                 if title_author_key:
-                    existing = papers_by_title_author.get(
-                        title_author_key
-                    )
+                    existing = papers_by_title_author.get(title_author_key)
                     if existing is None or existing is target:
                         papers_by_title_author[title_author_key] = target
         return normalized_papers, identity_conflicts, rejected, filtered_count
 
-    async def _resolve_cached_papers(
-        self, normalized_papers: list[dict[str, Any]],
-    ) -> tuple[dict[str, dict[str, Any]], int, list[dict[str, Any]]]:
-        cached_existing_by_key: dict[str, dict[str, Any]] = {}
-        cache_miss_count = 0
-        lookup_papers: list[dict[str, Any]] = []
-
-        for paper in normalized_papers:
-            cached_paper = await self.paper_cache_store.get_by_paper_info(
-                paper["paper_info"]
-            )
-            if cached_paper is None:
-                cache_miss_count += 1
-                lookup_papers.append(paper)
-                continue
-
-            cached_info = cached_paper.get("paper_info")
-            cached_id = cached_paper.get("paper_id")
-            if not isinstance(cached_info, dict):
-                lookup_papers.append(paper)
-                continue
-
-            merged_paper = copy.deepcopy(cached_paper)
-            merged_paper["paper_info"] = copy.deepcopy(cached_info)
-            _merge_envelope(merged_paper, paper)
-            merged_paper["dedup_key"] = paper["dedup_key"]
-            if not merged_paper.get("venue_resolution"):
-                merged_paper["venue_resolution"] = paper.get(
-                    "venue_resolution"
-                )
-
-            if isinstance(cached_id, int) and not isinstance(cached_id, bool) and cached_id > 0:
-                cached_existing_by_key[paper["dedup_key"]] = merged_paper
-            else:
-                lookup_papers.append(merged_paper)
-        return cached_existing_by_key, cache_miss_count, lookup_papers
-
     async def _lookup_existing_papers(
-        self, lookup_papers: list[dict[str, Any]],
-        cached_existing_by_key: dict[str, dict[str, Any]],
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str | None, int]:
-        lookup_candidates = [
-            {
-                "client_key": paper["dedup_key"],
-                "title": paper["paper_info"]["title"],
-                "authors": paper["paper_info"].get("authors"),
-                "doi": paper["paper_info"].get("doi"),
-            }
-            for paper in lookup_papers
-        ]
-        existing_papers: list[dict[str, Any]] = list(
-            cached_existing_by_key.values()
-        )
-        new_papers = lookup_papers
-        lookup_warning: str | None = None
-
-        if lookup_candidates:
-            lookup_result = await self.paper_lookup(lookup_candidates)
-
-            if lookup_result.get("ok") is True:
-                result = lookup_result.get("result") or {}
-                matches = result.get("matches", [])
-                matches_by_key: dict[str, dict[str, Any]] = {}
-
-                if not isinstance(matches, list):
-                    raise ValueError("批量论文查询返回的 matches 格式无效")
-
-                for match in matches:
-                    if not isinstance(match, dict):
-                        continue
-
-                    client_key = match.get("client_key")
-                    paper_id = match.get("paper_id")
-                    paper_info = match.get("paper_info")
-
-                    if (
-                        isinstance(client_key, str)
-                        and isinstance(paper_id, int)
-                        and paper_id > 0
-                        and isinstance(paper_info, dict)
-                    ):
-                        matches_by_key[client_key] = match
-
-                new_papers = []
-                for paper in lookup_papers:
-                    match = matches_by_key.get(paper["dedup_key"])
-
-                    if match is None:
-                        new_papers.append(paper)
-                        continue
-
-                    existing_paper = copy.deepcopy(paper)
-                    existing_paper.update(
-                        {
-                            "paper_id": match["paper_id"],
-                            "paper_info": match["paper_info"],
-                            "venue_resolution": match.get("venue"),
-                            "database_match": {
-                                "client_key": paper["dedup_key"],
-                            },
-                        }
-                    )
-                    existing_papers.append(existing_paper)
+        self,
+        papers: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+        queries = []
+        for paper in papers:
+            info = paper["paper_info"]
+            if info["doi"]:
+                queries.append({"doi": info["doi"]})
             else:
-                lookup_warning = str(
-                    lookup_result.get("error")
-                    or "批量论文查询失败，已按未命中继续处理。"
+                queries.append(
+                    {"title": info["title"], "authors": paper["author_names"]}
                 )
-        return new_papers, existing_papers, lookup_warning, len(lookup_candidates)
+
+        if not queries:
+            return [], [], []
+
+        lookup = await self.paper_lookup(queries)
+        if lookup["ok"] is not True:
+            raise ValueError(lookup["error"] or "批量论文查询失败。")
+
+        new_papers = []
+        existing_by_id: dict[int, dict[str, Any]] = {}
+        warnings = []
+        for candidate, result in zip(papers, lookup["result"]["results"], strict=True):
+            info = candidate["paper_info"]
+            if result["status"] == "NOT_FOUND":
+                new_papers.append(candidate)
+                continue
+            if result["status"] == "AMBIGUOUS":
+                warnings.append(f"{info['title']} 匹配到多篇已有论文，已跳过。")
+                continue
+
+            matched = result["paper"]
+            paper_id = matched["paper_id"]
+            existing = existing_by_id.get(paper_id)
+            if existing is not None:
+                refs = existing["source_refs"]
+                refs.extend(ref for ref in candidate["source_refs"] if ref not in refs)
+                continue
+
+            venue = matched.get("venue_info")
+            authors = [author for author in matched["authors"] if author]
+            abstract = matched.get("abstract")
+            candidate.update(
+                paper_id=paper_id,
+                paper_info={
+                    **info,
+                    "title": matched["title"],
+                    "authors": _as_authors(authors) or info["authors"],
+                    "doi": matched.get("doi") or info["doi"],
+                    "paper_abstract": abstract or info["paper_abstract"],
+                    "abstract_source": "database"
+                    if abstract
+                    else info.get("abstract_source"),
+                    "ai_abstract": matched.get("ai_abstract"),
+                    "oss_name": matched.get("oss_name"),
+                    "pdf_url": matched.get("pdf_url") or info["pdf_url"],
+                    "venue_id": venue["id"] if venue else None,
+                },
+                venue_resolution={
+                    "status": "resolved",
+                    "source": "database",
+                    "venue_id": venue["id"],
+                    "venue_draft": venue,
+                }
+                if venue
+                else None,
+            )
+            existing_by_id[paper_id] = candidate
+
+        return new_papers, list(existing_by_id.values()), warnings
 
     async def __call__(
         self,
@@ -635,9 +561,7 @@ class NormalizeDeduplicateFilterNode:
             understanding = PromptUnderstandingArgs.model_validate(
                 state.get("query_understanding")
             )
-            search_tag = SearchTagArgs.model_validate(
-                state.get("search_tag")
-            )
+            search_tag = SearchTagArgs.model_validate(state.get("search_tag"))
             artifact_uris = state.get(
                 "raw_result_artifact_refs",
                 [],
@@ -654,13 +578,11 @@ class NormalizeDeduplicateFilterNode:
                 self._normalize_payloads(payloads, understanding)
             )
 
-            cached_existing_by_key, cache_miss_count, lookup_papers = (
-                await self._resolve_cached_papers(normalized_papers)
-            )
-
-            new_papers, existing_papers, lookup_warning, _ = (
-                await self._lookup_existing_papers(lookup_papers, cached_existing_by_key)
-            )
+            (
+                new_papers,
+                existing_papers,
+                lookup_warnings,
+            ) = await self._lookup_existing_papers(normalized_papers)
 
             existing_artifact = await self.artifact_store.write_json(
                 run_id=child_run_id,
@@ -707,10 +629,7 @@ class NormalizeDeduplicateFilterNode:
                 "identity_conflicts": identity_conflicts,
                 "deferred_filters": {
                     "requires_code": understanding.requiresCode,
-                    "paper_tags": [
-                        item.value
-                        for item in search_tag.paperTag
-                    ],
+                    "paper_tags": [item.value for item in search_tag.paperTag],
                 },
             }
 
@@ -732,9 +651,7 @@ class NormalizeDeduplicateFilterNode:
             "stage": "reviewing_search",
             "status": "running",
             "normalized_manifest_artifact_ref": artifact.artifact_uri,
-            "existing_papers_manifest_artifact_ref": (
-                existing_artifact.artifact_uri
-            ),
+            "existing_papers_manifest_artifact_ref": (existing_artifact.artifact_uri),
             "search_quality_artifact_ref": quality_artifact.artifact_uri,
             "provider_stats": source_stats,
             "progress": {
@@ -742,8 +659,6 @@ class NormalizeDeduplicateFilterNode:
                 "deduplicated": len(normalized_papers),
                 "accepted": len(normalized_papers),
                 "existing_in_database": len(existing_papers),
-                "existing_in_paper_cache": len(cached_existing_by_key),
-                "paper_cache_misses": cache_miss_count,
                 "new_candidates": len(new_papers),
                 "filtered": filtered_count,
                 "rejected": len(rejected),
@@ -751,14 +666,11 @@ class NormalizeDeduplicateFilterNode:
             "warnings": [
                 *state.get("warnings", []),
                 *(
-                    [
-                        "requiresCode 需要代码链接补全节点验证，"
-                        "当前未作为过滤条件执行。"
-                    ]
+                    ["requiresCode 需要代码链接补全节点验证，当前未作为过滤条件执行。"]
                     if understanding.requiresCode
                     else []
                 ),
-                *([lookup_warning] if lookup_warning else []),
+                *lookup_warnings,
             ],
             "error": None,
         }

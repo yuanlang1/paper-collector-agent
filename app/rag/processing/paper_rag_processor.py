@@ -7,9 +7,11 @@ from langchain_core.documents import Document
 from pydantic import ValidationError
 
 from app.infrastructure.oss import (
-    oss_store as shared_oss_store,
     OssObjectStore,
     normalize_pdf_sha256,
+)
+from app.infrastructure.oss import (
+    oss_store as shared_oss_store,
 )
 from app.rag.data_preparation.data_preparation import DataPreparationModule
 from app.rag.file_parser.file_parser import FileParser

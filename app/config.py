@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from pydantic import AnyHttpUrl, Field, model_validator
+from pydantic import AnyHttpUrl, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -75,18 +75,6 @@ class Settings(BaseSettings):
     PAPER_SEARCH_MAX_SUPPLEMENTAL_ROUNDS: int = 2
     PAPER_SEARCH_MAX_EXTRA_PAGES_PER_SOURCE: int = 2
 
-    PAPER_SEARCH_ARXIV_MAX_PAGES: int = 20
-    PAPER_SEARCH_ARXIV_PAGE_SIZE: int = 50
-    PAPER_SEARCH_ARXIV_TOTAL_LIMIT: int = 10
-
-    PAPER_SEARCH_DBLP_MAX_PAGES: int = 20
-    PAPER_SEARCH_DBLP_PAGE_SIZE: int = 50
-    PAPER_SEARCH_DBLP_TOTAL_LIMIT: int = 10
-
-    PAPER_SEARCH_GOOGLE_SCHOLAR_MAX_PAGES: int = 100
-    PAPER_SEARCH_GOOGLE_SCHOLAR_PAGE_SIZE: int = 10
-    PAPER_SEARCH_GOOGLE_SCHOLAR_TOTAL_LIMIT: int = 20
-
     LANGSMITH_TRACING: bool
     LANGSMITH_API_KEY: str
     LANGSMITH_PROJECT: str
@@ -105,10 +93,13 @@ class Settings(BaseSettings):
     SUBAGENT_DISPATCH_TIMEOUT_SECONDS: int = 1800
     TASK_REVIEW_SUBAGENT_TIMEOUT_SECONDS: int = 3600
     TASK_REVIEW_MAX_REFLECTION_ROUNDS: int = Field(default=5, ge=1, le=5)
-    TASK_REVIEW_MAX_WRITING_REVISION_ROUNDS: int = Field(default=1, ge=0, le=5)
+    TASK_REVIEW_MAX_WRITING_REVISION_ROUNDS: int = Field(default=5, ge=0, le=5)
     SUBAGENT_DISPATCH_TIMEOUT_GRACE_SECONDS: int = 60
 
     # embedding settings
+    DASHSCOPE_API_KEY: SecretStr = Field(min_length=1)
+    QWEN_EMBEDDING_BASE_URL: str = "https://maas.qianwenaiapi.com/compatible-mode/v1"
+    QWEN_EMBEDDING_MODEL: str = "qwen3.7-text-embedding-flash"
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str | None = None
     PAPER_COLLECTION_NAME: str
@@ -116,14 +107,6 @@ class Settings(BaseSettings):
     MODEL_DIR: str = "models"
     SPARSE_EMBEDDING_MODEL_NAME: str = "Qdrant/bm25"
     EMBEDDING_DEVICE: str = "cpu"
-
-    EMBEDDING_PROVIDER: str = "siliconflow"
-    SILICONFLOW_API_KEY: str
-    SILICONFLOW_EMBEDDING_BASE_URL: str = "https://api.siliconflow.cn/v1"
-    SILICONFLOW_EMBEDDING_MODEL: str = "BAAI/bge-m3"
-    SILICONFLOW_EMBEDDING_TIMEOUT_SECONDS: float = 30.0
-    SILICONFLOW_EMBEDDING_BATCH_SIZE: int = 32
-    SILICONFLOW_EMBEDDING_MAX_RETRIES: int = 3
 
     LANGGRAPH_CHECKPOINT_PATH: str = "data/langgraph-checkpoints.db"
     CHAT_HISTORY_DB_PATH: str = "data/chat-history.db"
@@ -148,18 +131,9 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def validate_paper_search_pagination(self) -> "Settings":
+    def validate_agent_history(self) -> "Settings":
         if self.AGENT_HISTORY_TURNS < 1:
             raise ValueError("AGENT_HISTORY_TURNS must be at least 1")
-        for source in ("ARXIV", "DBLP", "GOOGLE_SCHOLAR"):
-            page_size = getattr(self, f"PAPER_SEARCH_{source}_PAGE_SIZE")
-            max_pages = getattr(self, f"PAPER_SEARCH_{source}_MAX_PAGES")
-            total_limit = getattr(self, f"PAPER_SEARCH_{source}_TOTAL_LIMIT")
-            if total_limit > page_size * max_pages:
-                raise ValueError(
-                    f"PAPER_SEARCH_{source}_TOTAL_LIMIT cannot exceed "
-                    f"PAGE_SIZE * MAX_PAGES"
-                )
         return self
 
     model_config = SettingsConfigDict(

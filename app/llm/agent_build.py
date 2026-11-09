@@ -29,9 +29,9 @@ async def get_model(
     think_effort: ReasoningEffort = None,
 ) -> BaseChatModel:
     llm_config = await llm_setting_service.get_llm_config(
-        db,
         model_id,
         user_id=user_id,
+        db=db,
     )
 
     return ChatOpenAI(

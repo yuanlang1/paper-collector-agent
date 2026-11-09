@@ -10,6 +10,7 @@ from app.schemas.search_connection import (
     SearchConnectionResponse,
     UpdateSearchConnection,
 )
+from app.utils.search_adapters.contracts import DEFAULT_INITIAL_LIMITS
 
 
 def _user_id(value: int | str) -> int:
@@ -26,11 +27,14 @@ async def create_connection(
     db: AsyncSession, *, user_id: int | str, data: CreateSearchConnection
 ) -> SearchConnectionResponse:
     data = CreateSearchConnection.model_validate(data)
+    values = data.model_dump()
+    if not values["settings"] and data.provider_id in DEFAULT_INITIAL_LIMITS:
+        values["settings"] = {"initial_limit": DEFAULT_INITIAL_LIMITS[data.provider_id]}
     try:
         async with db.begin():
             return _response(
                 await repository.create(
-                    db, user_id=_user_id(user_id), values=data.model_dump()
+                    db, user_id=_user_id(user_id), values=values
                 )
             )
     except IntegrityError as exc:
@@ -97,13 +101,21 @@ async def update_connection(
     data: UpdateSearchConnection,
 ) -> SearchConnectionResponse:
     data = UpdateSearchConnection.model_validate(data)
+    values = data.model_dump(exclude_unset=True)
+    user_id = _user_id(user_id)
     async with db.begin():
+        if values.get("settings") == {}:
+            current = await repository.get_by_id(db, user_id=user_id, connection_id=connection_id)
+            if current is None:
+                raise NotFoundException("检索连接不存在")
+            if current.provider_id in DEFAULT_INITIAL_LIMITS:
+                values["settings"] = {"initial_limit": DEFAULT_INITIAL_LIMITS[current.provider_id]}
         return _response(
             await repository.update_connection(
                 db,
-                user_id=_user_id(user_id),
+                user_id=user_id,
                 connection_id=connection_id,
-                values=data.model_dump(exclude_unset=True),
+                values=values,
             )
         )
 
