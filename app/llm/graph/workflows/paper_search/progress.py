@@ -15,14 +15,11 @@ _PHASES = {
     "collect_search": ("search", "汇总检索结果"),
     "filter": ("normalize", "清洗检索结果"),
     "review": ("review", "审核结果并规划补充检索"),
-    "enrich": ("enrich", "补充论文信息"),
-    "venue": ("enrich", "解析期刊或会议"),
-    "download_pdf": ("enrich", "下载 PDF"),
-    "abstract_enrich": ("enrich", "补充摘要"),
-    "recommend": ("recommend", "推荐论文"),
+    "probe_pdf": ("enrich", "探测 PDF 链接"),
+    "prepare_recommend": ("recommend", "准备论文推荐"),
+    "collect_recommend": ("recommend", "汇总论文推荐"),
     "create_task": ("persist", "创建检索任务"),
     "persist": ("persist", "保存论文"),
-    "finalize_pdfs": ("persist", "上传并清理临时 PDF"),
     "update_task_status": ("persist", "同步任务状态"),
     "finalize_result": ("persist", "汇总检索结果"),
 }
@@ -32,6 +29,8 @@ _PROGRESS_KEYS = (
     "deduplicated",
     "existing_in_database",
     "new_candidates",
+    "pdf_probe_passed",
+    "enrich_kept",
     "recommendation_kept",
     "persistence_saved",
 )
@@ -48,11 +47,7 @@ def _data(
         **dict((update or {}).get("progress") or {}),
     }
     data: dict[str, Any] = {
-        "counts": {
-            key: progress[key]
-            for key in _PROGRESS_KEYS
-            if key in progress
-        },
+        "counts": {key: progress[key] for key in _PROGRESS_KEYS if key in progress},
     }
     source_stats = (update or {}).get(
         "provider_stats",
@@ -73,7 +68,9 @@ def instrument_paper_search_node(*, node_name: str, node: Node) -> Node:
         phase=phase,
         phase_label=phase_label,
         label_resolver=lambda state: (
-            f"{phase_label}（{state['search_task']['provider_id']}）" if "search_task" in state else phase_label
+            f"{phase_label}（{state['search_task']['provider_id']}）"
+            if "search_task" in state
+            else phase_label
         ),
         data_builder=lambda state, update: _data(
             node_name=node_name,
@@ -81,6 +78,11 @@ def instrument_paper_search_node(*, node_name: str, node: Node) -> Node:
             update=update,
         ),
         iteration_resolver=lambda state: (
-            int(state.get("search_task", {}).get("round", state.get("supplemental_search_round", 0))) or None
+            int(
+                state.get("search_task", {}).get(
+                    "round", state.get("supplemental_search_round", 0)
+                )
+            )
+            or None
         ),
     )

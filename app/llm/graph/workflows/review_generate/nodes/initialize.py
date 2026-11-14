@@ -9,7 +9,9 @@ from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.subagents.task_review import TaskReviewParams
 
 
-async def initialize_review_node(state: Mapping[str, Any],) -> dict[str, Any]:
+async def initialize_review_node(
+    state: Mapping[str, Any],
+) -> dict[str, Any]:
     try:
         request = TaskReviewParams.model_validate(state)
     except ValidationError as exc:

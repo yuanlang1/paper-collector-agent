@@ -11,9 +11,12 @@ class PostAddModelRequest(BaseModel):
     is_default: bool = False
 
 
-class UpdateSourceLimitsRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class ModelSettingListItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
 
-    arxiv: int = Field(strict=True, ge=1)
-    dblp: int = Field(strict=True, ge=1)
-    google_scholar: int = Field(strict=True, ge=1)
+    id: int
+    provider: str
+    model_name: str = Field(validation_alias="model")
+    base_url: str
+    is_small_model: bool
+    is_default: bool

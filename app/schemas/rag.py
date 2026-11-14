@@ -8,10 +8,7 @@ class IndexBatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     user_id: str = Field(min_length=1)
-    paper_ids: list[Annotated[int, Field(strict=True, gt=0)]] = Field(
-        min_length=1,
-        max_length=20,
-    )
+    paper_ids: list[Annotated[int, Field(strict=True, gt=0)]] = Field(min_length=1)
 
     @field_validator("paper_ids")
     @classmethod
@@ -26,4 +23,4 @@ class PostPaperProfile(BaseModel):
 
     user_id: str = Field(min_length=1)
     paper_id: str = Field(min_length=1)
-    oss_name: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
+    oss_name: str = Field(min_length=1)

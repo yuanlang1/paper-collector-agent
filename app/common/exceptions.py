@@ -158,11 +158,18 @@ async def http_exception_handler(
     )
 
 
+def _public_validation_errors(errors: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {key: error[key] for key in ("loc", "type", "msg") if key in error}
+        for error in errors
+    ]
+
+
 async def request_validation_exception_handler(
     request: Request,
     exc: RequestValidationError,
 ) -> JSONResponse:
-    errors = exc.errors()
+    errors = _public_validation_errors(exc.errors())
     first_error = errors[0] if errors else {}
 
     loc = first_error.get("loc", [])
@@ -191,7 +198,7 @@ async def pydantic_validation_exception_handler(
         message="数据校验失败",
         status_code=status.HTTP_400_BAD_REQUEST,
         other={
-            "errors": exc.errors(),
+            "errors": _public_validation_errors(exc.errors()),
         },
     )
 

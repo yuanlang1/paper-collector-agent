@@ -8,16 +8,14 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from app.database import SessionLocal
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.citations import (
     citation_paper_ids as cited_paper_ids,
 )
+from app.llm.graph.workflows.review_generate.contracts import revisions_for
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
 from app.services import llm_setting_service
-from app.llm.graph.workflows.review_generate.contracts import revisions_for
-
 
 ASSEMBLE_REVIEW_PROMPT = """
     你是一位学术综述编辑。
@@ -43,6 +41,7 @@ ASSEMBLE_REVIEW_PROMPT = """
     ```
 """.strip()
 
+
 class SynthesisFragment(BaseModel):
     text: str = Field(
         min_length=1,
@@ -67,25 +66,35 @@ class ReviewSynthesis(BaseModel):
 
 class AssembleReviewNode:
     def __init__(
-        self, *, artifact_store: LocalArtifactStore | None = None, model: Any | None = None,
+        self,
+        *,
+        artifact_store: LocalArtifactStore | None = None,
+        model: Any | None = None,
         user_id: int | None = None,
     ) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
         self.user_id = user_id
         self.model = model
 
-    async def __call__(self, state: Mapping[str, Any],) -> dict[str, Any]:
+    async def __call__(
+        self,
+        state: Mapping[str, Any],
+    ) -> dict[str, Any]:
         try:
             framework_payload = await self.artifact_store.read_json_uri(
                 state["framework_artifact_ref"]
             )
-            corpus_payload = await self.artifact_store.read_json_uri(state["corpus_artifact_ref"])
+            corpus_payload = await self.artifact_store.read_json_uri(
+                state["corpus_artifact_ref"]
+            )
             framework = framework_payload["framework"]
             section_refs = state["section_draft_artifact_refs"]
 
             draft_payloads = await asyncio.gather(
                 *[
-                    self.artifact_store.read_json_uri(section_refs[section["section_id"]])
+                    self.artifact_store.read_json_uri(
+                        section_refs[section["section_id"]]
+                    )
                     for section in framework["sections"]
                     if section["section_id"] in section_refs
                 ]
@@ -122,7 +131,10 @@ class AssembleReviewNode:
                     "summary": draft["summary"],
                     "arguments": draft.get("arguments", []),
                     "used_claim_ids": draft.get("used_claim_ids", []),
-                    "omitted_claim_ids": draft.get("omitted_claim_ids", [],),
+                    "omitted_claim_ids": draft.get(
+                        "omitted_claim_ids",
+                        [],
+                    ),
                 }
             )
 
@@ -137,10 +149,12 @@ class AssembleReviewNode:
         if sections:
             if self.model is None:
                 try:
-                    async with SessionLocal() as db:
-                        config = await llm_setting_service.get_small_llm_config(db, user_id=self.user_id)
+                    config = await llm_setting_service.get_small_llm_config(
+                        user_id=self.user_id
+                    )
                     self.model = ChatClient(runtime_config=config).structured(
-                        ReviewSynthesis, options=ModelOptions(temperature=0),
+                        ReviewSynthesis,
+                        options=ModelOptions(temperature=0),
                     )
                 except Exception as exc:
                     return failed(f"review assembly failed: {exc}")
@@ -190,19 +204,22 @@ class AssembleReviewNode:
             conclusion = ""
 
         review_text = "\n\n".join(
-            part
-            for part in [abstract, body_markdown, conclusion]
-            if part
+            part for part in [abstract, body_markdown, conclusion] if part
         )
 
         citation_paper_ids = cited_paper_ids(review_text)
 
-        papers_by_id = {str(paper["paper_id"]): paper for paper in corpus_payload["papers"]}
+        papers_by_id = {
+            str(paper["paper_id"]): paper for paper in corpus_payload["papers"]
+        }
 
         citation_metadata = {
             paper_id: {
                 "title": papers_by_id[paper_id]["title"],
-                "authors": papers_by_id[paper_id].get("authors", [],),
+                "authors": papers_by_id[paper_id].get(
+                    "authors",
+                    [],
+                ),
                 "published_date": papers_by_id[paper_id].get("published_date"),
                 "doi": papers_by_id[paper_id].get("doi"),
             }
@@ -259,10 +276,14 @@ class AssembleReviewNode:
             if "@paper-" in fragment.text or "[[REF_" in fragment.text:
                 raise ValueError("synthesis fragment must not contain citations")
             paper_ids = list(
-                dict.fromkeys(citation_sources[index] for index in fragment.source_indices)
+                dict.fromkeys(
+                    citation_sources[index] for index in fragment.source_indices
+                )
             )
             citation = "; ".join(f"@paper-{paper_id}" for paper_id in paper_ids)
             rendered.append(
-                f"{fragment.text.rstrip()} [{citation}]" if citation else fragment.text.rstrip()
+                f"{fragment.text.rstrip()} [{citation}]"
+                if citation
+                else fragment.text.rstrip()
             )
         return "\n\n".join(rendered)

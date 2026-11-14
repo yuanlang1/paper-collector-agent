@@ -16,8 +16,6 @@ from app.llm.context import BaseAgentContext
 from app.llm.loop.agent_loop import AgentLoop
 from app.llm.tools.web_tools.search_web import search_web_tool
 
-SUBAGENT_RECURSION_LIMIT = 25
-
 
 class SubagentArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -96,7 +94,7 @@ def build_subagent_tool(*, model: BaseChatModel) -> BaseTool:
         config = patch_config(
             runtime.config,
             configurable={"thread_id": context.thread_id},
-            recursion_limit=SUBAGENT_RECURSION_LIMIT,
+            recursion_limit=1004,
             run_name="subagent",
         )
         config.pop("run_id", None)
@@ -107,6 +105,7 @@ def build_subagent_tool(*, model: BaseChatModel) -> BaseTool:
             "parent_run_id": parent.run_id,
             "parent_thread_id": parent.thread_id,
         }
+
         agent = AgentLoop(
             context=context,
             model=model,
@@ -115,6 +114,7 @@ def build_subagent_tool(*, model: BaseChatModel) -> BaseTool:
             checkpointer=False,
             name="subagent",
         )
+
         try:
             output = await asyncio.wait_for(
                 agent.run([HumanMessage(content=prompt)], config=config),

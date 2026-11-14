@@ -24,7 +24,6 @@ class ArxivAdapter:
         self,
         *,
         query_args: Mapping[str, Any],
-        settings: Mapping[str, Any],
         credentials: Mapping[str, str],
         cursor: Mapping[str, Any] | None,
         limit: int,
@@ -35,13 +34,11 @@ class ArxivAdapter:
             raise ValueError("This provider does not accept credentials")
         arguments = source_arguments(
             query_args,
-            settings,
             cursor,
             limit,
             max_pages,
             page_field="max_results",
             offset_field="start",
-            page_max=2000,
         )
         arguments = ArxivSearchArgs.model_validate(arguments).model_dump()
         try:

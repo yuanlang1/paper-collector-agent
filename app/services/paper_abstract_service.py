@@ -162,7 +162,7 @@ async def enrich_paper_abstract(db, *, user_id: int, paper: dict) -> dict:
     initial_pdf_text = ""
 
     try:
-        config = await get_small_llm_config(db, user_id=user_id)
+        config = await get_small_llm_config(user_id=user_id, db=db)
         model = ChatOpenAI(model=config.model, base_url=config.base_url, api_key=config.api_key,
                            streaming=False, timeout=settings.PAPER_ABSTRACT_TASK_TIMEOUT_SECONDS)
         invoker = ValidatedJsonInvoker(model=model, schema=PdfFrontPageEnrichmentResult)

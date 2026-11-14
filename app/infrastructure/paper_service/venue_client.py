@@ -11,6 +11,19 @@ from app.infrastructure.paper_service.http_client import (
 )
 
 
+def parse_venue_record(data: dict[str, Any]) -> dict[str, Any]:
+    fields = {
+        "standard_name": "standardName", "type": "type", "acronym": "acronym",
+        "sci_rank": "sciRank", "ccf_rank": "ccfRank", "sci_if": "sciIf",
+        "sci_up": "sciUp", "sci_up_small": "sciUpSmall", "core_rank": "coreRank",
+    }
+    venue = {key: data.get(value) for key, value in fields.items()}
+    venue["id"] = positive_id(data["id"], "venue_id")
+    venue["type"] = venue["type"] if venue["type"] is not None else 0
+    venue["sci_if"] = venue["sci_if"] if venue["sci_if"] is not None else 0
+    return venue
+
+
 class VenueServiceClient(ServiceClient):
     async def get_venue_by_name(self, standard_name: str) -> dict[str, Any]:
         try:
@@ -20,16 +33,7 @@ class VenueServiceClient(ServiceClient):
             response = await self.http.request(
                 "GET", "/internal/venue/details", params={"standardName": name},
             )
-            data = object_value(response["data"])
-            fields = {
-                "standard_name": "standardName", "type": "type", "acronym": "acronym",
-                "sci_rank": "sciRank", "ccf_rank": "ccfRank", "sci_if": "sciIf",
-                "sci_up": "sciUp", "sci_up_small": "sciUpSmall", "core_rank": "coreRank",
-            }
-            venue = {key: data.get(value) for key, value in fields.items()}
-            venue["id"] = positive_id(data["id"], "venue_id")
-            venue["type"] = venue["type"] if venue["type"] is not None else 0
-            venue["sci_if"] = venue["sci_if"] if venue["sci_if"] is not None else 0
+            venue = parse_venue_record(object_value(response["data"]))
             return self._success({"venue": venue}, response)
         except PaperServiceError as exc:
             if exc.code == 1 and str(exc) == "venue not found":

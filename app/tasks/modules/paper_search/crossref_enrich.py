@@ -109,7 +109,9 @@ def _response_papers(response: Mapping[str, Any]) -> list[dict[str, Any]]:
     return [paper for paper in papers if isinstance(paper, dict)] if isinstance(papers, list) else []
 
 
-async def _search(paper_info: Mapping[str, Any]) -> tuple[dict[str, Any] | None, str]:
+async def search_crossref_paper(
+    paper_info: Mapping[str, Any],
+) -> tuple[dict[str, Any] | None, str]:
     doi = normalize_doi(paper_info.get("doi"))
     if doi:
         response = await crossref_search_service({"doi": doi}, None)
@@ -146,7 +148,9 @@ def query_crossref(
 ) -> dict:
     async def execute():
         async with asyncio.timeout(settings.PAPER_CROSSREF_TASK_TIMEOUT_SECONDS):
-            candidate, method = await _search({"doi": doi, "title": title, "authors": authors})
+            candidate, method = await search_crossref_paper(
+                {"doi": doi, "title": title, "authors": authors}
+            )
         return {"paper_index": paper_index, "candidate": candidate, "match_method": method}
 
     return get_worker_loop().run_until_complete(execute())

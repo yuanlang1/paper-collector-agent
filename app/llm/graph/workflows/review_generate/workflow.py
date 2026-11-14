@@ -7,26 +7,47 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
 from app.infrastructure.paper_service.paper_client import PaperServiceClient
-from app.llm.graph.workflows.review_generate.contracts import review_batch
-from app.llm.graph.workflows.review_generate.nodes.assemble_review import AssembleReviewNode
-from app.llm.graph.workflows.review_generate.nodes.finalizing_handoff import FinalizingHandoffNode
-from app.llm.graph.workflows.review_generate.nodes.finalize import finalize_task_review_node
-from app.llm.graph.workflows.review_generate.nodes.generate_claim import GenerateClaimsNode
-from app.llm.graph.workflows.review_generate.nodes.generate_framework import GenerateFrameworkNode
-from app.llm.graph.workflows.review_generate.nodes.initialize import initialize_review_node
-from app.llm.graph.workflows.review_generate.nodes.load import LoadTaskCorpusNode
-from app.llm.graph.workflows.review_generate.nodes.persist_review import PersistReviewNode
-from app.llm.graph.workflows.review_generate.nodes.reflect_review import ReflectReviewNode
-from app.llm.graph.workflows.review_generate.nodes.render_section import RenderSectionsNode
-from app.llm.graph.workflows.review_generate.nodes.retrieve_evidence import RetrieveEvidenceNode
-from app.llm.graph.workflows.review_generate.state import TaskReviewOutputState, TaskReviewWorkflowState
 from app.llm.graph.workflows.progress import instrument_subagent_progress_node
-
+from app.llm.graph.workflows.review_generate.contracts import review_batch
+from app.llm.graph.workflows.review_generate.nodes.assemble_review import (
+    AssembleReviewNode,
+)
+from app.llm.graph.workflows.review_generate.nodes.finalize import (
+    finalize_task_review_node,
+)
+from app.llm.graph.workflows.review_generate.nodes.finalizing_handoff import (
+    FinalizingHandoffNode,
+)
+from app.llm.graph.workflows.review_generate.nodes.generate_claim import (
+    GenerateClaimsNode,
+)
+from app.llm.graph.workflows.review_generate.nodes.generate_framework import (
+    GenerateFrameworkNode,
+)
+from app.llm.graph.workflows.review_generate.nodes.initialize import (
+    initialize_review_node,
+)
+from app.llm.graph.workflows.review_generate.nodes.load import LoadTaskCorpusNode
+from app.llm.graph.workflows.review_generate.nodes.persist_review import (
+    PersistReviewNode,
+)
+from app.llm.graph.workflows.review_generate.nodes.reflect_review import (
+    ReflectReviewNode,
+)
+from app.llm.graph.workflows.review_generate.nodes.render_section import (
+    RenderSectionsNode,
+)
+from app.llm.graph.workflows.review_generate.nodes.retrieve_evidence import (
+    RetrieveEvidenceNode,
+)
 from app.llm.graph.workflows.review_generate.nodes.verify_claims import (
     VerificationProtocolError,
     VerifyClaimsNode,
 )
-
+from app.llm.graph.workflows.review_generate.state import (
+    TaskReviewOutputState,
+    TaskReviewWorkflowState,
+)
 
 REVIEW_MAX_CONCURRENCY = 4
 
@@ -95,14 +116,18 @@ def _route(expected_stage: str, target: str):
     return route
 
 
-def _route_after_verification(state: TaskReviewWorkflowState,) -> str:
+def _route_after_verification(
+    state: TaskReviewWorkflowState,
+) -> str:
     return {
         "generating_claims": "generate_claims",
         "rendering_sections": "render_sections",
     }.get(state.get("stage"), "finalize")
 
 
-def _route_after_writing_review(state: TaskReviewWorkflowState,) -> str:
+def _route_after_writing_review(
+    state: TaskReviewWorkflowState,
+) -> str:
     return {
         "finalizing_handoff": "finalizing_handoff",
         "rendering_sections": "render_sections",
@@ -126,7 +151,11 @@ def _add_review_batch(builder, name, stage, route, paths, *, instrument=None):
         except GraphBubbleUp:
             raise
         except Exception as exc:
-            return {**review_batch([]), "batch_jobs": None, **stage.failure(state, _batch_error(exc))}
+            return {
+                **review_batch([]),
+                "batch_jobs": None,
+                **stage.failure(state, _batch_error(exc)),
+            }
 
     async def run_item(item):
         try:
@@ -139,8 +168,12 @@ def _add_review_batch(builder, name, stage, route, paths, *, instrument=None):
 
     async def collect(state):
         records = state["batch_results"]
-        results = {item["item_id"]: item["value"] for item in records if "value" in item}
-        positions = {job["item_id"]: index for index, job in enumerate(state["batch_jobs"])}
+        results = {
+            item["item_id"]: item["value"] for item in records if "value" in item
+        }
+        positions = {
+            job["item_id"]: index for index, job in enumerate(state["batch_jobs"])
+        }
         failure = min(
             (item for item in records if "error" in item),
             key=lambda item: positions.get(item["item_id"], -1),
@@ -174,10 +207,18 @@ def _add_review_batch(builder, name, stage, route, paths, *, instrument=None):
     builder.add_node(item_node, run_item)
     builder.add_node(collect_node, collect)
     builder.add_conditional_edges(
-        name, dispatch, {item_node: item_node, collect_node: collect_node, "finalize": paths["finalize"]},
+        name,
+        dispatch,
+        {
+            item_node: item_node,
+            collect_node: collect_node,
+            "finalize": paths["finalize"],
+        },
     )
     builder.add_edge(item_node, collect_node)
-    collect_paths = {**paths, item_node: item_node} if name == "generate_claims" else paths
+    collect_paths = (
+        {**paths, item_node: item_node} if name == "generate_claims" else paths
+    )
     builder.add_conditional_edges(collect_node, after_collect, collect_paths)
 
 
@@ -203,42 +244,60 @@ def build_task_review_workflow(
         )
 
     def node(name: str, factory):
-        return progress(name, node_overrides[name] if name in node_overrides else factory())
+        return progress(
+            name, node_overrides[name] if name in node_overrides else factory()
+        )
 
     def batch_progress(name, target, *, emit_start):
-        return progress(name, target, emit_start=emit_start, finish_when=lambda update: "stage" in update)
+        return progress(
+            name,
+            target,
+            emit_start=emit_start,
+            finish_when=lambda update: "stage" in update,
+        )
 
     builder = StateGraph(TaskReviewWorkflowState, output_schema=TaskReviewOutputState)
     builder.add_node("initialize", node("initialize", lambda: initialize_review_node))
     builder.add_node(
         "load_task_corpus",
-        node("load_task_corpus", lambda: LoadTaskCorpusNode(client=paper_client),),
+        node(
+            "load_task_corpus",
+            lambda: LoadTaskCorpusNode(client=paper_client),
+        ),
     )
     builder.add_node(
-        "generate_framework", node("generate_framework", lambda: GenerateFrameworkNode(user_id=user_id)),
+        "generate_framework",
+        node("generate_framework", lambda: GenerateFrameworkNode(user_id=user_id)),
     )
     builder.add_node(
-        "assemble_review", node("assemble_review", lambda: AssembleReviewNode(user_id=user_id)),
+        "assemble_review",
+        node("assemble_review", lambda: AssembleReviewNode(user_id=user_id)),
     )
     builder.add_node(
         "reflect_review",
         node("reflect_review", lambda: ReflectReviewNode(user_id=user_id)),
     )
     builder.add_node(
-        "finalizing_handoff", node("finalizing_handoff", FinalizingHandoffNode),
+        "finalizing_handoff",
+        node("finalizing_handoff", FinalizingHandoffNode),
     )
     builder.add_node(
-        "persist_review", node("persist_review", PersistReviewNode),
+        "persist_review",
+        node("persist_review", PersistReviewNode),
     )
     builder.add_node(
-        "finalize_result", node("finalize_result", lambda: finalize_task_review_node),
+        "finalize_result",
+        node("finalize_result", lambda: finalize_task_review_node),
     )
 
     builder.add_edge(START, "initialize")
     builder.add_conditional_edges(
         "initialize",
         _route("loading_corpus", "load_task_corpus"),
-        {"load_task_corpus": "load_task_corpus", "finalize": "finalize_result",},
+        {
+            "load_task_corpus": "load_task_corpus",
+            "finalize": "finalize_result",
+        },
     )
     builder.add_conditional_edges(
         "load_task_corpus",
@@ -247,16 +306,21 @@ def build_task_review_workflow(
     )
     for name, factory, route, paths in (
         (
-            "generate_claims", lambda: GenerateClaimsNode(user_id=user_id),
+            "generate_claims",
+            lambda: GenerateClaimsNode(user_id=user_id),
             _route("retrieving_evidence", "retrieve_evidence"),
             {"retrieve_evidence": "retrieve_evidence", "finalize": "finalize_result"},
         ),
         (
-            "retrieve_evidence", RetrieveEvidenceNode, _route("verifying_claims", "verify_claims"),
+            "retrieve_evidence",
+            RetrieveEvidenceNode,
+            _route("verifying_claims", "verify_claims"),
             {"verify_claims": "verify_claims", "finalize": "finalize_result"},
         ),
         (
-            "verify_claims", lambda: VerifyClaimsNode(user_id=user_id), _route_after_verification,
+            "verify_claims",
+            lambda: VerifyClaimsNode(user_id=user_id),
+            _route_after_verification,
             {
                 "generate_claims": "generate_claims",
                 "render_sections": "render_sections",
@@ -264,7 +328,8 @@ def build_task_review_workflow(
             },
         ),
         (
-            "render_sections", lambda: RenderSectionsNode(user_id=user_id),
+            "render_sections",
+            lambda: RenderSectionsNode(user_id=user_id),
             _route("assembling_review", "assemble_review"),
             {"assemble_review": "assemble_review", "finalize": "finalize_result"},
         ),
@@ -273,7 +338,9 @@ def build_task_review_workflow(
             builder.add_node(name, node(name, factory))
             builder.add_conditional_edges(name, route, paths)
         else:
-            _add_review_batch(builder, name, factory(), route, paths, instrument=batch_progress)
+            _add_review_batch(
+                builder, name, factory(), route, paths, instrument=batch_progress
+            )
 
     builder.add_conditional_edges(
         "generate_framework",
@@ -283,7 +350,10 @@ def build_task_review_workflow(
     builder.add_conditional_edges(
         "assemble_review",
         _route("reflecting_review", "reflect_review"),
-        {"reflect_review": "reflect_review", "finalize": "finalize_result",},
+        {
+            "reflect_review": "reflect_review",
+            "finalize": "finalize_result",
+        },
     )
     builder.add_conditional_edges(
         "reflect_review",
@@ -304,5 +374,6 @@ def build_task_review_workflow(
     builder.add_edge("finalize_result", END)
 
     return builder.compile(checkpointer=checkpointer).with_config(
-        recursion_limit=128, max_concurrency=REVIEW_MAX_CONCURRENCY,
+        recursion_limit=128,
+        max_concurrency=REVIEW_MAX_CONCURRENCY,
     )

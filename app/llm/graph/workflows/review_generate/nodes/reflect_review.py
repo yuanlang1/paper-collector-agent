@@ -8,7 +8,6 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, model_validator
 
 from app.config import settings
-from app.database import SessionLocal
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.citations import (
     citation_paper_ids,
@@ -19,7 +18,6 @@ from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
 from app.services import llm_setting_service
 
-
 WRITING_REVIEW_PROMPT = """
     你是学术综述写作质量控制编辑。依据既定 Framework、已核验 Claim 与当前草稿，
     检查章节是否回应 discussion_questions、跨研究综合是否清楚、衔接和术语是否一致、
@@ -27,10 +25,13 @@ WRITING_REVIEW_PROMPT = """
 
     只提出影响理解或结论准确性的必要写作修改。修改目标只能是 section 或 synthesis；
     保持已有研究范围、论点和证据基础，不得要求新增 Claim、重建 Framework 或补充检索。
-    证据本身不足应说明为受阻原因，不能伪装成可由写作解决的问题。一般润色写入 suggestions，
+    某个表述缺少证据时，要求删减该表述或明确证据缺口；必要结论缺少证据且无法通过收缩表述解决时，判为 blocked。
+    章节修订需要综合其他章节的论点时，将所需的最少 claim_id 写入 supporting_claim_ids，
+    只能从 supported_claims 选择，且只列目标章节以外的论点。其余修订可省略该字段。一般润色写入 suggestions，
     不触发修改。程序提供的 hard_issues 未解决时不得 decision=pass。
 
-    review_mode 为 initial 时进行一次全文检查；为 acceptance 时，重点验收 previous_plan 的问题是否解决，并检查修改是否引入明显不一致。
+    review_mode 为 initial 时逐章检查数值、比较、作者归因和机制细节是否超出已核验 Claim，
+    并为每个有实质问题的章节列出修订项。为 acceptance 时，逐项验收 previous_plan，并检查全文是否仍有实质问题。
 
     以下仅为格式示例；使用实际 section_id 和问题，勿照抄：
     pass：
@@ -98,6 +99,10 @@ class WritingRevision(BaseModel):
         min_length=1,
         description="复查时用于判断该写作问题已解决的明确标准。",
     )
+    supporting_claim_ids: list[str] = Field(
+        default_factory=list,
+        description="章节修订需要借用的其他章节已核验 Claim ID；只为 section 类型指定。",
+    )
 
 
 class WritingReviewResult(BaseModel):
@@ -132,17 +137,25 @@ class ReflectReviewNode:
 
     async def __call__(self, state):
         try:
-            draft, corpus, claims_payload, verification_payload, framework_payload = (
-                await asyncio.gather(
-                    self.artifact_store.read_json_uri(state["review_draft_artifact_ref"]),
-                    self.artifact_store.read_json_uri(state["corpus_artifact_ref"]),
-                    self.artifact_store.read_json_uri(state["claims_artifact_ref"]),
-                    self.artifact_store.read_json_uri(state["claim_verification_artifact_ref"]),
-                    self.artifact_store.read_json_uri(state["framework_artifact_ref"]),
-                )
+            (
+                draft,
+                corpus,
+                claims_payload,
+                verification_payload,
+                framework_payload,
+            ) = await asyncio.gather(
+                self.artifact_store.read_json_uri(state["review_draft_artifact_ref"]),
+                self.artifact_store.read_json_uri(state["corpus_artifact_ref"]),
+                self.artifact_store.read_json_uri(state["claims_artifact_ref"]),
+                self.artifact_store.read_json_uri(
+                    state["claim_verification_artifact_ref"]
+                ),
+                self.artifact_store.read_json_uri(state["framework_artifact_ref"]),
             )
             previous_plan = (
-                await self.artifact_store.read_json_uri(state["writing_review_plan_ref"])
+                await self.artifact_store.read_json_uri(
+                    state["writing_review_plan_ref"]
+                )
                 if state.get("writing_review_plan_ref")
                 else None
             )
@@ -157,40 +170,53 @@ class ReflectReviewNode:
                 require_citations=bool(supported_claims),
             )
             if self.model is None:
-                async with SessionLocal() as db:
-                    config = await llm_setting_service.get_small_llm_config(db, user_id=self.user_id)
-                self.model = ChatClient(runtime_config=config).structured(
-                    WritingReviewResult, options=ModelOptions(temperature=0),
+                config = await llm_setting_service.get_small_llm_config(
+                    user_id=self.user_id
                 )
-            result = (await self.model.ainvoke([
-                SystemMessage(content=WRITING_REVIEW_PROMPT),
-                HumanMessage(content=json.dumps({
-                    "review_mode": "acceptance" if previous_plan else "initial",
-                    "framework": {
-                        "title": framework["title"],
-                        "scope": framework["scope"],
-                        "sections": [
-                            {
-                                key: section[key]
-                                for key in (
-                                    "section_id",
-                                    "title",
-                                    "description",
-                                    "discussion_questions",
-                                )
-                            }
-                            for section in framework["sections"]
-                        ],
-                    },
-                    "abstract": draft["abstract"],
-                    "body_markdown": draft["body_markdown"],
-                    "conclusion": draft["conclusion"],
-                    "supported_claims": supported_claims,
-                    "previous_plan": previous_plan,
-                    "hard_issues": hard_issues,
-                }, ensure_ascii=False)),
-            ])).model_dump(mode="json")
-            self._validate_targets(result["revisions"], framework)
+                self.model = ChatClient(runtime_config=config).structured(
+                    WritingReviewResult,
+                    options=ModelOptions(temperature=0),
+                )
+            result = (
+                await self.model.ainvoke(
+                    [
+                        SystemMessage(content=WRITING_REVIEW_PROMPT),
+                        HumanMessage(
+                            content=json.dumps(
+                                {
+                                    "review_mode": "acceptance"
+                                    if previous_plan
+                                    else "initial",
+                                    "framework": {
+                                        "title": framework["title"],
+                                        "scope": framework["scope"],
+                                        "sections": [
+                                            {
+                                                key: section[key]
+                                                for key in (
+                                                    "section_id",
+                                                    "title",
+                                                    "description",
+                                                    "discussion_questions",
+                                                )
+                                            }
+                                            for section in framework["sections"]
+                                        ],
+                                    },
+                                    "abstract": draft["abstract"],
+                                    "body_markdown": draft["body_markdown"],
+                                    "conclusion": draft["conclusion"],
+                                    "supported_claims": supported_claims,
+                                    "previous_plan": previous_plan,
+                                    "hard_issues": hard_issues,
+                                },
+                                ensure_ascii=False,
+                            )
+                        ),
+                    ]
+                )
+            ).model_dump(mode="json")
+            self._validate_targets(result["revisions"], framework, supported_claims)
             return await self._complete_reflection(state, result, hard_issues)
         except Exception as exc:
             return failed(
@@ -217,14 +243,29 @@ class ReflectReviewNode:
         return supported
 
     @staticmethod
-    def _validate_targets(revisions, framework):
+    def _validate_targets(revisions, framework, supported_claims):
         section_ids = {section["section_id"] for section in framework["sections"]}
+        claim_sections = {
+            claim["claim_id"]: claim["section_id"] for claim in supported_claims
+        }
         for revision in revisions:
+            supporting_ids = revision["supporting_claim_ids"]
             if revision["target_type"] == "section":
                 if revision["target_id"] not in section_ids:
                     raise ValueError("writing revision targets an unknown section")
-            elif revision["target_id"] != "review":
-                raise ValueError("synthesis revision must target review")
+                for claim_id in supporting_ids:
+                    if (
+                        claim_id not in claim_sections
+                        or claim_sections[claim_id] == revision["target_id"]
+                    ):
+                        raise ValueError(
+                            f"invalid cross-section supporting claim: {claim_id}"
+                        )
+            else:
+                if revision["target_id"] != "review":
+                    raise ValueError("synthesis revision must target review")
+                if supporting_ids:
+                    raise ValueError("synthesis revision cannot borrow claims")
 
     async def _complete_reflection(self, state, result, hard_issues):
         decision = result["decision"]
@@ -237,7 +278,8 @@ class ReflectReviewNode:
             stop_reason = "hard_constraints_failed"
         elif (
             decision == "revise"
-            and state["writing_revision_round"] >= settings.TASK_REVIEW_MAX_WRITING_REVISION_ROUNDS
+            and state["writing_revision_round"]
+            >= settings.TASK_REVIEW_MAX_WRITING_REVISION_ROUNDS
         ):
             effective_decision = "blocked"
             stop_reason = "writing_revision_limit_reached"
@@ -323,7 +365,9 @@ class ReflectReviewNode:
             issues.append("review has no citations")
         for section in framework["sections"]:
             if section["section_id"] not in section_ids:
-                issues.append(f"review omits framework section: {section['section_id']}")
+                issues.append(
+                    f"review omits framework section: {section['section_id']}"
+                )
         for paper_id in sorted(
             unsupported_synthesis_citation_ids(
                 body_markdown=review_draft.get("body_markdown", ""),

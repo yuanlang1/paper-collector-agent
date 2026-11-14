@@ -1,10 +1,8 @@
-import asyncio
 import json
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from app.database import SessionLocal
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import (
     CandidateClaim,
@@ -160,14 +158,12 @@ class GenerateClaimsNode:
         user_id: int | None = None,
     ):
         self.artifact_store = artifact_store or LocalArtifactStore()
-        self._model_lock = asyncio.Lock()
         self.user_id = user_id
         self.model = model
         self.revision_model = revision_model
 
     async def _load_models(self):
-        async with SessionLocal() as db:
-            config = await llm_setting_service.get_small_llm_config(db, user_id=self.user_id)
+        config = await llm_setting_service.get_small_llm_config(user_id=self.user_id)
         client = ChatClient(runtime_config=config)
         options = ModelOptions(temperature=0)
         if self.model is None:
@@ -177,9 +173,7 @@ class GenerateClaimsNode:
 
     async def _ensure_model(self, *, revise=False):
         if (self.revision_model if revise else self.model) is None:
-            async with self._model_lock:
-                if (self.revision_model if revise else self.model) is None:
-                    await self._load_models()
+            await self._load_models()
 
     async def _generate_for_section(
         self, state, section, studies, existing, additions, claim_budget=MAX_CLAIMS_PER_SECTION

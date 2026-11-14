@@ -5,9 +5,11 @@ from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from langgraph.constants import INTERRUPT
 from openai import OpenAIError
 
 from app.common.exceptions import ConflictException, NotFoundException
+from app.db.models import RunStatus
 from app.db.repositories import agent_run, agent_thread
 from app.services import llm_setting_service
 
@@ -56,7 +58,7 @@ async def create_thread(db, user_id: int, message: str | None = None) -> ThreadI
     message = message.strip() if message is not None else ""
     topic = message[:40] if message else None
     if message:
-        llm_config = await llm_setting_service.get_small_llm_config(db, user_id=user_id)
+        llm_config = await llm_setting_service.get_small_llm_config(user_id=user_id, db=db)
         model = ChatOpenAI(
             model=llm_config.model,
             base_url=llm_config.base_url,
@@ -103,13 +105,33 @@ async def get_history(db, *, user_id: int, thread_id: str, checkpointer):
         if thread is None:
             raise NotFoundException("会话不存在")
 
+        runs = await agent_run.list_by_owned_thread(
+            db, user_id=user_id, thread_id=thread_id, limit=1
+        )
+
     checkpoint = await checkpointer.aget_tuple(
         {
             "configurable": {"thread_id": thread_id, "checkpoint_ns": ""},
         }
     )
 
-    return checkpoint.checkpoint["channel_values"] if checkpoint is not None else []
+    if checkpoint is None:
+        return []
+
+    history = checkpoint.checkpoint["channel_values"]
+    if runs and runs[0].status == RunStatus.INTERRUPTED:
+        interrupts = {
+            item.id: {"id": item.id, "value": item.value}
+            for _, channel, values in (checkpoint.pending_writes or [])
+            if channel == INTERRUPT
+            for item in values
+        }
+        return {
+            **history,
+            "interrupts": list(interrupts.values()),
+            "model_id": runs[0].run_metadata.get("model_id"),
+        }
+    return history
 
 
 async def delete_thread(db, user_id: int, thread_id: str) -> None:

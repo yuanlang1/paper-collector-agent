@@ -7,14 +7,18 @@ from app.llm.subagents.paper_search import build_paper_search_tool
 from app.llm.subagents.task_review import task_review_agent
 from app.llm.tools.agent_tools.subagent import build_subagent_tool
 from app.llm.tools.registry import ToolRegistry
+from app.llm.tools.task_tools.search_task.get_task_papers import get_task_papers_tool
 from app.llm.tools.web_tools.search_web import search_web_tool
 from app.services import llm_setting_service
 
 
-def build_tools(db: AsyncSession | None, user_id: int, *, model: BaseChatModel) -> ToolRegistry:
+def build_tools(
+    db: AsyncSession | None, user_id: int, *, model: BaseChatModel
+) -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(build_paper_search_tool(model=model), "论文检索子代理")
     registry.register(task_review_agent, "综述生成子代理")
+    registry.register(get_task_papers_tool, "查询任务论文")
     registry.register(search_web_tool, "网络搜索")
     registry.register(build_subagent_tool(model=model), "子代理")
 
@@ -29,9 +33,9 @@ async def get_model(
     think_effort: ReasoningEffort = None,
 ) -> BaseChatModel:
     llm_config = await llm_setting_service.get_llm_config(
-        db,
         model_id,
         user_id=user_id,
+        db=db,
     )
 
     return ChatOpenAI(

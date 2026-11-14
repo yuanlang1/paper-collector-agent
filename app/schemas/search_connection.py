@@ -1,9 +1,10 @@
 from datetime import datetime
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from app.db.models.search_connection import SearchConnectionStatus
+from app.utils.search_adapters.contracts import SearchSettings
 
 ProviderId = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)
@@ -23,6 +24,12 @@ class CreateSearchConnection(BaseModel):
     settings: dict[str, Any] = Field(default_factory=dict)
     enabled: bool = Field(default=True, strict=True)
 
+    @field_validator("settings")
+    @classmethod
+    def validate_settings(cls, value: dict[str, Any]) -> dict[str, Any]:
+        SearchSettings.model_validate(value)
+        return value
+
 
 class UpdateSearchConnection(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -37,6 +44,8 @@ class UpdateSearchConnection(BaseModel):
         for name in self.model_fields_set - {"api_key"}:
             if getattr(self, name) is None:
                 raise ValueError(f"{name} must not be null")
+        if self.settings is not None:
+            CreateSearchConnection.validate_settings(self.settings)
         return self
 
 

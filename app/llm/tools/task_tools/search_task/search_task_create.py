@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.infrastructure.paper_service.task_client import (
     task_service_client,
 )
-from app.llm.graph.workflows.paper_search_schemas import (
+from app.llm.graph.workflows.paper_search.paper_search_schemas import (
     NonBlankString,
     PromptUnderstandingArgs,
     SearchTagArgs,

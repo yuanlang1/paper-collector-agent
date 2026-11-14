@@ -10,9 +10,55 @@ from app.infrastructure.paper_service.http_client import (
     positive_id,
     text_value,
 )
+from app.infrastructure.paper_service.venue_client import parse_venue_record
 
 
 class PaperServiceClient(ServiceClient):
+    async def batch_lookup_papers(
+        self, queries: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        try:
+            if not queries:
+                raise ValueError("queries must not be empty")
+            results = []
+            for start in range(0, len(queries), 100):
+                batch = queries[start : start + 100]
+                response = await self.http.request(
+                    "POST", "/internal/paper/batch-lookup", json={"queries": batch}
+                )
+                items = list_value(object_value(response["data"])["results"])
+                if len(items) != len(batch):
+                    raise ValueError("Paper lookup results do not match request size")
+                for index, value in enumerate(items):
+                    item = object_value(value)
+                    if type(item["index"]) is not int or item["index"] != index:
+                        raise ValueError("Paper lookup results are out of order")
+                    status = item["status"]
+                    if type(status) is not bool:
+                        raise ValueError("Invalid paper lookup status")
+                    if status:
+                        paper = dict(object_value(item["paper"]))
+                        paper["paper_id"] = positive_id(
+                            paper.pop("paperId"), "paper_id"
+                        )
+                        if not text_value(paper["title"]).strip():
+                            raise ValueError("Matched paper title must not be blank")
+                        for author in list_value(paper["authors"]):
+                            text_value(author)
+                        venue = paper.pop("venueInfo", None)
+                        paper["venue_info"] = (
+                            parse_venue_record(object_value(venue))
+                            if venue is not None
+                            else None
+                        )
+                        item = {**item, "paper": paper}
+                    elif item["paper"] is not None:
+                        raise ValueError("Invalid paper lookup result")
+                    results.append({**item, "index": start + index})
+            return self._success({"results": results}, response)
+        except CLIENT_ERRORS as exc:
+            return self._error(exc)
+
     @staticmethod
     def _list_text(value: Any) -> str:
         if isinstance(value, list):
@@ -68,7 +114,6 @@ class PaperServiceClient(ServiceClient):
             "source": str(paper.get("source") or ""),
             "pdfUrl": str(paper.get("pdf_url") or ""),
             "abstractUrl": str(paper.get("abstract_url") or ""),
-            "ossName": str(paper.get("oss_name") or ""),
             "publishedDate": cls._timestamp(paper.get("published_date")),
             "citations": int(citations) if citations is not None else None,
         }
@@ -133,8 +178,11 @@ class PaperServiceClient(ServiceClient):
                         "paper_abstract": text_value(item.get("paperAbstract")).strip(),
                         "oss_name": text_value(item.get("ossName")).strip() or None,
                         "pdf_url": text_value(item.get("pdfUrl")).strip() or None,
-                        "paper_profile": text_value(item.get("paperProfile")).strip() or None,
-                        "profile_status": text_value(item.get("profileStatus")).strip().lower()
+                        "paper_profile": text_value(item.get("paperProfile")).strip()
+                        or None,
+                        "profile_status": text_value(item.get("profileStatus"))
+                        .strip()
+                        .lower()
                         or "pending",
                     }
                 )
@@ -152,8 +200,8 @@ class PaperServiceClient(ServiceClient):
 
     async def batch_get_paper_details(self, paper_ids: list[int]) -> dict[str, Any]:
         try:
-            if not paper_ids or len(paper_ids) > 20:
-                raise ValueError("paper_ids must contain between 1 and 20 IDs")
+            if not paper_ids:
+                raise ValueError("paper_ids must not be empty")
             for paper_id in paper_ids:
                 positive_id(paper_id, "paper_id")
             if len(paper_ids) != len(set(paper_ids)):

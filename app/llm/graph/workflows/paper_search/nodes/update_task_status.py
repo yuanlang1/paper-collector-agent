@@ -15,17 +15,13 @@ def _is_valid_task_id(value: Any) -> bool:
 
 
 class UpdatePaperSearchTaskStatusNode:
-
     def __init__(
         self,
         client: TaskServiceClient | None = None,
     ) -> None:
         self.client = client or task_service_client
 
-    async def __call__(
-        self,
-        state: Mapping[str, Any]
-    ) -> dict[str, Any]:
+    async def __call__(self, state: Mapping[str, Any]) -> dict[str, Any]:
         task_id = state.get("paper_service_task_id")
         if not _is_valid_task_id(task_id):
             return {}
@@ -45,9 +41,9 @@ class UpdatePaperSearchTaskStatusNode:
 
         try:
             result = await self.client.update_task_status(
-                task_id = task_id,
-                task_state = task_state,
-                error_message = error_message,
+                task_id=task_id,
+                task_state=task_state,
+                error_message=error_message,
             )
         except Exception as exc:
             result = {

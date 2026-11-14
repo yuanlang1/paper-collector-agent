@@ -46,6 +46,7 @@ async def _extract_episode(db: AsyncSession, job_id: str) -> dict[str, str]:
         extracted = await common.with_lease(job, extract())
     except Exception as exc:
         return await common.finish_job(db, job, error=exc)
+
     return await common.finish_job(db, job, extracted=extracted)
 
 

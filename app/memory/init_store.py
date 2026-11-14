@@ -9,6 +9,7 @@ from langgraph.store.postgres.aio import AsyncPostgresStore
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
+from app.config import settings
 from app.memory.store import (
     DENSE_EMBEDDING_DIMS,
     MemorySettings,
@@ -17,8 +18,8 @@ from app.memory.store import (
 
 
 async def initialize(*, check_embedding: bool = False) -> None:
-    settings = MemorySettings()
-    index = memory_index(settings)
+    memory_settings = MemorySettings()
+    index = memory_index()
 
     if check_embedding:
         embeddings = cast(Embeddings, index["embed"])
@@ -30,7 +31,7 @@ async def initialize(*, check_embedding: bool = False) -> None:
             )
 
     async with await AsyncConnection.connect(
-        settings.DATABASE_POSTGRES_URL.get_secret_value(),
+        memory_settings.DATABASE_POSTGRES_URL.get_secret_value(),
         autocommit=True,
         prepare_threshold=0,
         row_factory=dict_row,
@@ -75,7 +76,7 @@ async def initialize(*, check_embedding: bool = False) -> None:
             json.dumps(
                 {
                     "status": "ok",
-                    "model": settings.DENSE_EMBEDDING_MODEL_NAME,
+                    "model": settings.QWEN_EMBEDDING_MODEL,
                     "dimensions": DENSE_EMBEDDING_DIMS,
                     "embedding_checked": check_embedding,
                     "column_type": row["column_type"],

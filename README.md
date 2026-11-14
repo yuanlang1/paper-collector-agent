@@ -70,9 +70,9 @@ SCWS 和固定提交的 zhparser；Compose 将该数据卷声明为 external，�
 
 ```dotenv
 DATABASE_POSTGRES_URL='postgresql://yl:URL编码后的原密码@127.0.0.1:5432/agent_db'
-SILICONFLOW_API_KEY='你的密钥'
-SILICONFLOW_EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
-DENSE_EMBEDDING_MODEL_NAME=BAAI/bge-m3
+DASHSCOPE_API_KEY='你的千问平台 API Key'
+QWEN_EMBEDDING_BASE_URL=https://maas.qianwenaiapi.com/compatible-mode/v1
+QWEN_EMBEDDING_MODEL=qwen3.7-text-embedding-flash
 ```
 
 在 Docker Desktop 的 Linux 容器模式下启动 PostgreSQL 和 Redis：
@@ -154,11 +154,16 @@ uv run --locked --no-sync --env-file .env python -m app.memory.init_store
 记忆数据库初始化命令可重复执行：由原生 LangGraph Store 创建 `halfvec(1024)`
 表和 cosine HNSW 索引，并检查实际列类型和索引。该命令负责 Store 相关表，
 `memory_job` 等业务表由 FastAPI 启动时创建。需要同时验证 embedding 时，在命令末尾
-添加 `--check-embedding`，会调用一次 SiliconFlow；不带此参数时只初始化数据库。
+添加 `--check-embedding`，会调用一次千问向量接口；不带此参数时只初始化数据库。
 现有其他维度或不同类型的索引须单独迁移。
 PostgreSQL 设置 `hnsw.ef_search=100`、`hnsw.iterative_scan=strict_order`；
 当前使用 Store 原生语义检索，初始化命令不会启动记忆提取。
-原有论文 RAG 的 Qdrant 配置保留。
+论文 RAG 和记忆共用千问的 OpenAI 兼容向量接口。已有部署切换模型前，
+须在新的 `PAPER_COLLECTION_NAME` 和 `PAPER_CONTENT_COLLECTION_NAME` 对应集合中
+重建 Qdrant 向量，并从原始记忆内容重算 PostgreSQL 的 `store_vectors`。
+迁移后再切换 FastAPI 和 Celery worker。即使维度相同，不同模型的向量也不能混用。
+客户端每次最多发送 20 条文本。重建时若一批包含多个超长正文块，须缩小批次，
+使单次请求符合千问向量接口的 128,000 token 限额。
 
 切换前备份保存在 Git 忽略的 `data/backups/postgres/`；不要删除原数据卷。
 
@@ -171,9 +176,9 @@ docker compose -f compose.memory.yml down
 
 ## 内部 HTTP 接口
 
-HTTP 提供根路径 `/`、健康检查 `/health`、Agent SSE 与历史接口、thread 操作和 run 查询。主服务负责用户鉴权和权限判断。内部检索数量配置使用 `GET /internal/settings/source-limits` 和 `PUT /internal/settings/source-limits`；更新请求为 `{"arxiv": 20, "dblp": 20, "google_scholar": 20}`，返回 `ServiceResponse`，其中 `data` 包含 `limits`、`page_sizes` 和 `maximum_limits`。Swagger、ReDoc 和 OpenAPI 均已关闭。
+HTTP 提供根路径 `/`、健康检查 `/health`、Agent SSE 与历史接口、thread 操作和 run 查询。主服务负责用户鉴权和权限判断。论文检索首轮数量按用户和检索源存于 `search_connection.settings.initial_limit`，缺省使用 arXiv 10、DBLP 10、Google Scholar 20。Swagger、ReDoc 和 OpenAPI 均已关闭。
 
-Agent 监听 HTTP 端口。主服务通过配置的 Agent HTTP 地址调用内部配置接口；网关不得对外转发 `/internal/**`，需通过网络策略限制内部接口只允许可信服务访问。旧配置调用方需同步切换到 HTTP，不再提供业务 gRPC 服务。
+Agent 监听 HTTP 端口。主服务通过配置的 Agent HTTP 地址调用内部接口；网关不得对外转发 `/internal/**`，需通过网络策略限制内部接口只允许可信服务访问。
 
 访问 Java paper-service 时复用 `httpx.AsyncClient`，调用 `/internal/**` 接口。`.env` 配置如下：
 
@@ -185,20 +190,21 @@ PAPER_SERVICE_TIMEOUT_SECONDS=10.0
 
 `PAPER_SERVICE_BASE_URL` 必填，使用 FastAPI 和 Worker 均可访问的 HTTP(S) 地址。客户端同时检查 HTTP 状态和响应体的 `success`、`code`，写操作不自动重试。
 
-协议位于 [app/protos/agent/v1/agent.proto](app/protos/agent/v1/agent.proto)。当前只注册 `SettingsService.GetSourceLimits` 和 `UpdateSourceLimits`。旧主 Agent 图、会话历史和 LLM 配置档案的运行入口已停用；保留协议定义，相关 RPC 返回 `UNIMPLEMENTED`。论文检索和综述生成的业务工作流仍保留；RAG 索引改由内部 HTTP 接口提交 Celery 任务，不再作为 Agent 子图执行。
+协议位于 [app/protos/agent/v1/agent.proto](app/protos/agent/v1/agent.proto)。旧主 Agent 图、会话历史和 LLM 配置档案的运行入口已停用；保留协议定义，相关 RPC 返回 `UNIMPLEMENTED`。论文检索和综述生成的业务工作流仍保留；RAG 索引改由内部 HTTP 接口提交 Celery 任务，不再作为 Agent 子图执行。
 
 ## 批量论文索引
 
-paper service 调用 `POST /internal/rag/batches`，请求仅包含
-`{"paper_ids": [123, 124]}`；列表长度为 1～20，元素必须为不重复的正整数。
-接口通过 `index_batch.delay(paper_ids=...)` 提交 Celery `rag.index_batch` 任务，返回
+paper service 调用 `POST /internal/rag/batches`，请求包含
+`{"user_id": "11", "paper_ids": [123, 124]}`。`paper_ids` 是非空列表，元素必须为不重复的正整数。
+接口提交 Celery `rag.index_batch` 任务，返回
 HTTP 202 和 `ServiceResponse.data.job_id`（Celery 生成的 UUID）。不传论文详情、PDF 内容或 chunks。
 
 worker 调用 paper service 新增的 `POST /internal/paper/batch-details`，请求为
 `{"paperIds": [123, 124]}`。响应 `data.papers` 包含 `paperId`、`title`、
 `paperAbstract`、`pdfUrl`、`ossName`、`publishedDate`（`yyyy-MM-dd` 或 null），
-`data.missingPaperIds` 列出未找到的 ID。worker 按 ID 匹配详情，从发布日期提取年份，
-再执行 OSS 地址获取、MinerU 解析、Markdown 保存、内容切分和 Qdrant 论文级及正文索引。
+`data.missingPaperIds` 列出未找到的 ID。paper service 负责 MinerU 提取和 OSS 归档。
+worker 按 `ossName` 从同一 bucket 读取 `md/{ossName}.md`，切分 Markdown 并写入 Qdrant 论文级及正文索引。
+新正文切块暂不保存章节路径、页码和来源坐标。
 索引任务不领取 paper service 租约，不调用状态更新或批次完成接口。
 
 调用 `GET /internal/rag/batches/{job_id}` 查询结果，内部通过
@@ -224,7 +230,7 @@ worker 调用 paper service 新增的 `POST /internal/paper/batch-details`，请
 未开始、未知及结果已过期的任务 ID 均可能返回 `PENDING`，调用方需自行限制轮询时间。
 队列或结果后端不可用返回 503。调用方应在保留期内读取并持久化结果。
 
-RAG worker 需要默认 `app` 依赖组及预下载的 RAG 模型。在独立 PowerShell 终端启动：
+RAG worker 需要默认 `app` 依赖组及上文的千问向量配置。在独立 PowerShell 终端启动：
 
 ```powershell
 $env:UV_PROJECT_ENVIRONMENT = ".venv311"
@@ -235,7 +241,7 @@ uv run --locked --no-sync --env-file .env celery -A app.tasks.celery_app:celery_
 协调。任务复用 worker 专属事件循环，使用固定地址访问 Paper Service。Worker 退出时释放共享 HTTP 客户端和向量客户端。`TASK_RAG_WORKFLOW_TIMEOUT_SECONDS` 继续作为批次执行超时，默认
 1800 秒；Redis 队列可见性超时为 7200 秒。
 
-离线检查（HTTP、解析及索引使用替身，不调用外部服务）：
+离线检查（HTTP、OSS 及索引使用替身，不调用外部服务）：
 
 ```powershell
 .\.venv311\Scripts\python.exe -B -m unittest tests.test_rag_batch tests.test_paper_rag_processor tests.test_paper_service_http tests.test_celery_runtime tests.test_rag_oss -q
@@ -275,20 +281,6 @@ Windows 上 Psycopg 异步连接需要 Selector 事件循环。使用当前锁�
 $env:TEST_DATABASE_POSTGRES_URL = "postgresql://user:password@localhost:5432/paper_collector_test"
 .\.venv311\Scripts\python.exe -m unittest tests.test_async_database tests.test_postgres_models tests.test_agent_runs -v
 ```
-
-## 预下载 RAG 模型
-
-在项目根目录执行以下 PowerShell 命令，将 RAG 模型保存到本地 `models/` 目录：
-
-```powershell
-# 稠密向量模型：运行时直接从 models/bge-m3 加载
-.\.venv311\Scripts\hf.exe download BAAI/bge-m3 --local-dir models\bge-m3
-
-# 稀疏向量模型：保留 Hugging Face 缓存结构，供 FastEmbed 从 models/fastembed 加载
-.\.venv311\Scripts\hf.exe download Qdrant/bm25 --cache-dir models\fastembed
-```
-
-模型下载完成后可离线启动服务。`models/` 已被 Git 忽略，不会提交模型文件。
 
 ## 运行论文 RAG 评测
 

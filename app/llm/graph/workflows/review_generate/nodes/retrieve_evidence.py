@@ -1,12 +1,11 @@
 from app.llm.artifacts.store import LocalArtifactStore
-from app.rag.retrieval.paper_content_retrieval import PaperContentHybridRetrievalModule
 from app.llm.graph.workflows.review_generate.contracts import (
     retrieval_plan_hash,
     review_batch,
     save,
 )
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
-
+from app.rag.retrieval.paper_content_retrieval import PaperContentHybridRetrievalModule
 
 MAX_EVIDENCE_QUERIES = 2
 RETRIEVAL_TOP_K = 6
@@ -88,14 +87,18 @@ class RetrieveEvidenceNode:
         self.content_retrieval = content_retrieval
 
     async def prepare(self, state):
-        claims = (await self.artifact_store.read_json_uri(state["claims_artifact_ref"]))["claims"]
+        claims = (
+            await self.artifact_store.read_json_uri(state["claims_artifact_ref"])
+        )["claims"]
         previous = {}
         if state.get("evidence_ledger_artifact_ref"):
             previous = {
                 item["claim_id"]: item
-                for item in (await self.artifact_store.read_json_uri(
-                    state["evidence_ledger_artifact_ref"]
-                ))["claims"]
+                for item in (
+                    await self.artifact_store.read_json_uri(
+                        state["evidence_ledger_artifact_ref"]
+                    )
+                )["claims"]
             }
         jobs, claim_ids, cached = [], [], {}
         user_id = state["user_id"]
@@ -122,14 +125,16 @@ class RetrieveEvidenceNode:
             ):
                 cached[claim_id] = old
                 continue
-            jobs.append({
-                "item_id": claim_id,
-                "claim_hash": claim["claim_hash"],
-                "retrieval_plan_hash": plan_hash,
-                "queries": queries,
-                "paper_ids": claim["candidate_paper_ids"],
-                "user_id": user_id,
-            })
+            jobs.append(
+                {
+                    "item_id": claim_id,
+                    "claim_hash": claim["claim_hash"],
+                    "retrieval_plan_hash": plan_hash,
+                    "queries": queries,
+                    "paper_ids": claim["candidate_paper_ids"],
+                    "user_id": user_id,
+                }
+            )
         return review_batch(jobs, claim_ids=claim_ids, cached=cached)
 
     async def run_item(self, item):
@@ -137,12 +142,14 @@ class RetrieveEvidenceNode:
             self.content_retrieval = PaperContentHybridRetrievalModule()
         query_results = []
         for query in item["queries"]:
-            query_results.append(await self.content_retrieval.search(
-                query=query,
-                user_id=item["user_id"],
-                top_k=RETRIEVAL_TOP_K,
-                paper_ids=item["paper_ids"],
-            ))
+            query_results.append(
+                await self.content_retrieval.search(
+                    query=query,
+                    user_id=item["user_id"],
+                    top_k=RETRIEVAL_TOP_K,
+                    paper_ids=item["paper_ids"],
+                )
+            )
         return {
             "claim_id": item["item_id"],
             "claim_hash": item["claim_hash"],
@@ -157,7 +164,9 @@ class RetrieveEvidenceNode:
         context = state["batch_context"]
         entries = {**context["cached"], **results}
         ref = await save(
-            self.artifact_store, state, "evidence_ledger",
+            self.artifact_store,
+            state,
+            "evidence_ledger",
             {"claims": [entries[claim_id] for claim_id in context["claim_ids"]]},
         )
         return {
@@ -170,5 +179,6 @@ class RetrieveEvidenceNode:
     def failure(state, error):
         return failed(
             f"evidence retrieval failed: {error['error']}",
-            error_code="RETRIEVAL_FAILED", retryable=True,
+            error_code="RETRIEVAL_FAILED",
+            retryable=True,
         )

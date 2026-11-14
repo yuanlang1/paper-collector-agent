@@ -1,4 +1,3 @@
-import asyncio
 import json
 from typing import Literal
 
@@ -7,7 +6,6 @@ from langgraph.errors import GraphBubbleUp
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.config import settings
-from app.database import SessionLocal
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import (
     UNTRUSTED_INPUT_GUARD,
@@ -20,11 +18,10 @@ from app.llm.graph.workflows.review_generate.contracts import (
 )
 from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 from app.llm.provider import ChatClient, ModelOptions
-from app.services import llm_setting_service
 from app.llm.provider.structured_output import StructuredOutputError
+from app.services import llm_setting_service
 
-
-CLAIM_VERIFICATION_PROMPT = ("""
+CLAIM_VERIFICATION_PROMPT = """
     你是一名严格的学术论点核验员。
     你的任务是判断当前 claim 是否被输入的 original_evidence 真实支持。只能依据提供的原文证据，不得使用外部知识，不得因为主题相关、片段数量较多或表述看似合理就判定支持。
 
@@ -156,7 +153,6 @@ CLAIM_VERIFICATION_PROMPT = ("""
     }
     ```
 """
-)
 
 
 class EvidenceQuote(BaseModel):
@@ -231,7 +227,6 @@ class VerifyClaimsNode:
     ):
         self.artifact_store = artifact_store or LocalArtifactStore()
         self.user_id = user_id
-        self._model_lock = asyncio.Lock()
         self.model = model
 
     @staticmethod
@@ -336,23 +331,49 @@ class VerifyClaimsNode:
         }
         for attempt in range(2):
             try:
-                result = (await self.model.ainvoke([
-                    SystemMessage(content=CLAIM_VERIFICATION_PROMPT + UNTRUSTED_INPUT_GUARD),
-                    HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-                ])).model_dump(mode="json")
+                result = (
+                    await self.model.ainvoke(
+                        [
+                            SystemMessage(
+                                content=CLAIM_VERIFICATION_PROMPT
+                                + UNTRUSTED_INPUT_GUARD
+                            ),
+                            HumanMessage(
+                                content=json.dumps(payload, ensure_ascii=False)
+                            ),
+                        ]
+                    )
+                ).model_dump(mode="json")
                 return self._bind_verdict(result, claim, sources)
-            except (StructuredOutputError, ValidationError, VerificationProtocolError) as exc:
+            except (
+                StructuredOutputError,
+                ValidationError,
+                VerificationProtocolError,
+            ) as exc:
                 if attempt:
                     raise VerificationProtocolError(str(exc)) from exc
                 payload["validation_feedback"] = str(exc)
 
     async def _revision_snapshot(self, state):
         claims = await self.artifact_store.read_json_uri(state["claims_artifact_ref"])
-        ledger = await self.artifact_store.read_json_uri(state["evidence_ledger_artifact_ref"])
-        return content_hash([
-            [{"claim_id": item["claim_id"], "claim_hash": item["claim_hash"]} for item in claims["claims"]],
-            [{"claim_id": item["claim_id"], "chunk_snippets": item["chunk_snippets"]} for item in ledger["claims"]],
-        ])
+        ledger = await self.artifact_store.read_json_uri(
+            state["evidence_ledger_artifact_ref"]
+        )
+        return content_hash(
+            [
+                [
+                    {"claim_id": item["claim_id"], "claim_hash": item["claim_hash"]}
+                    for item in claims["claims"]
+                ],
+                [
+                    {
+                        "claim_id": item["claim_id"],
+                        "chunk_snippets": item["chunk_snippets"],
+                    }
+                    for item in ledger["claims"]
+                ],
+            ]
+        )
 
     async def _schedule_claim_revision(self, state, items):
         current = await self._revision_snapshot(state)
@@ -383,26 +404,35 @@ class VerifyClaimsNode:
 
     async def _ensure_model(self):
         if self.model is None:
-            async with self._model_lock:
-                if self.model is None:
-                    async with SessionLocal() as db:
-                        config = await llm_setting_service.get_small_llm_config(db, user_id=self.user_id)
-                    self.model = ChatClient(runtime_config=config).structured(
-                        Verdict, max_attempts=1, options=ModelOptions(temperature=0),
-                    )
+            config = await llm_setting_service.get_small_llm_config(
+                user_id=self.user_id
+            )
+            if self.model is None:
+                self.model = ChatClient(runtime_config=config).structured(
+                    Verdict,
+                    max_attempts=1,
+                    options=ModelOptions(temperature=0),
+                )
 
     async def prepare(self, state):
-        claims = (await self.artifact_store.read_json_uri(state["claims_artifact_ref"]))["claims"]
+        claims = (
+            await self.artifact_store.read_json_uri(state["claims_artifact_ref"])
+        )["claims"]
         ledger = {
             item["claim_id"]: item
-            for item in (await self.artifact_store.read_json_uri(state["evidence_ledger_artifact_ref"]))["claims"]
+            for item in (
+                await self.artifact_store.read_json_uri(
+                    state["evidence_ledger_artifact_ref"]
+                )
+            )["claims"]
         }
-        framework = (await self.artifact_store.read_json_uri(state["framework_artifact_ref"]))["framework"]
+        framework = (
+            await self.artifact_store.read_json_uri(state["framework_artifact_ref"])
+        )["framework"]
         corpus = await self.artifact_store.read_json_uri(state["corpus_artifact_ref"])
         sections = {section["section_id"]: section for section in framework["sections"]}
         titles = {
-            str(paper["paper_id"]): paper.get("title", "")
-            for paper in corpus["papers"]
+            str(paper["paper_id"]): paper.get("title", "") for paper in corpus["papers"]
         }
         previous = {}
         if state.get("claim_verification_artifact_ref"):
@@ -463,7 +493,9 @@ class VerifyClaimsNode:
         await self._ensure_model()
         claim = item["claim"]
         verdict = await self._verify_claim(
-            claim=claim, section=item["section"], section_claims=item["section_claims"],
+            claim=claim,
+            section=item["section"],
+            section_claims=item["section_claims"],
             sources=item["sources"],
         )
         verdict.update(
@@ -477,19 +509,30 @@ class VerifyClaimsNode:
         context = state["batch_context"]
         verdicts = {**context["cached"], **results}
         ordered_verdicts = [
-            verdicts[claim_id] for claim_id in context["claim_ids"] if claim_id in verdicts
+            verdicts[claim_id]
+            for claim_id in context["claim_ids"]
+            if claim_id in verdicts
         ]
         verification_ref = state.get("claim_verification_artifact_ref")
         if ordered_verdicts or not failure:
             verification_ref = await save(
-                self.artifact_store, state, "claim_verification", {"claims": ordered_verdicts},
+                self.artifact_store,
+                state,
+                "claim_verification",
+                {"claims": ordered_verdicts},
             )
         update = {"claim_verification_artifact_ref": verification_ref}
         if failure:
             return self.failure({**state, **update}, failure)
 
-        revisions = [revision for verdict in ordered_verdicts for revision in verdict["revisions"]]
-        supported = any(verdict["status"] == "supported" for verdict in ordered_verdicts)
+        revisions = [
+            revision
+            for verdict in ordered_verdicts
+            for revision in verdict["revisions"]
+        ]
+        supported = any(
+            verdict["status"] == "supported" for verdict in ordered_verdicts
+        )
         if revisions:
             if (
                 state["reflection_round"]
@@ -498,7 +541,8 @@ class VerifyClaimsNode:
                 return {
                     **update,
                     "revision_items": [],
-                    "warnings": state.get("warnings", []) + [
+                    "warnings": state.get("warnings", [])
+                    + [
                         "Claim evidence revision limit reached; unsupported claims "
                         "will be represented as material insufficiency."
                     ],
@@ -506,7 +550,9 @@ class VerifyClaimsNode:
                     "status": "running",
                 }
             try:
-                result = await self._schedule_claim_revision({**state, **update}, revisions)
+                result = await self._schedule_claim_revision(
+                    {**state, **update}, revisions
+                )
             except GraphBubbleUp:
                 raise
             except Exception as exc:
@@ -533,10 +579,18 @@ class VerifyClaimsNode:
         if "item_id" in error:
             message = f"claim_id={error['item_id']}: {message}"
         protocol_error = error.get("protocol_error", False)
-        label = "claim verification protocol failed" if protocol_error else "claim verification failed"
+        label = (
+            "claim verification protocol failed"
+            if protocol_error
+            else "claim verification failed"
+        )
         return failed(
             f"{label}: {message}",
-            claim_verification_artifact_ref=state.get("claim_verification_artifact_ref"),
-            error_code="VERIFICATION_PROTOCOL_FAILED" if protocol_error else "VERIFICATION_FAILED",
+            claim_verification_artifact_ref=state.get(
+                "claim_verification_artifact_ref"
+            ),
+            error_code="VERIFICATION_PROTOCOL_FAILED"
+            if protocol_error
+            else "VERIFICATION_FAILED",
             retryable=not protocol_error,
         )

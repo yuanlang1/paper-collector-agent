@@ -1,11 +1,9 @@
-import asyncio
 import json
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.errors import GraphBubbleUp
 from pydantic import BaseModel, Field
 
-from app.database import SessionLocal
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.review_generate.contracts import (
     UNTRUSTED_INPUT_GUARD,
@@ -28,7 +26,8 @@ section_outline 是固定的综述目录；本节只讨论当前 section 的范�
 不使用“如上文所述”等依赖具体前文内容的指代。
 
 规则：
-1. claims_with_evidence 非空时，arguments 必须覆盖其中每个 claim_id 至少一次；只有直接相关的论点才能放入同一个 Argument。
+1. claims_with_evidence 非空时，arguments 必须覆盖 required_claim_ids 中每个本节论点至少一次。
+   其余论点仅在执行修订需要时引用；只有直接相关的论点才能放入同一个 Argument。
 2. 每个 evidence 都有本章节内有效的 source_index。evidence_indices 只能选择输入明确给出的 source_index，
    不得按列表位置猜测编号，也不得使用旧草稿或其他章节的编号。
 3. 每个 Argument 的 claim_ids 和 evidence_indices 必须来自输入。对每个覆盖的 Claim，所选 supports
@@ -109,20 +108,18 @@ class RenderSectionsNode:
         self.artifact_store = artifact_store or LocalArtifactStore()
         self.user_id = user_id
         self.model = model
-        self._model_lock = asyncio.Lock()
 
     async def _create_model(self):
-        async with SessionLocal() as db:
-            config = await llm_setting_service.get_small_llm_config(db, user_id=self.user_id)
+        config = await llm_setting_service.get_small_llm_config(user_id=self.user_id)
         return ChatClient(runtime_config=config).structured(
             SectionDraft, options=ModelOptions(temperature=0),
         )
 
     async def _ensure_model(self):
         if self.model is None:
-            async with self._model_lock:
-                if self.model is None:
-                    self.model = await self._create_model()
+            model = await self._create_model()
+            if self.model is None:
+                self.model = model
 
     @staticmethod
     def _citation_text(text, paper_ids):
@@ -254,11 +251,25 @@ class RenderSectionsNode:
             and claim["claim_id"] in verdicts
             and verdicts[claim["claim_id"]]["status"] == "supported"
         ]
+        revisions = revisions_for(state, "section", section["section_id"])
+        supporting_ids = dict.fromkeys(
+            claim_id for revision in revisions for claim_id in revision.get("supporting_claim_ids", [])
+        )
+        supporting_claims = []
+        for claim_id in supporting_ids:
+            claim = claims.get(claim_id)
+            if (
+                not claim
+                or claim["withdrawn_reason"]
+                or claim["section_id"] == section["section_id"]
+                or claim_id not in verdicts
+            ):
+                raise ValueError(f"invalid cross-section supporting claim: {claim_id}")
+            supporting_claims.append(claim)
         packages = [
             {"claim": claim, "evidence": verified_pack(claim, verdicts[claim["claim_id"]])}
-            for claim in section_claims
+            for claim in [*section_claims, *supporting_claims]
         ]
-        revisions = revisions_for(state, "section", section["section_id"])
         signature = content_hash(
             [
                 framework["title"],
@@ -289,6 +300,7 @@ class RenderSectionsNode:
             "section_outline": section_outline,
             "section": section,
             "claims_with_evidence": self._model_packages(packages, sources),
+            "required_claim_ids": [claim["claim_id"] for claim in section_claims],
             "old_draft": old if revisions else None,
             "revisions": revisions,
         }
@@ -309,9 +321,10 @@ class RenderSectionsNode:
             SystemMessage(content=SECTION_DRAFT_PROMPT + UNTRUSTED_INPUT_GUARD),
             HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
         ])).model_dump(mode="json")
-        section_claims = [package["claim"] for package in packages]
         if packages:
-            arguments = self._render_arguments(result, packages, sources)
+            arguments = self._render_arguments(
+                result, packages, sources, payload["required_claim_ids"],
+            )
             text = "\n\n".join(item["text"] for item in arguments)
         else:
             arguments = result["arguments"]
@@ -324,18 +337,21 @@ class RenderSectionsNode:
                 raise ValueError("insufficient-evidence section must contain only an uncited notice")
             text = result["insufficient_notice"]
 
+        used = {claim_id for argument in arguments for claim_id in argument["claim_ids"]}
+        used_claim_hashes = {
+            pack["claim"]["claim_id"]: pack["claim"]["claim_hash"]
+            for pack in packages
+            if pack["claim"]["claim_id"] in used
+        }
         draft = {
             "section_id": payload["section"]["section_id"],
             "title": payload["section"]["title"],
             "input_hash": item["input_hash"],
-            "claim_hashes": {
-                claim["claim_id"]: claim["claim_hash"]
-                for claim in section_claims
-            },
+            "claim_hashes": used_claim_hashes,
             "arguments": arguments,
             "text": text,
             "summary": result["summary"],
-            "used_claim_ids": [claim["claim_id"] for claim in section_claims],
+            "used_claim_ids": list(used_claim_hashes),
             "omitted_claim_ids": [],
         }
         ref = await save(
@@ -343,7 +359,7 @@ class RenderSectionsNode:
         )
         return ref
 
-    def _render_arguments(self, result, packages, sources):
+    def _render_arguments(self, result, packages, sources, required_claim_ids):
         if result["insufficient_notice"]:
             raise ValueError(
                 "evidence-backed section cannot contain an insufficiency notice"
@@ -402,6 +418,6 @@ class RenderSectionsNode:
             for argument in arguments
             for claim_id in argument["claim_ids"]
         }
-        if used != claim_ids:
+        if not used or not set(required_claim_ids) <= used:
             raise ValueError("section draft omitted verified claims")
         return arguments

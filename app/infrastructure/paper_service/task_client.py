@@ -7,7 +7,7 @@ from app.infrastructure.paper_service.http_client import (
     positive_id,
 )
 from app.infrastructure.paper_service.types import TaskState
-from app.llm.graph.workflows.paper_search_schemas import PaperTypeCode
+from app.llm.graph.workflows.paper_search.paper_search_schemas import PaperTypeCode
 
 
 class TaskServiceClient(ServiceClient):
@@ -89,9 +89,6 @@ class TaskServiceClient(ServiceClient):
                         "taskId": positive_id(relation["task_id"]),
                         "paperId": positive_id(relation["paper_id"], "paper_id"),
                         "star": int(star) if star is not None else None,
-                        "recommendationMarkdown": str(
-                            relation.get("recommendation_markdown") or ""
-                        ),
                         "reasons": str(
                             relation.get("reasons")
                             or relation.get("recommendation_reason")

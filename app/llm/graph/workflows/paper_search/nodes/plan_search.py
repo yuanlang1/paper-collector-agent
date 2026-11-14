@@ -1,20 +1,26 @@
+import json
 from collections.abc import Mapping
 from datetime import date
-import json
 from math import ceil
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.runtime import Runtime
 from langgraph.errors import GraphBubbleUp
+from langgraph.runtime import Runtime
 
 from app.llm.context import PaperSearchContext
-from app.llm.graph.workflows.paper_search_schemas import SearchPlanningArgs, SearchTagArgs, SourceTypeValue
+from app.llm.graph.workflows.paper_search.paper_search_schemas import (
+    SearchPlanningArgs,
+    SearchTagArgs,
+    SourceTypeValue,
+)
 from app.llm.provider import ValidatedJsonInvoker
-from app.services.search_connection_executor import search_executor as shared_search_executor, validate_query
-from app.services.setting_service import default_source_limits
-
+from app.services.search_connection_executor import (
+    search_executor as shared_search_executor,
+)
+from app.services.search_connection_executor import validate_query
+from app.utils.search_adapters.contracts import SEARCH_PAGE_SIZE
 
 PLAN_SEARCH_SYSTEM_PROMPT = """
 你是论文检索规划专家。根据用户原始请求及 available_providers 生成 SearchPlanningArgs JSON。
@@ -38,26 +44,38 @@ _PROVIDER_TAGS = {
 
 class PlanSearchNode:
     def __init__(self, *, model: BaseChatModel, search_executor=None):
-        self.executor = search_executor if search_executor is not None else shared_search_executor
+        self.executor = (
+            search_executor if search_executor is not None else shared_search_executor
+        )
         self.model = model
         self.invoker = ValidatedJsonInvoker(model=model, schema=SearchPlanningArgs)
 
-    async def __call__(self, state: Mapping[str, Any], runtime: Runtime[PaperSearchContext]) -> dict:
+    async def __call__(
+        self, state: Mapping[str, Any], runtime: Runtime[PaperSearchContext]
+    ) -> dict:
         try:
             available, warnings = await self.executor.get_available_providers(
-                user_id=runtime.context["user_id"], provider_ids=state.get("provider_ids"),
+                user_id=runtime.context["user_id"],
+                provider_ids=state.get("provider_ids"),
             )
-            output = await self.invoker.ainvoke([
-                SystemMessage(content=PLAN_SEARCH_SYSTEM_PROMPT),
-                HumanMessage(content=json.dumps({
-                    "prompt": state["original_prompt"], "available_providers": list(available),
-                }, ensure_ascii=False)),
-            ])
+            output = await self.invoker.ainvoke(
+                [
+                    SystemMessage(content=PLAN_SEARCH_SYSTEM_PROMPT),
+                    HumanMessage(
+                        content=json.dumps(
+                            {
+                                "prompt": state["original_prompt"],
+                                "available_providers": list(available),
+                            },
+                            ensure_ascii=False,
+                        )
+                    ),
+                ]
+            )
             output = SearchPlanningArgs.model_validate(output)
             if set(output.query_plans) != set(available):
                 raise ValueError("query_plans must exactly match available providers")
             understanding = output.query_understanding
-            limits = state.get("paper_search_source_limits") or default_source_limits()
             tasks = {}
             for provider, connection in available.items():
                 arguments = dict(output.query_plans[provider].arguments)
@@ -65,28 +83,46 @@ class PlanSearchNode:
                 arguments.pop("year_from", None)
                 arguments.pop("year_to", None)
                 if understanding.yearFrom is not None:
-                    arguments.update(year_from=understanding.yearFrom, year_to=understanding.yearTo)
-                validate_query(provider, arguments, connection["settings"])
-                page_size = connection["settings"].get("page_size", 5)
+                    arguments.update(
+                        year_from=understanding.yearFrom, year_to=understanding.yearTo
+                    )
+                validate_query(provider, arguments)
+                initial_limit = connection["initial_limit"]
                 tasks[provider] = {
-                    "provider_id": provider, "round": 0, "query_args": arguments,
+                    "provider_id": provider,
+                    "round": 0,
+                    "query_args": arguments,
                     "configuration_version": connection["configuration_version"],
-                    "cursor": None, "page_size": page_size, "limit": limits[provider],
-                    "max_pages": min(20, ceil(limits[provider] / page_size)),
+                    "cursor": None,
+                    "limit": initial_limit,
+                    "max_pages": ceil(initial_limit / SEARCH_PAGE_SIZE),
                 }
-            year_tag = (date.today().year - understanding.yearFrom + 1
-                        if understanding.yearTo == date.today().year else 0)
-            tags = SearchTagArgs(yearTag=year_tag, paperTag=output.paperTag,
-                                 sourceTag=[_PROVIDER_TAGS[p] for p in tasks])
+            year_tag = (
+                date.today().year - understanding.yearFrom + 1
+                if understanding.yearTo == date.today().year
+                else 0
+            )
+            tags = SearchTagArgs(
+                yearTag=year_tag,
+                paperTag=output.paperTag,
+                sourceTag=[_PROVIDER_TAGS[p] for p in tasks],
+            )
         except GraphBubbleUp:
             raise
         except Exception as exc:
-            return {"stage": "failed", "status": "failed", "error": f"论文检索计划失败：{exc}"}
+            return {
+                "stage": "failed",
+                "status": "failed",
+                "error": f"论文检索计划失败：{exc}",
+            }
         return {
-            "stage": "searching", "status": "running", "error": None,
+            "stage": "searching",
+            "status": "running",
+            "error": None,
             "query_understanding": understanding.model_dump(mode="json"),
             "search_tag": tags.model_dump(mode="json"),
-            "provider_query_plans": tasks, "active_search_tasks": tasks,
+            "provider_query_plans": tasks,
+            "active_search_tasks": tasks,
             "supplemental_search_round": 0,
             "warnings": [*state.get("warnings", []), *warnings],
         }

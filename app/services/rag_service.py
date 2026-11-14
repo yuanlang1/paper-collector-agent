@@ -8,7 +8,6 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 
 from app.common.exceptions import AppException
-from app.infrastructure.http import http_manager
 from app.infrastructure.oss import oss_store
 from app.infrastructure.paper_service.paper_client import paper_service_client
 from app.llm.context import PaperReadingContext
@@ -17,7 +16,6 @@ from app.llm.tools.search_tools.search_paper_index import (
     build_search_paper_index_tool,
 )
 from app.rag.data_preparation.data_preparation import DataPreparationModule
-from app.rag.file_parser.file_parser import FileParser
 from app.rag.processing.paper_rag_processor import PaperRagInput, PaperRagProcessor
 from app.rag.retrieval.paper_content_retrieval import (
     PaperContentHybridRetrievalModule,
@@ -44,9 +42,7 @@ async def extract_studies(
     paper_id = paper_id.strip()
     oss_name = oss_name.strip()
 
-    markdown = await oss_store.get_markdown(
-        pdf_sha256=oss_name,
-    )
+    markdown = await oss_store.get_paper_markdown(oss_name)
     initial_evidence = _markdown_context(markdown.content)
 
     run_id = f"reading_{uuid4().hex}"
@@ -57,9 +53,9 @@ async def extract_studies(
         paper_id=paper_id,
     )
 
-    llm_config = await get_default_model(db, user_id=user_id)
+    llm_config = await get_default_model(user_id=user_id, db=db)
     if llm_config is None:
-        llm_config = await get_small_llm_config(db, user_id=user_id)
+        llm_config = await get_small_llm_config(user_id=user_id, db=db)
     model = ChatOpenAI(
         model=llm_config.model,
         base_url=llm_config.base_url,
@@ -157,12 +153,7 @@ async def process_batch(paper_ids: list[int], *, user_id: str) -> dict:
     }
     papers = response["result"]["papers"]
     if papers:
-        mineru = http_manager.mineru_client
-
-        processor = PaperRagProcessor(
-            file_parser=FileParser(mineru_client=mineru),
-            data_preparation=DataPreparationModule(),
-        )
+        processor = PaperRagProcessor(data_preparation=DataPreparationModule())
         processed = await processor.process_many(
             [PaperRagInput(**paper, user_id=user_id) for paper in papers]
         )

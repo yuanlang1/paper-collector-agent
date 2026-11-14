@@ -6,7 +6,6 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from app.api import (
     internal_rag_router,
-    internal_settings_router,
     run_router,
     setting_router,
     thread_router,
@@ -14,9 +13,10 @@ from app.api import (
 from app.common.exceptions import register_exception_handlers
 from app.config import settings
 from app.database import Base, SessionLocal, create_database
-from app.infrastructure.redis import redis_manager
+from app.db.repositories.search_connection import migrate_connection_limits
 from app.infrastructure.http import http_manager
 from app.infrastructure.oss import oss_store
+from app.infrastructure.redis import redis_manager
 from app.memory.store import open_memory_store
 from app.rag.index_construction.base import close_index_resources
 from app.services.search_connection_executor import search_executor
@@ -57,6 +57,7 @@ async def lifespan(app: FastAPI):
 
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
+            await migrate_connection_limits(connection)
 
         resources.push_async_callback(oss_store.close)
         resources.push_async_callback(close_index_resources)
@@ -74,7 +75,6 @@ register_exception_handlers(app)
 app.include_router(run_router)
 app.include_router(thread_router)
 app.include_router(setting_router)
-app.include_router(internal_settings_router)
 app.include_router(internal_rag_router)
 
 

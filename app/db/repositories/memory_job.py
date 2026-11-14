@@ -119,8 +119,9 @@ async def get_episode_source(
 
 
 async def is_episode_current(db: AsyncSession, *, job: MemoryJobRow) -> bool:
-    return bool(await db.scalar(
-        text("""
+    return bool(
+        await db.scalar(
+            text("""
             SELECT EXISTS (
                 SELECT 1
                 FROM agent_thread AS thread
@@ -140,13 +141,14 @@ async def is_episode_current(db: AsyncSession, *, job: MemoryJobRow) -> bool:
                   AND latest.status = 'completed'
             )
         """),
-        {
-            "user_id": job.user_id,
-            "thread_id": job.thread_id,
-            "run_id": job.run_id,
-            "source_thread_update_time": job.source_thread_update_time,
-        },
-    ))
+            {
+                "user_id": job.user_id,
+                "thread_id": job.thread_id,
+                "run_id": job.run_id,
+                "source_thread_update_time": job.source_thread_update_time,
+            },
+        )
+    )
 
 
 async def create_run_jobs(

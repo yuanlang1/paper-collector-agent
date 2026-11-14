@@ -13,7 +13,7 @@ from langchain_core.embeddings import Embeddings
 from qdrant_client import AsyncQdrantClient, models
 
 from app.config import settings
-from app.rag.embeddings.siliconflow import SiliconFlowEmbeddings
+from app.rag.embeddings.qwen import create_qwen_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -43,14 +43,7 @@ def get_qdrant_client() -> AsyncQdrantClient:
 
 @lru_cache(maxsize=1)
 def get_dense_embeddings() -> Embeddings:
-    return SiliconFlowEmbeddings(
-        api_key=settings.SILICONFLOW_API_KEY,
-        model=settings.SILICONFLOW_EMBEDDING_MODEL,
-        base_url=settings.SILICONFLOW_EMBEDDING_BASE_URL,
-        timeout_seconds=settings.SILICONFLOW_EMBEDDING_TIMEOUT_SECONDS,
-        batch_size=settings.SILICONFLOW_EMBEDDING_BATCH_SIZE,
-        max_retries=settings.SILICONFLOW_EMBEDDING_MAX_RETRIES,
-    )
+    return create_qwen_embeddings()
 
 
 async def close_index_resources() -> None:
