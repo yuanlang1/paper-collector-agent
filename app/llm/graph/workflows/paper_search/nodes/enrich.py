@@ -1,165 +1,204 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import Any
 
+from anyio import fail_after
+from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.errors import GraphBubbleUp
+from langgraph.runtime import Runtime
+
+from app.config import settings
+from app.infrastructure.http import http_manager
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.graph.workflows.paper_search_schemas import PaperTypeCode
-from app.tasks.modules.paper_search.crossref_enrich import (
-    normalize_doi,
-    optional_text,
-    query_papers,
+from app.llm.context import PaperSearchContext
+from app.llm.graph.workflows.paper_search.nodes.venue import VenueResolver
+from app.llm.graph.workflows.paper_search.paper_search_schemas import (
+    PaperFrontPageMetadata,
 )
-
-
-def _paper_type_code(value: Any) -> int:
-    try:
-        return int(PaperTypeCode(str(value)))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _as_int(value: Any) -> int:
-    try:
-        return max(int(value or 0), 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _append_venue_candidate(
-    paper: dict[str, Any],
-    venue: str | None,
-) -> None:
-    if venue is None:
-        return
-
-    candidates = paper.setdefault("venue_candidates", [])
-    if venue not in candidates:
-        candidates.append(venue)
+from app.llm.graph.workflows.paper_search.state import EnrichWorkerState
+from app.llm.prompt import FRONT_PAGE_PROMPT
+from app.llm.provider import ChatClient, ModelOptions
+from app.rag.file_parser.file_parser import FileParser
+from app.schemas.file_parser import FileParseOptions, FileParseRequest, FileType
+from app.services.llm_setting_service import get_small_llm_config
+from app.tasks.modules.paper_search.crossref_enrich import normalize_doi
 
 
 class PaperEnrichmentNode:
-    """Filter PDF candidates and supplement their metadata with Crossref."""
+    def __init__(
+        self,
+        *,
+        file_parser: FileParser | None = None,
+        venue_resolver: VenueResolver | None = None,
+    ) -> None:
+        self.file_parser = file_parser
+        self.venue_resolver = venue_resolver or VenueResolver()
 
+    async def __call__(
+        self,
+        state: EnrichWorkerState,
+        runtime: Runtime[PaperSearchContext],
+    ) -> dict[str, Any]:
+        index = state["paper_index"]
+        info = dict(state["paper"]["paper_info"])
+        paper = {**state["paper"], "paper_info": info}
+        title = info.get("title") or f"候选论文 {index + 1}"
+        warnings = []
+        venue_name = None
+        extraction_failed = False
+
+        try:
+            with fail_after(settings.PAPER_ABSTRACT_TASK_TIMEOUT_SECONDS):
+                parser = self.file_parser or FileParser(
+                    mineru_client=http_manager.mineru_client
+                )
+                file_id = f"{state['child_run_id']}-{index}"
+                document = await parser.parse_one(
+                    FileParseRequest(
+                        file_id=file_id,
+                        uri=info["pdf_url"],
+                        file_name=f"{file_id}.pdf",
+                        file_type=FileType.PDF,
+                        options=FileParseOptions(page_ranges="1-2"),
+                    )
+                )
+                if not document.page_content.strip():
+                    raise ValueError("MinerU 返回空 Markdown")
+
+                config = await get_small_llm_config(
+                    user_id=int(runtime.context["user_id"])
+                )
+                invoker = ChatClient(config).structured(
+                    PaperFrontPageMetadata,
+                    options=ModelOptions(streaming=False),
+                )
+                metadata = await invoker.ainvoke(
+                    [
+                        SystemMessage(content=FRONT_PAGE_PROMPT),
+                        HumanMessage(
+                            content=json.dumps(
+                                {
+                                    "venue_candidates": paper.get("venue_candidates", []),
+                                    "pdf_front_pages": document.page_content[:32_000],
+                                },
+                                ensure_ascii=False,
+                            )
+                        ),
+                    ]
+                )
+        except GraphBubbleUp:
+            raise
+        except Exception as exc:
+            extraction_failed = True
+            warnings.append(
+                f"{title} 的前两页提取失败（{type(exc).__name__}），保留来源信息。"
+            )
+        else:
+            doi = normalize_doi(metadata.doi)
+            source_doi = normalize_doi(info.get("doi"))
+            abstract = (metadata.abstract or "").strip()
+            if doi and source_doi and doi.casefold() != source_doi.casefold():
+                warnings.append(f"{title} 的 PDF DOI 与来源 DOI 不一致，保留来源 DOI。")
+                if abstract:
+                    info["paper_abstract"] = abstract
+                    info["abstract_source"] = "pdf_front_pages"
+            else:
+                if not info.get("title") and metadata.title:
+                    info["title"] = metadata.title.strip()
+                if not info.get("authors"):
+                    authors = [
+                        name.strip() for name in metadata.authors if name.strip()
+                    ]
+                    author_text = ", ".join(authors)
+                    if 0 < len(author_text) <= 1000:
+                        info["authors"] = author_text
+                        paper["author_names"] = authors
+                if doi and not source_doi:
+                    info["doi"] = doi
+                if abstract and (
+                    not info.get("paper_abstract")
+                    or info.get("abstract_source") == "search_snippet"
+                ):
+                    info["paper_abstract"] = abstract
+                    info["abstract_source"] = "pdf_front_pages"
+                keywords = [word.strip() for word in metadata.keywords if word.strip()]
+                if keywords:
+                    info["keywords"] = keywords
+                ai_abstract = (metadata.ai_abstract or "").strip()
+                if ai_abstract:
+                    info["ai_abstract"] = ai_abstract
+            venue_name = (metadata.venue_name or "").strip() or None
+
+        eligible = bool(info.get("title") and info.get("authors"))
+        if eligible:
+            _, venue_warning = await self.venue_resolver.resolve_paper(
+                paper, venue_name, use_source_fallback=extraction_failed
+            )
+            if venue_warning:
+                warnings.append(venue_warning)
+        else:
+            warnings.append(f"{title} 缺少入库所需的标题或作者，已跳过。")
+        return {
+            "enrich_results": {
+                index: {
+                    "paper": paper if eligible else None,
+                    "warnings": warnings,
+                    "extraction_failed": extraction_failed,
+                },
+            },
+        }
+
+
+class CollectEnrichNode:
     def __init__(self, artifact_store: LocalArtifactStore | None = None) -> None:
         self.artifact_store = artifact_store or LocalArtifactStore()
 
-    def _merge(
-        self,
-        paper: dict[str, Any],
-        crossref_paper: Mapping[str, Any],
-        match_method: str,
-    ) -> None:
-        paper_info = paper["paper_info"]
-        doi = normalize_doi(crossref_paper.get("doi"))
-        published_date = optional_text(crossref_paper.get("published"))
-        venue_title = optional_text(crossref_paper.get("venue"))
-        citations = max(
-            _as_int(paper_info.get("citations")),
-            _as_int(crossref_paper.get("citation_count")),
-        )
-        paper_type_code = _paper_type_code(
-            crossref_paper.get("publication_type")
-        )
-
-        if not paper_info.get("doi") and doi:
-            paper_info["doi"] = doi
-        if published_date and (
-            not paper_info.get("publish_date")
-            or paper_info.get("publish_date_precision") == "year"
-        ):
-            paper_info["publish_date"] = published_date
-            paper_info["publish_date_precision"] = "day"
-        abstract = optional_text(crossref_paper.get("abstract"))
-        if abstract and (
-            not paper_info.get("paper_abstract")
-            or paper_info.get("abstract_source") == "search_snippet"
-        ):
-            paper_info["paper_abstract"] = abstract
-            paper_info["abstract_source"] = "crossref"
-        if not paper_info.get("abstract_url"):
-            paper_info["abstract_url"] = optional_text(
-                crossref_paper.get("abstract_url")
-            ) or optional_text(crossref_paper.get("landing_url"))
-        paper_info["citations"] = citations
-        _append_venue_candidate(paper, venue_title)
-
-        paper["crossref_metadata"] = {
-            "status": "matched",
-            "match_method": match_method,
-            "doi": doi,
-            "published_date": published_date,
-            "citations": _as_int(crossref_paper.get("citation_count")),
-            "venue_title": venue_title,
-            "paper_type_code": paper_type_code,
-            "crossref_type": optional_text(
-                crossref_paper.get("publication_type")
-            ),
-        }
-
     async def __call__(self, state: Mapping[str, Any]) -> dict[str, Any]:
         try:
-            manifest = await self.artifact_store.read_json_uri(state["normalized_manifest_artifact_ref"])
-            papers = []
-            removed = []
-            for paper in manifest.get("papers", []):
-                info = paper["paper_info"]
-                if info.get("pdf_url"):
-                    papers.append(paper)
-                else:
-                    removed.append({
-                        "title": str(info.get("title") or ""),
-                        "reason": "未找到可用 PDF 下载地址。",
-                    })
-
-            matched = unmatched = 0
-            warnings = []
-            results = await query_papers([paper["paper_info"] for paper in papers])
-            for index, paper in enumerate(papers):
-                result = results[index]
-                if "error" in result:
-                    paper["crossref_metadata"] = {"status": "failed", "match_method": None}
-                    title = optional_text(paper["paper_info"].get("title")) or ""
-                    warnings.append(f"{title} 的 Crossref 补充失败：{result['error']}")
-                elif result["candidate"] is None:
-                    paper["crossref_metadata"] = {
-                        "status": "not_matched",
-                        "match_method": result["match_method"],
-                    }
-                    unmatched += 1
-                else:
-                    self._merge(paper, result["candidate"], result["match_method"])
-                    matched += 1
-
-            manifest["papers"] = papers
-            manifest["removed_without_pdf"] = removed
-            manifest["step_key"] = "crossref_enrichment"
+            results = state.get("enrich_results", {})
+            ordered = [
+                results[index] for index in range(len(state["enrich_candidates"]))
+            ]
+            papers = [item["paper"] for item in ordered if item["paper"] is not None]
+            warnings = [
+                *state.get("warnings", []),
+                *(warning for item in ordered for warning in item["warnings"]),
+            ]
+            progress = {
+                **state.get("progress", {}),
+                "enrich_kept": len(papers),
+                "enrich_extraction_failed": sum(
+                    item["extraction_failed"] for item in ordered
+                ),
+            }
+            if not papers and not progress.get("existing_in_database"):
+                return {
+                    "stage": "failed",
+                    "status": "failed",
+                    "progress": progress,
+                    "warnings": warnings,
+                    "error": "没有可继续推荐的论文。",
+                }
+            manifest = await self.artifact_store.read_json_uri(
+                state["normalized_manifest_artifact_ref"]
+            )
             artifact = await self.artifact_store.write_json(
                 run_id=state["child_run_id"],
-                step_key="crossref_enrichment",
-                source="crossref",
-                payload=manifest,
+                step_key="enrich_papers",
+                source="enrich",
+                payload={**manifest, "step_key": "enrich_papers", "papers": papers},
             )
         except Exception as exc:
             return {
                 "stage": "failed",
                 "status": "failed",
-                "error": f"Crossref metadata enrichment failed: {exc}",
+                "error": f"论文补全结果汇总失败：{exc}",
             }
-
         return {
-            "stage": "resolving_venues",
-            "status": "running",
-            "crossref_enrichment_manifest_artifact_ref": artifact.artifact_uri,
-            "progress": {
-                **state.get("progress", {}),
-                "pdf_enriched": 0,
-                "venue_enriched": 0,
-                "removed_without_pdf": len(removed),
-                "crossref_matched": matched,
-                "crossref_unmatched": unmatched,
-                "crossref_failed": len(warnings),
-            },
-            "warnings": [*state.get("warnings", []), *warnings],
-            "error": None,
+            "stage": "recommending",
+            "enriched_manifest_artifact_ref": artifact.artifact_uri,
+            "progress": progress,
+            "warnings": warnings,
         }

@@ -194,16 +194,17 @@ PAPER_SERVICE_TIMEOUT_SECONDS=10.0
 
 ## 批量论文索引
 
-paper service 调用 `POST /internal/rag/batches`，请求仅包含
-`{"paper_ids": [123, 124]}`；列表长度为 1～20，元素必须为不重复的正整数。
-接口通过 `index_batch.delay(paper_ids=...)` 提交 Celery `rag.index_batch` 任务，返回
+paper service 调用 `POST /internal/rag/batches`，请求包含
+`{"user_id": "11", "paper_ids": [123, 124]}`。`paper_ids` 是非空列表，元素必须为不重复的正整数。
+接口提交 Celery `rag.index_batch` 任务，返回
 HTTP 202 和 `ServiceResponse.data.job_id`（Celery 生成的 UUID）。不传论文详情、PDF 内容或 chunks。
 
 worker 调用 paper service 新增的 `POST /internal/paper/batch-details`，请求为
 `{"paperIds": [123, 124]}`。响应 `data.papers` 包含 `paperId`、`title`、
 `paperAbstract`、`pdfUrl`、`ossName`、`publishedDate`（`yyyy-MM-dd` 或 null），
-`data.missingPaperIds` 列出未找到的 ID。worker 按 ID 匹配详情，从发布日期提取年份，
-再执行 OSS 地址获取、MinerU 解析、Markdown 保存、内容切分和 Qdrant 论文级及正文索引。
+`data.missingPaperIds` 列出未找到的 ID。paper service 负责 MinerU 提取和 OSS 归档。
+worker 按 `ossName` 从同一 bucket 读取 `md/{ossName}.md`，切分 Markdown 并写入 Qdrant 论文级及正文索引。
+新正文切块暂不保存章节路径、页码和来源坐标。
 索引任务不领取 paper service 租约，不调用状态更新或批次完成接口。
 
 调用 `GET /internal/rag/batches/{job_id}` 查询结果，内部通过
@@ -240,7 +241,7 @@ uv run --locked --no-sync --env-file .env celery -A app.tasks.celery_app:celery_
 协调。任务复用 worker 专属事件循环，使用固定地址访问 Paper Service。Worker 退出时释放共享 HTTP 客户端和向量客户端。`TASK_RAG_WORKFLOW_TIMEOUT_SECONDS` 继续作为批次执行超时，默认
 1800 秒；Redis 队列可见性超时为 7200 秒。
 
-离线检查（HTTP、解析及索引使用替身，不调用外部服务）：
+离线检查（HTTP、OSS 及索引使用替身，不调用外部服务）：
 
 ```powershell
 .\.venv311\Scripts\python.exe -B -m unittest tests.test_rag_batch tests.test_paper_rag_processor tests.test_paper_service_http tests.test_celery_runtime tests.test_rag_oss -q

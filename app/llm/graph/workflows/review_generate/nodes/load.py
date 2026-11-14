@@ -2,6 +2,7 @@ from collections import Counter
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
 from app.infrastructure.paper_service.paper_client import (
     PaperServiceClient,
     paper_service_client,
@@ -12,24 +13,27 @@ from app.llm.graph.workflows.review_generate.nodes.finalize import failed
 RagStatus = Literal["success", "pending", "skipped", "failed", "indexing"]
 RAG_STATUSES = {"success", "pending", "skipped", "failed", "indexing"}
 
+
 class CorpusPaper(BaseModel):
-    paper_id: int = Field(..., gt = 0)
+    paper_id: int = Field(..., gt=0)
     title: str = ""
     abstract: str = ""
-    authors: list[str] = Field(default_factory = list)
-    year: int | None = Field(default = None, ge = 1800, le = 2100)
+    authors: list[str] = Field(default_factory=list)
+    year: int | None = Field(default=None, ge=1800, le=2100)
     doi: str | None = None
     oss_name: str | None = None
     pdf_url: str | None = None
 
     rag_status: RagStatus = "pending"
-    chunk_count: int = Field(default = 0, ge = 0)
+    chunk_count: int = Field(default=0, ge=0)
     paper_profile: str | None = None
     profile_status: str = "pending"
 
+
 class TaskReviewCorpus(BaseModel):
-    task_id: int = Field(..., gt = 0)
-    papers: list[CorpusPaper] = Field(default_factory = list)
+    task_id: int = Field(..., gt=0)
+    papers: list[CorpusPaper] = Field(default_factory=list)
+
 
 class LoadTaskCorpusNode:
     def __init__(
@@ -40,10 +44,7 @@ class LoadTaskCorpusNode:
         self.client = client or paper_service_client
         self.store = artifact_store or LocalArtifactStore()
 
-    async def __call__(
-        self, 
-        state: dict
-    ) -> dict:
+    async def __call__(self, state: dict) -> dict:
         child_run_id = state["child_run_id"]
         task_id = state["task_id"]
 
@@ -79,8 +80,7 @@ class LoadTaskCorpusNode:
 
             if rag_status not in RAG_STATUSES:
                 return failed(
-                    f"paper_id = {paper_id} has invalid "
-                    f"rag_status = {rag_status!r}"
+                    f"paper_id = {paper_id} has invalid rag_status = {rag_status!r}"
                 )
 
             chunk_count = raw_paper["chunk_count"]
@@ -96,9 +96,7 @@ class LoadTaskCorpusNode:
                 {
                     "paper_id": paper_id,
                     "title": str(raw_paper.get("title") or "").strip(),
-                    "abstract": str(
-                        raw_paper.get("paper_abstract") or ""
-                    ).strip(),
+                    "abstract": str(raw_paper.get("paper_abstract") or "").strip(),
                     "authors": [
                         str(author).strip()
                         for author in raw_paper.get("authors", [])
@@ -106,12 +104,8 @@ class LoadTaskCorpusNode:
                     ],
                     "published_date": raw_paper.get("published_date"),
                     "doi": raw_paper.get("doi"),
-                    "oss_name": str(
-                        raw_paper.get("oss_name") or ""
-                    ).strip() or None,
-                    "pdf_url": str(
-                        raw_paper.get("pdf_url") or ""
-                    ).strip() or None,
+                    "oss_name": str(raw_paper.get("oss_name") or "").strip() or None,
+                    "pdf_url": str(raw_paper.get("pdf_url") or "").strip() or None,
                     "rag_status": rag_status,
                     "chunk_count": chunk_count,
                     "paper_profile": raw_paper.get("paper_profile"),
@@ -119,16 +113,15 @@ class LoadTaskCorpusNode:
                 }
             )
 
-        rag_status_counts = Counter(
-            paper["rag_status"]
-            for paper in papers
-        )
+        rag_status_counts = Counter(paper["rag_status"] for paper in papers)
         task_rag_status = str(result.get("rag_status") or "").strip().lower()
 
         warnings = list(state.get("warnings", []))
 
         if duplicate_count:
-            warnings.append(f"Removed {duplicate_count} duplicate task-paper relation(s).")
+            warnings.append(
+                f"Removed {duplicate_count} duplicate task-paper relation(s)."
+            )
 
         if (
             task_rag_status != "rag_completed"
@@ -145,11 +138,7 @@ class LoadTaskCorpusNode:
                 ],
             }
 
-        review_papers = [
-            paper
-            for paper in papers
-            if paper["rag_status"] == "success"
-        ]
+        review_papers = [paper for paper in papers if paper["rag_status"] == "success"]
 
         if not review_papers:
             return {
@@ -163,9 +152,7 @@ class LoadTaskCorpusNode:
             }
 
         if len(review_papers) != len(papers):
-            warnings.append(
-                "Excluded failed or skipped papers from the review corpus."
-            )
+            warnings.append("Excluded failed or skipped papers from the review corpus.")
 
         pending_profiles = []
         unavailable_profiles = []
@@ -190,16 +177,13 @@ class LoadTaskCorpusNode:
                 warnings=warnings,
             )
 
-        paper_ids_snapshot = [
-            str(paper["paper_id"])
-            for paper in review_papers
-        ]
+        paper_ids_snapshot = [str(paper["paper_id"]) for paper in review_papers]
 
         artifact = await self.store.write_json(
-            run_id = child_run_id,
-            step_key = "load_task_corpus",
-            source = "task_review",
-            payload = {
+            run_id=child_run_id,
+            step_key="load_task_corpus",
+            source="task_review",
+            payload={
                 "task_id": task_id,
                 "search_status": result.get("search_status"),
                 "rag_status": task_rag_status,
@@ -217,7 +201,6 @@ class LoadTaskCorpusNode:
         return {
             "paper_ids_snapshot": paper_ids_snapshot,
             "corpus_artifact_ref": artifact.artifact_uri,
-
             "warnings": warnings,
             "error": None,
             "stage": "generating_framework",

@@ -105,6 +105,7 @@ def build_subagent_tool(*, model: BaseChatModel) -> BaseTool:
             "parent_run_id": parent.run_id,
             "parent_thread_id": parent.thread_id,
         }
+
         agent = AgentLoop(
             context=context,
             model=model,
@@ -113,6 +114,7 @@ def build_subagent_tool(*, model: BaseChatModel) -> BaseTool:
             checkpointer=False,
             name="subagent",
         )
+
         try:
             output = await asyncio.wait_for(
                 agent.run([HumanMessage(content=prompt)], config=config),

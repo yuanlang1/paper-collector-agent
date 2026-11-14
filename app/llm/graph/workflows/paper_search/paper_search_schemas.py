@@ -221,3 +221,73 @@ class SearchTagArgs(BaseModel):
         self.paperTag = list(dict.fromkeys(self.paperTag))
         self.sourceTag = list(dict.fromkeys(self.sourceTag))
         return self
+
+
+class PaperFrontPageMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(
+        default=None,
+        max_length=500,
+        description=("当前论文的完整原文标题。允许修复 OCR 断行，不允许翻译或改写。"),
+    )
+
+    authors: list[str] = Field(
+        default_factory=list,
+        description=("按论文署名顺序排列的作者姓名列表，不包含机构、邮箱或上标符号。"),
+    )
+
+    doi: str | None = Field(
+        default=None,
+        description=(
+            "当前论文的 DOI 标识符，不包含 https://doi.org/ 前缀。无法确认时返回 null。"
+        ),
+    )
+
+    abstract: str | None = Field(
+        default=None,
+        max_length=10000,
+        description=("论文明确标注的原文摘要。保留原文语言，不翻译、不扩写。"),
+    )
+
+    venue_name: str | None = Field(
+        default=None,
+        max_length=500,
+        description=(
+            "论文明确标注的期刊或会议名称。不将出版社或作者机构误认为发表来源。"
+        ),
+    )
+
+    keywords: list[str] = Field(
+        default_factory=list,
+        description=("论文明确标注的原文关键词，按原文顺序输出，不自行生成。"),
+    )
+
+    ai_abstract: str | None = Field(
+        default=None,
+        max_length=3000,
+        description=(
+            "基于论文前两页生成的中文 Markdown 学术摘要。"
+            "必须按顺序包含四个三级标题："
+            "### 研究背景与问题、"
+            "### 研究目标、"
+            "### 研究方法、"
+            "### 主要贡献与发现。"
+            "每节使用自然段，缺失信息明确标注。"
+            "整体内容不足时返回 null。"
+            "不得编造方法、实验结果或结论。"
+        ),
+    )
+
+
+class PaperRecommendationResult(BaseModel):
+    recommendation_stars: int = Field(
+        ge=1,
+        le=5,
+        description="论文与用户检索意图的匹配星数，取 1 至 5 的整数，分数越高表示越匹配。",
+    )
+    recommendation_reason: str = Field(
+        min_length=1,
+        max_length=1_000,
+        description="用中文说明具体匹配点或不匹配点，依据输入中的论文信息和检索意图。",
+    )

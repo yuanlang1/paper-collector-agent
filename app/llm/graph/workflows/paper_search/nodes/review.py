@@ -33,49 +33,94 @@ class ReviewNode:
 
     async def __call__(self, state):
         progress = state.get("progress", {})
-        effective = progress.get("new_candidates", 0) + progress.get("existing_in_database", 0)
+        effective = progress.get("new_candidates", 0) + progress.get(
+            "existing_in_database", 0
+        )
         round_number = state["supplemental_search_round"]
-        eligible = {p: cursor for p, cursor in state.get("provider_cursors", {}).items() if cursor is not None}
+        eligible = {
+            p: cursor
+            for p, cursor in state.get("provider_cursors", {}).items()
+            if cursor is not None
+        }
         tasks = {}
-        if (effective < settings.PAPER_SEARCH_TARGET_PAPER_COUNT and eligible
-                and round_number < settings.PAPER_SEARCH_MAX_SUPPLEMENTAL_ROUNDS):
+        if (
+            effective < settings.PAPER_SEARCH_TARGET_PAPER_COUNT
+            and eligible
+            and round_number < settings.PAPER_SEARCH_MAX_SUPPLEMENTAL_ROUNDS
+        ):
             try:
-                decision = await self.invoker.ainvoke([
-                    SystemMessage(content="审核检索结果。候选不足时从 eligible_providers 选择补搜来源，每来源1到2页，否则结束。只输出 SearchReviewDecision JSON。"),
-                    HumanMessage(content=json.dumps({
-                        "effective_count": effective, "target_count": settings.PAPER_SEARCH_TARGET_PAPER_COUNT,
-                        "eligible_providers": list(eligible), "provider_stats": state.get("provider_stats", {}),
-                    }, ensure_ascii=False)),
-                ])
+                decision = await self.invoker.ainvoke(
+                    [
+                        SystemMessage(
+                            content="审核检索结果。候选不足时从 eligible_providers 选择补搜来源，每来源1到2页，否则结束。只输出 SearchReviewDecision JSON。"
+                        ),
+                        HumanMessage(
+                            content=json.dumps(
+                                {
+                                    "effective_count": effective,
+                                    "target_count": settings.PAPER_SEARCH_TARGET_PAPER_COUNT,
+                                    "eligible_providers": list(eligible),
+                                    "provider_stats": state.get("provider_stats", {}),
+                                },
+                                ensure_ascii=False,
+                            )
+                        ),
+                    ]
+                )
                 decision = SearchReviewDecision.model_validate(decision)
                 selected = [action.provider_id for action in decision.provider_actions]
-                if (len(set(selected)) != len(selected) or any(p not in eligible for p in selected)
-                        or (decision.action == "supplement") != bool(selected)):
+                if (
+                    len(set(selected)) != len(selected)
+                    or any(p not in eligible for p in selected)
+                    or (decision.action == "supplement") != bool(selected)
+                ):
                     raise ValueError("Invalid supplemental providers")
             except GraphBubbleUp:
                 raise
             except Exception:
                 # ponytail: a failed model review advances each eligible provider by one page.
-                decision = SearchReviewDecision(action="supplement", reasoning="使用分页兜底策略。", provider_actions=[
-                    ProviderSupplementAction(provider_id=p, requested_pages=1, reason="仍可续查") for p in eligible
-                ])
+                decision = SearchReviewDecision(
+                    action="supplement",
+                    reasoning="使用分页兜底策略。",
+                    provider_actions=[
+                        ProviderSupplementAction(
+                            provider_id=p, requested_pages=1, reason="仍可续查"
+                        )
+                        for p in eligible
+                    ],
+                )
             if decision.action == "supplement":
                 for action in decision.provider_actions:
                     provider = action.provider_id
                     template = state["provider_query_plans"][provider]
-                    pages = min(action.requested_pages, settings.PAPER_SEARCH_MAX_EXTRA_PAGES_PER_SOURCE)
+                    pages = min(
+                        action.requested_pages,
+                        settings.PAPER_SEARCH_MAX_EXTRA_PAGES_PER_SOURCE,
+                    )
                     tasks[provider] = {
-                        **template, "round": round_number + 1, "cursor": eligible[provider],
-                        "limit": SEARCH_PAGE_SIZE * pages, "max_pages": pages,
+                        **template,
+                        "round": round_number + 1,
+                        "cursor": eligible[provider],
+                        "limit": SEARCH_PAGE_SIZE * pages,
+                        "max_pages": pages,
                     }
         else:
-            decision = SearchReviewDecision(action="finish", reasoning="达到目标、轮数上限或没有可续查来源。")
+            decision = SearchReviewDecision(
+                action="finish", reasoning="达到目标、轮数上限或没有可续查来源。"
+            )
         artifact = await self.artifact_store.write_json(
-            run_id=state["child_run_id"], step_key="search_review", source="search_review",
-            payload={"round": round_number, "effective_count": effective, "decision": decision.model_dump(mode="json")},
+            run_id=state["child_run_id"],
+            step_key="search_review",
+            source="search_review",
+            payload={
+                "round": round_number,
+                "effective_count": effective,
+                "decision": decision.model_dump(mode="json"),
+            },
         )
         return {
-            "stage": "searching" if tasks else "enriching", "status": "running",
+            "stage": "searching" if tasks else "enriching",
+            "status": "running",
             "active_search_tasks": tasks,
             "supplemental_search_round": round_number + 1 if tasks else round_number,
             "search_review_decision_artifact_ref": artifact.artifact_uri,

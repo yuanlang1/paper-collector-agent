@@ -14,7 +14,7 @@ class BaseAgentContext:
     run_id: str
     user_id: str
     auto_threshold: float = 0
-    context_window_tokens: int | None = None
+    context_window_tokens: int = 16000
     keep_last_n_turns: int = 2
 
     def __post_init__(self) -> None:

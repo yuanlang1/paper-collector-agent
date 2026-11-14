@@ -74,6 +74,8 @@ def build_markdown_object_name(
 
 
 class OssObjectStore(Protocol):
+    async def get_paper_markdown(self, oss_name: str) -> MarkdownObject: ...
+
     async def get_pdf_temporary_url(
         self,
         *,
@@ -318,19 +320,7 @@ class AliyunOssObjectStore:
         *,
         object_name: str,
     ) -> MarkdownObject:
-        client, oss = self._get_client()
-        with self._handle_oss_errors():
-            result = client.get_object(
-                oss.GetObjectRequest(
-                    bucket=settings.OSS_BUCKET,
-                    key=object_name,
-                )
-            )
-            try:
-                content = result.body.read().decode("utf-8")
-            finally:
-                result.body.close()
-
+        content = self._read_text_sync(object_name)
         if not content.strip():
             raise NotFoundException("论文没有可读取的 OSS Markdown。")
 
@@ -339,6 +329,22 @@ class AliyunOssObjectStore:
             object_name=object_name,
             content_sha256=hashlib.sha256(content.encode("utf-8")).hexdigest(),
         )
+
+    async def get_paper_markdown(self, oss_name: str) -> MarkdownObject:
+        return await asyncio.to_thread(
+            self._run_sync, self._get_markdown_sync, object_name=f"md/{oss_name}.md"
+        )
+
+    def _read_text_sync(self, object_name: str) -> str:
+        client, oss = self._get_client()
+        with self._handle_oss_errors():
+            result = client.get_object(
+                oss.GetObjectRequest(bucket=settings.OSS_BUCKET, key=object_name)
+            )
+            try:
+                return result.body.read().decode("utf-8")
+            finally:
+                result.body.close()
 
     def _upload_markdown_sync(
         self,

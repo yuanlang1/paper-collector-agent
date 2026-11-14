@@ -7,7 +7,6 @@ from typing import Any
 from app.llm.artifacts.store import LocalArtifactStore
 from app.llm.graph.workflows.paper_search.state import PaperSearchOutputState
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -15,15 +14,19 @@ async def finalize_paper_search_node(
     state: Mapping[str, Any],
 ) -> PaperSearchOutputState:
     try:
-        await LocalArtifactStore().delete_run_directories(
-            (state["child_run_id"],)
-        )
+        await LocalArtifactStore().delete_run_directories((state["child_run_id"],))
     except OSError:
         logger.warning("Paper-search artifact cleanup failed.", exc_info=True)
 
     stage = str(state.get("stage"))
     progress = state.get("progress") or {}
-    status = "success" if stage == "completed" else "timed_out" if stage == "timed_out" else "failed"
+    status = (
+        "success"
+        if stage == "completed"
+        else "timed_out"
+        if stage == "timed_out"
+        else "failed"
+    )
 
     if stage == "completed":
         summary = (

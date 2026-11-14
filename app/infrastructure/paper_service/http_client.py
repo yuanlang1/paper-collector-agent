@@ -21,7 +21,6 @@ class PaperServiceHttpClient:
 
         base_url = str(settings.PAPER_SERVICE_BASE_URL).rstrip("/")
 
-        # ponytail: no write retries; review versions and RAG leases need explicit idempotency first.
         response = await http.request(method, base_url + path, **kwargs)
         response.raise_for_status()
         body = object_value(response.json())

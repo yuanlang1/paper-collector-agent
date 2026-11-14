@@ -13,7 +13,7 @@ from app.schemas.search_connection import (
     SearchConnectionResponse,
     UpdateSearchConnection,
 )
-from app.schemas.setting import PostAddModelRequest
+from app.schemas.setting import ModelSettingListItem, PostAddModelRequest
 from app.services import llm_setting_service, search_connection_service
 from app.utils.search_adapters.registry import supported_provider_ids
 
@@ -40,6 +40,22 @@ async def add_model(
 
 UserId = Annotated[int, Query(gt=0, le=9_223_372_036_854_775_807)]
 ConnectionId = Annotated[int, Path(gt=0, le=9_223_372_036_854_775_807)]
+
+
+@router.get("/model_setting")
+async def list_models(
+    user_id: UserId,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    is_small_model: bool | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> ServiceResponse[list[ModelSettingListItem]]:
+    models = await llm_setting_service.list_settings(
+        db, user_id=user_id, is_small_model=is_small_model, limit=limit, offset=offset
+    )
+    return ServiceResponse[list[ModelSettingListItem]].build_success_response(
+        [ModelSettingListItem.model_validate(model) for model in models]
+    )
 
 
 @router.post("/search-connections")

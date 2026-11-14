@@ -5,8 +5,6 @@ from typing import Any
 
 
 class CollectSearchNode:
-    """Collect the current parallel batch and rebuild cumulative search statistics."""
-
     async def __call__(self, state: Mapping[str, Any]) -> dict[str, Any]:
         try:
             round_number = state["supplemental_search_round"]
@@ -51,7 +49,9 @@ class CollectSearchNode:
                 "provider_stats": stats,
                 "provider_cursors": cursors,
                 "raw_result_artifact_refs": list(dict.fromkeys(refs)),
-                "warnings": list(dict.fromkeys([*state.get("warnings", []), *warnings])),
+                "warnings": list(
+                    dict.fromkeys([*state.get("warnings", []), *warnings])
+                ),
                 "progress": {**state.get("progress", {}), "discovered": discovered},
                 "stage": "failed" if failed else "normalizing",
                 "status": "failed" if failed else "running",

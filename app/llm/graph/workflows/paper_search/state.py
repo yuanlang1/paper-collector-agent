@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from operator import or_
 from typing import Annotated, Any, Literal
 
 from typing_extensions import TypedDict
@@ -26,17 +27,31 @@ class SearchWorkerState(TypedDict):
     child_run_id: str
 
 
+class EnrichWorkerState(TypedDict):
+    paper_index: int
+    paper: dict[str, Any]
+    child_run_id: str
+
+
+class RecommendWorkerState(TypedDict):
+    paper_index: int
+    paper: dict[str, Any]
+    query_understanding: dict[str, Any]
+
+
+class EnrichResult(TypedDict):
+    paper: dict[str, Any] | None
+    warnings: list[str]
+    extraction_failed: bool
+
+
 PaperSearchStage = Literal[
     "preparing_search",
     "searching",
     "normalizing",
     "reviewing_search",
     "enriching",
-    "downloading_pdfs",
-    "enriching_abstract",
-    "uploading_oss",
     "persisting_papers",
-    "resolving_venues",
     "recommending",
     "completed",
     "failed",
@@ -92,15 +107,16 @@ class PaperSearchWorkflowState(TypedDict, total=False):
     raw_result_artifact_refs: list[str]
     normalized_manifest_artifact_ref: str | None
     existing_papers_manifest_artifact_ref: str | None
-    crossref_enrichment_manifest_artifact_ref: str | None
-    pdf_manifest_artifact_ref: str | None
     failed_manifest_artifact_ref: str | None
-    venue_manifest_artifact_ref: str | None
-    abstract_manifest_artifact_ref: str | None
+    enrich_candidates: list[dict[str, Any]]
+    enrich_results: Annotated[dict[int, EnrichResult], or_]
+    enriched_manifest_artifact_ref: str | None
+    recommendation_candidates: list[dict[str, Any]]
+    recommendation_manifest: dict[str, Any]
+    recommendation_results: Annotated[dict[int, dict[str, Any]], or_]
     recommendation_manifest_artifact_ref: str | None
     task_bound_recommendation_manifest_artifact_ref: str | None
     persisted_papers_manifest_artifact_ref: str | None
-    downloaded_pdf_paths: list[str]
     task_status_update_error: str | None
     remote_task_state: str | None
     search_quality_artifact_ref: str | None

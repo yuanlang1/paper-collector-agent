@@ -40,19 +40,24 @@ async def finalize_task_review_node(
         "WRITING_REVIEW_BLOCKED",
     }:
         summary = "综述写作质量审核未通过。"
+
     lines = [summary]
     if state.get("task_id") is not None:
         lines.append(f"检索任务 ID：{state['task_id']}。")
+
     if state.get("review_id") is not None:
         lines.append(
             f"综述 ID：{state['review_id']}，版本：{state.get('review_version_number', 1)}。"
         )
+
     if state.get("error"):
         code = "RAG_NOT_READY" if blocked else state.get("error_code") or stage
         lines.append(f"失败原因（{code}）：{state['error']}")
+
     if not success and state.get("claim_verification_artifact_ref"):
         lines.append(f"论点核验报告：{state['claim_verification_artifact_ref']}")
     lines.extend(f"警告：{warning}" for warning in state.get("warnings", []))
+
     return {
         "content": "\n".join(lines),
         "status": "success"

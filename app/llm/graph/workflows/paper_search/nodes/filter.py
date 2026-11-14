@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 from collections.abc import Awaitable, Callable, Mapping
@@ -9,7 +8,7 @@ from typing import Any
 
 from app.infrastructure.paper_service.paper_client import paper_service_client
 from app.llm.artifacts.store import LocalArtifactStore
-from app.llm.graph.workflows.paper_search_schemas import (
+from app.llm.graph.workflows.paper_search.paper_search_schemas import (
     PromptUnderstandingArgs,
     SearchTagArgs,
 )
@@ -214,7 +213,6 @@ def _to_paper_info_draft(
     return {
         "title": title,
         "authors": authors,
-        # 与 Crossref 日期约定一致：缺少月日时使用 01-01，并保留精度。
         "publish_date": published_date or (f"{year}-01-01" if year else None),
         "publish_date_precision": "day" if published_date else "year" if year else None,
         "paper_abstract": _text(paper.get("abstract")),
@@ -410,9 +408,6 @@ class NormalizeDeduplicateFilterNode:
                         ]
                         if value
                     ],
-                    "oss_object_key": None,
-                    "oss_uri": None,
-                    "pdf_upload_status": "pending",
                 }
 
                 doi_match = papers_by_doi.get(doi_key) if doi_key else None
@@ -481,7 +476,7 @@ class NormalizeDeduplicateFilterNode:
     async def _lookup_existing_papers(
         self,
         papers: list[dict[str, Any]],
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         queries = []
         for paper in papers:
             info = paper["paper_info"]
@@ -493,7 +488,7 @@ class NormalizeDeduplicateFilterNode:
                 )
 
         if not queries:
-            return [], [], []
+            return [], []
 
         lookup = await self.paper_lookup(queries)
         if lookup["ok"] is not True:
@@ -501,14 +496,10 @@ class NormalizeDeduplicateFilterNode:
 
         new_papers = []
         existing_by_id: dict[int, dict[str, Any]] = {}
-        warnings = []
         for candidate, result in zip(papers, lookup["result"]["results"], strict=True):
             info = candidate["paper_info"]
-            if result["status"] == "NOT_FOUND":
+            if not result["status"]:
                 new_papers.append(candidate)
-                continue
-            if result["status"] == "AMBIGUOUS":
-                warnings.append(f"{info['title']} 匹配到多篇已有论文，已跳过。")
                 continue
 
             matched = result["paper"]
@@ -534,7 +525,6 @@ class NormalizeDeduplicateFilterNode:
                     if abstract
                     else info.get("abstract_source"),
                     "ai_abstract": matched.get("ai_abstract"),
-                    "oss_name": matched.get("oss_name"),
                     "pdf_url": matched.get("pdf_url") or info["pdf_url"],
                     "venue_id": venue["id"] if venue else None,
                 },
@@ -549,7 +539,7 @@ class NormalizeDeduplicateFilterNode:
             )
             existing_by_id[paper_id] = candidate
 
-        return new_papers, list(existing_by_id.values()), warnings
+        return new_papers, list(existing_by_id.values())
 
     async def __call__(
         self,
@@ -570,19 +560,17 @@ class NormalizeDeduplicateFilterNode:
             if not isinstance(artifact_uris, list) or not artifact_uris:
                 raise ValueError("缺少分源检索结果 artifact。")
 
-            payloads = await asyncio.gather(
-                *(self.artifact_store.read_json_uri(uri) for uri in artifact_uris)
-            )
+            payloads = []
+            for uri in artifact_uris:
+                payloads.append(await self.artifact_store.read_json_uri(uri))
 
             normalized_papers, identity_conflicts, rejected, filtered_count = (
                 self._normalize_payloads(payloads, understanding)
             )
 
-            (
-                new_papers,
-                existing_papers,
-                lookup_warnings,
-            ) = await self._lookup_existing_papers(normalized_papers)
+            new_papers, existing_papers = await self._lookup_existing_papers(
+                normalized_papers
+            )
 
             existing_artifact = await self.artifact_store.write_json(
                 run_id=child_run_id,
@@ -670,7 +658,6 @@ class NormalizeDeduplicateFilterNode:
                     if understanding.requiresCode
                     else []
                 ),
-                *lookup_warnings,
             ],
             "error": None,
         }

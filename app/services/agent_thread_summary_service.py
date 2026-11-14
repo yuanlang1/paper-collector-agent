@@ -165,8 +165,10 @@ async def compact(
                 end_message_id=end_message_id,
                 expected_version=previous.version if previous is not None else None,
             )
+
     except AppException as exc:
         return {"error": exc.message}
+
     except Exception as exc:
         logger.warning(
             "Thread summary compaction failed: thread_id=%s, error=%s",

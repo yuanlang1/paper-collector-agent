@@ -242,6 +242,7 @@ async def run(
         async with aclosing(runner.run(input)) as stream:
             async for event in stream:
                 yield event
+
         snapshot = await runner.get_state()
         errors = [task.error for task in snapshot.tasks if task.error]
         if errors:

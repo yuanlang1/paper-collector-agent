@@ -66,7 +66,7 @@ class SolveNode:
             if window is None:
                 window = (self.model.profile or {}).get("max_input_tokens")
             if window and window > 0:
-                tokens = response.usage_metadata.input_tokens
+                tokens = response.usage_metadata["input_tokens"]
                 if tokens > window * context.auto_threshold:
                     return Command(update=update, goto="compact")
 

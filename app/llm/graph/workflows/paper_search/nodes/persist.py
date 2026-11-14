@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from app.config import settings
 from app.infrastructure.paper_service.paper_client import (
     paper_service_client,
 )
@@ -13,7 +12,6 @@ from app.infrastructure.paper_service.task_client import (
 from app.infrastructure.paper_service.venue_client import (
     venue_service_client,
 )
-from app.infrastructure.oss import normalize_pdf_sha256
 from app.llm.artifacts.store import LocalArtifactStore
 from app.schemas.venue import VenueInfoDraft
 from app.services.venue_service import VenueService
@@ -80,7 +78,6 @@ class PersistRecommendedPapersNode:
                 "not_required" if _is_valid_id(paper_id) else "pending"
             ),
             "task_paper_save_status": "pending",
-            "oss_name": None,
             "error": None,
         }
 
@@ -215,21 +212,6 @@ class PersistRecommendedPapersNode:
 
         return cache_hits, saved_count, failed_count
 
-    @staticmethod
-    def _planned_pdf_sha256(paper: dict[str, Any]) -> str | None:
-        if not settings.OSS_ENABLED:
-            return None
-
-        pdf_download = paper.get("pdf_download")
-        if not isinstance(pdf_download, dict):
-            return None
-        if pdf_download.get("status") != "success":
-            return None
-        if not isinstance(pdf_download.get("local_pdf_path"), str):
-            return None
-
-        return normalize_pdf_sha256(pdf_download.get("sha256"))
-
     def _prepare_entries(
         self, papers: list[dict[str, Any]], child_run_id: str, task_id: int,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
@@ -287,17 +269,13 @@ class PersistRecommendedPapersNode:
                 entry["outcome"]["paper_save_status"] = "not_started"
                 entry["outcome"]["task_paper_save_status"] = "not_started"
                 continue
-            info = entry["paper_info"]
+            info = dict(entry["paper_info"])
             info["published_date"] = info.get("published_date") or info.get(
                 "publish_date"
             )
-            pdf_sha256 = self._planned_pdf_sha256(entry["paper"])
-            if pdf_sha256:
-                info["oss_name"] = pdf_sha256
-                entry["outcome"]["oss_name"] = pdf_sha256
-            authors = entry["paper"].get("author_names") or info.get("authors")
+            info["authors"] = entry["paper"].get("author_names") or info.get("authors")
             new_requests.append(
-                {"client_key": entry["client_key"], "paper_info": {**info, "authors": authors}}
+                {"client_key": entry["client_key"], "paper_info": info}
             )
 
         paper_response = await self.save_papers(new_requests) if new_requests else {"ok": True, "result": {"papers": []}}

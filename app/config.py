@@ -86,7 +86,6 @@ class Settings(BaseSettings):
     MINERU_TOKEN: str
     MINERU_BASE_URL: str
     MINERU_PARSE_TIMEOUT_SECONDS: int = 1200
-    TASK_RAG_POST_PROCESSING_GRACE_SECONDS: int = 600
     TASK_RAG_WORKFLOW_TIMEOUT_SECONDS: int = Field(default=1800, ge=1, le=3600)
     PAPER_ABSTRACT_TASK_TIMEOUT_SECONDS: int = Field(default=180, gt=0)
     PAPER_ABSTRACT_GROUP_TIMEOUT_SECONDS: int = Field(default=900, gt=0)
@@ -117,18 +116,6 @@ class Settings(BaseSettings):
     AGENT_HISTORY_TURNS: int = 12
 
     DATABASE_POSTGRES_URL: str
-
-    @model_validator(mode="after")
-    def validate_task_rag_timeout(self) -> "Settings":
-        minimum = (
-            self.MINERU_PARSE_TIMEOUT_SECONDS
-            + self.TASK_RAG_POST_PROCESSING_GRACE_SECONDS
-        )
-        if self.TASK_RAG_WORKFLOW_TIMEOUT_SECONDS < minimum:
-            raise ValueError(
-                "TASK_RAG_WORKFLOW_TIMEOUT_SECONDS must cover parsing and post-processing"
-            )
-        return self
 
     @model_validator(mode="after")
     def validate_agent_history(self) -> "Settings":

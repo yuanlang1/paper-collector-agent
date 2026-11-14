@@ -85,8 +85,10 @@ class PaperContentIndexConstructionModule(BaseQdrantIndexConstructionModule):
             "chunk_id": str(metadata["chunk_id"]),
             "chunk_index": int(metadata["chunk_index"]),
             "content": document.page_content,
-            "section_path": str(metadata.get("section_path") or ""),
         }
+
+        if metadata.get("section_path"):
+            payload["section_path"] = str(metadata["section_path"])
 
         if metadata.get("year") is not None:
             payload["year"] = int(metadata["year"])

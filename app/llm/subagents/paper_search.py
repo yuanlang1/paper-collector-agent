@@ -103,7 +103,13 @@ def build_paper_search_tool(*, model: BaseChatModel) -> BaseTool:
                         "conversation_id": session_id,
                         **args,
                     },
-                    config={**runtime.config, "recursion_limit": 10007},
+                    config={
+                        **runtime.config,
+                        "recursion_limit": 10007,
+                        "max_concurrency": min(
+                            runtime.config.get("max_concurrency") or 3, 3
+                        ),
+                    },
                     context={"event_fields": fields, "user_id": user_id},
                 ),
                 timeout=settings.SUBAGENT_DISPATCH_TIMEOUT_SECONDS,

@@ -22,10 +22,7 @@ def to_agent_output_error(exc: Exception) -> AgentOutputError:
         return exc
 
     if isinstance(exc, APIStatusError):
-        if (
-            exc.status_code == 402
-            and "insufficient balance" in str(exc).lower()
-        ):
+        if exc.status_code == 402 and "insufficient balance" in str(exc).lower():
             return InsufficientBalanceError()
 
         return ModelAPIError()
